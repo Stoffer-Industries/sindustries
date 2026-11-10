@@ -54,6 +54,25 @@ function expect(cond, message) {
   if (!cond) fail(message);
 }
 
+// Host comparison helpers.
+//
+// DNS is case-insensitive and a fully-qualified name may carry a
+// trailing root dot, so every host comparison in this script
+// normalises first. Leak comparisons happen on a label boundary: a
+// name like "foo.sindustries-tasks-api.fly.dev" is a subdomain of the
+// production provider host and must be treated as the same production
+// target (AC2), not as an unrelated host that slips past the guard.
+function normalizeHost(host) {
+  return typeof host === 'string' ? host.trim().toLowerCase().replace(/\.+$/, '') : '';
+}
+
+function isSameOrSubdomain(host, other) {
+  const a = normalizeHost(host);
+  const b = normalizeHost(other);
+  if (!a || !b) return false;
+  return a === b || a.endsWith(`.${b}`);
+}
+
 function loadJson(path) {
   try {
     return JSON.parse(readFileSync(path, 'utf8'));
@@ -184,29 +203,144 @@ function main() {
     // A staging hostname must never CNAME to a production provider
     // target. Vercel's shared managed target is the one exception: it
     // is environment-agnostic by design, and the environment separation
-    // is enforced by the domain-to-project binding in Vercel.
-    if (surface.cnameTargets.staging === surface.cnameTargets.production && surface.cnameTargets.staging !== VERCEL_MANAGED_CNAME_TARGET) {
+    // for those surfaces is enforced by the domain-to-environment
+    // binding asserted below.
+    if (
+      isSameOrSubdomain(surface.cnameTargets.staging, surface.cnameTargets.production) &&
+      normalizeHost(surface.cnameTargets.staging) !== VERCEL_MANAGED_CNAME_TARGET
+    ) {
       fail(`${path}.cnameTargets.staging and .production are the same target ("${surface.cnameTargets.staging}") — a staging hostname must not alias its production provider host (AC2)`);
     }
   }
 
-  // Cross-row: no surface's staging CNAME target may be another
-  // surface's production CNAME target (again, except Vercel's shared
-  // managed target, which carries no environment identity).
+  // Cross-row: no surface's staging CNAME target may be ANY production
+  // target (again, except Vercel's shared managed target, which carries
+  // no environment identity).
+  //
+  // The production-target set is the UNION of two fields, because the
+  // two are deliberately allowed to diverge:
+  //
+  //   - `cnameTargets.production` — the production CNAME target, and
+  //   - `providerFallback` — the production provider host (the
+  //     documented migration path).
+  //
+  // Guarding on `cnameTargets.production` alone lets a staging hostname
+  // alias `providerFallback` the moment the two diverge — which task
+  // 020f423e will cause on purpose. Guarding on `providerFallback`
+  // alone would miss a surface whose production CNAME target moved but
+  // whose provider fallback did not. The union closes both gaps, and the
+  // self-exemption is gone: a surface may no longer alias its OWN
+  // production host either.
   const productionTargets = new Map();
   for (const surface of matrix.surfaces) {
     if (surface.kind === 'worker') continue;
-    const target = surface.cnameTargets?.production ?? null;
-    if (typeof target === 'string' && target.length > 0) productionTargets.set(target, surface.id);
+    const candidates = [surface.cnameTargets?.production, surface.providerFallback];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || candidate.length === 0) continue;
+      const key = normalizeHost(candidate);
+      if (!key || key === VERCEL_MANAGED_CNAME_TARGET) continue;
+      if (!productionTargets.has(key)) productionTargets.set(key, surface.id);
+    }
   }
   for (const surface of matrix.surfaces) {
     if (surface.kind === 'worker') continue;
     const stagingTarget = surface.cnameTargets?.staging ?? null;
     if (typeof stagingTarget !== 'string' || stagingTarget.length === 0) continue;
-    if (stagingTarget === VERCEL_MANAGED_CNAME_TARGET) continue;
-    const owner = productionTargets.get(stagingTarget);
-    if (owner && owner !== surface.id) {
-      fail(`surfaces (${surface.id}).cnameTargets.staging ("${stagingTarget}") is the production CNAME target of surface "${owner}" — cross-environment alias (AC2)`);
+    if (normalizeHost(stagingTarget) === VERCEL_MANAGED_CNAME_TARGET) continue;
+    for (const [productionTarget, owner] of productionTargets.entries()) {
+      if (!isSameOrSubdomain(stagingTarget, productionTarget)) continue;
+      fail(`surfaces (${surface.id}).cnameTargets.staging ("${stagingTarget}") is the production target of surface "${owner}" ("${productionTarget}") — cross-environment alias (AC2)`);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // `flyApp` is the PRODUCTION Fly app name.
+  //
+  // The matrix carries two views of the deployment topology: `flyApp`
+  // (the production app name the deploy workflows use) and
+  // `cnameTargets` / `stagingRoutes` (the per-environment views).
+  // Binding `cnameTargets.production` to `${flyApp}.fly.dev` makes the
+  // two impossible to drift: when task 020f423e renames the production
+  // apps, the CNAME target has to move in the same change — and the
+  // staging target can never silently become the production app's host.
+  // ------------------------------------------------------------------
+  for (const [idx, surface] of matrix.surfaces.entries()) {
+    const path = `surfaces[${idx}] (${surface.id})`;
+    if (surface.kind !== 'api') continue;
+    expect(typeof surface.flyApp === 'string' && surface.flyApp.length > 0, `${path}.flyApp must be a non-empty string for an api surface`);
+    if (typeof surface.flyApp !== 'string' || surface.flyApp.length === 0) continue;
+    const productionAppHost = `${surface.flyApp}.fly.dev`;
+    expect(
+      normalizeHost(surface.cnameTargets?.production) === normalizeHost(productionAppHost),
+      `${path}.cnameTargets.production ("${surface.cnameTargets?.production}") must be the production Fly app host ("${productionAppHost}") — flyApp is the production app name and the two must not drift`,
+    );
+    expect(
+      normalizeHost(surface.cnameTargets?.staging) !== normalizeHost(productionAppHost),
+      `${path}.cnameTargets.staging ("${surface.cnameTargets?.staging}") must not be the production Fly app host ("${productionAppHost}") (AC2)`,
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Vercel environment binding (the AC2 half for the two frontends).
+  //
+  // A Vercel custom domain CNAMEs to Vercel's shared managed target
+  // (`cname.vercel-dns.com`) in EVERY project, so the DNS shape carries
+  // no environment identity at all: the staging hostname and the
+  // production hostname of one project resolve to byte-identical DNS,
+  // and the HTTPS check cannot tell a staging deployment from a
+  // production one. The environment separation therefore lives in WHICH
+  // Vercel environment the custom domain is bound to.
+  //
+  // What this block asserts (repo-verified): the staging stable
+  // hostname is bound to the project's staging Vercel environment, the
+  // production stable hostname to a DIFFERENT one, and both bindings
+  // match the contract in infra/cloud/vercel-env-matrix.json.
+  //
+  // What it does NOT assert (operator-verified in Vercel): that the
+  // bound environment is actually serving a deployment built from the
+  // expected branch. That half stays a manual Vercel gate — see
+  // docs/systems/cloud-platform.md.
+  // ------------------------------------------------------------------
+  const vercelEnvMatrixPath = join(args.repoRoot, 'infra/cloud/vercel-env-matrix.json');
+  const vercelEnvMatrix = loadJson(vercelEnvMatrixPath);
+  const vercelProjectsById = new Map();
+  if (vercelEnvMatrix) {
+    for (const project of vercelEnvMatrix.vercelProjects ?? []) {
+      if (typeof project?.vercelProjectId === 'string') vercelProjectsById.set(project.vercelProjectId, project);
+    }
+  }
+  for (const [idx, surface] of matrix.surfaces.entries()) {
+    const path = `surfaces[${idx}] (${surface.id})`;
+    if (surface.kind !== 'frontend') continue;
+    expect(typeof surface.vercelProject === 'string' && surface.vercelProject.length > 0, `${path}.vercelProject must be a non-empty string for a frontend surface`);
+    const envs = surface.vercelEnvironments;
+    expect(envs && typeof envs === 'object', `${path}.vercelEnvironments must be an object with the Vercel environment bound to each environment`);
+    if (!envs || typeof envs !== 'object') continue;
+    expect(typeof envs.staging === 'string' && envs.staging.length > 0, `${path}.vercelEnvironments.staging must be a non-empty string`);
+    expect(typeof envs.production === 'string' && envs.production.length > 0, `${path}.vercelEnvironments.production must be a non-empty string`);
+    if (typeof envs.staging !== 'string' || typeof envs.production !== 'string') continue;
+    expect(
+      envs.staging !== envs.production,
+      `${path}.vercelEnvironments.staging ("${envs.staging}") and .production ("${envs.production}") must be different Vercel environments — the two stable hostnames must not be served by the same environment (AC2)`,
+    );
+    const project = vercelProjectsById.get(surface.vercelProject);
+    expect(project, `${path}.vercelProject ("${surface.vercelProject}") must exist in ${vercelEnvMatrixPath}`);
+    if (!project) continue;
+    const stagingEnv = project.environments?.[envs.staging];
+    const productionEnv = project.environments?.[envs.production];
+    expect(stagingEnv, `${path}.vercelEnvironments.staging ("${envs.staging}") must be an environment of Vercel project "${surface.vercelProject}"`);
+    expect(productionEnv, `${path}.vercelEnvironments.production ("${envs.production}") must be an environment of Vercel project "${surface.vercelProject}"`);
+    if (stagingEnv) {
+      expect(
+        normalizeHost(stagingEnv.customDomain) === normalizeHost(surface.staging),
+        `${path}.staging ("${surface.staging}") must be the customDomain of Vercel project "${surface.vercelProject}" environment "${envs.staging}" (recorded: "${stagingEnv.customDomain}")`,
+      );
+    }
+    if (productionEnv) {
+      expect(
+        normalizeHost(productionEnv.customDomain) === normalizeHost(surface.production),
+        `${path}.production ("${surface.production}") must be the customDomain of Vercel project "${surface.vercelProject}" environment "${envs.production}" (recorded: "${productionEnv.customDomain}")`,
+      );
     }
   }
 

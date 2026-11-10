@@ -2,13 +2,26 @@
 // check-stable-hostname-matrix.test.mjs — task 5cb4a8fe static check.
 //
 // Pure Node 22, no deps (uses node:test + node:assert). Exercises
-// scripts/check-stable-hostname-matrix.mjs via execFile on three cases:
+// scripts/check-stable-hostname-matrix.mjs via execFile on these cases:
 //   1. The real repo tree passes (no synthetic fixture needed; the matrix
 //      and the per-hostname fly.toml comment blocks are in the working
 //      tree).
 //   2. A synthetic matrix missing a required public surface fails with a
 //      recognisable error.
-//   3. A synthetic fly.toml whose comment block omits the staging
+//   3. A synthetic matrix without cnameTargets fails with a recognisable
+//      error.
+//   4. A synthetic matrix whose staging CNAME target aliases a production
+//      provider host fails with a recognisable error.
+//   5. A synthetic matrix whose staging CNAME target aliases a surface's
+//      OWN providerFallback while cnameTargets.production has diverged
+//      from it fails — the AC2 leak guard must be built from the UNION of
+//      cnameTargets.production and providerFallback, not from one of them.
+//   6. A synthetic matrix that binds the staging and production stable
+//      hostnames to the SAME Vercel environment fails (AC2 for the two
+//      frontends).
+//   7. A synthetic matrix whose cnameTargets.production drifts from the
+//      production Fly app host named by flyApp fails.
+//   8. A synthetic fly.toml whose comment block omits the staging
 //      hostname fails with a recognisable error.
 //
 // Run with: node --test tests/cloud/tests/check-stable-hostname-matrix.test.mjs
@@ -114,6 +127,96 @@ test('synthetic matrix whose staging CNAME target aliases a production provider 
     assert.ok(err, 'expected the script to fail on a staging CNAME target that aliases production');
     const stderr = (err.stderr || '') + (err.stdout || '');
     assert.match(stderr, /cross-environment alias|must not alias its production provider host/, `expected a cross-environment alias error, got: ${stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('synthetic matrix whose staging CNAME target aliases the surface own providerFallback fails the check', async () => {
+  // AC2 guard regression (C1). The production-target set must be the
+  // UNION of `cnameTargets.production` and `providerFallback`.
+  //
+  // `cnameTargets.production` and `providerFallback` are deliberately
+  // allowed to diverge — task 020f423e will rename the production apps,
+  // so the CNAME target moves while the documented provider fallback
+  // stays. Guarding on `cnameTargets.production` alone lets a staging
+  // hostname alias `providerFallback` the moment they diverge, and the
+  // `owner !== surface.id` exemption let a surface alias its OWN
+  // production host besides.
+  //
+  // The mutation below keeps the flyApp rule satisfied (flyApp is
+  // updated to the renamed production app alongside
+  // `cnameTargets.production`) so the ONLY rule that can catch the leak
+  // is the union guard itself.
+  const dir = mkdtempSync(join(tmpdir(), 'check-stable-hostname-matrix-'));
+  try {
+    const matrix = JSON.parse(readFileSync(REAL_MATRIX, 'utf8'));
+    const surface = matrix.surfaces.find((s) => s.id === 'health-probe');
+    surface.flyApp = 'sindustries-health-probe-prod';
+    surface.cnameTargets.production = 'sindustries-health-probe-prod.fly.dev';
+    // providerFallback stays on the old host — the divergence.
+    assert.equal(surface.providerFallback, 'sindustries-health-probe.fly.dev', 'fixture assumes the provider fallback stays put');
+    // The staging target now aliases the surface's OWN provider fallback.
+    surface.cnameTargets.staging = 'sindustries-health-probe.fly.dev';
+    const matrixPath = join(dir, 'hostname-matrix.json');
+    writeFileSync(matrixPath, JSON.stringify(matrix, null, 2));
+    let err;
+    try {
+      await exec('node', [SCRIPT, matrixPath, REAL_FLY_DIR, REPO_ROOT]);
+    } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail on a staging CNAME target that aliases the surface own providerFallback');
+    const stderr = (err.stderr || '') + (err.stdout || '');
+    assert.match(stderr, /cross-environment alias/, `expected a cross-environment alias error, got: ${stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('synthetic matrix that binds the staging and production hostnames to the same Vercel environment fails the check', async () => {
+  // AC2 for the two Vercel frontends. A Vercel custom domain CNAMEs to
+  // the same shared managed target in every project, so the DNS shape
+  // carries no environment identity — the separation lives in which
+  // Vercel environment the custom domain is bound to. Binding both
+  // stable hostnames to the same environment would serve one environment
+  // under both hostnames.
+  const dir = mkdtempSync(join(tmpdir(), 'check-stable-hostname-matrix-'));
+  try {
+    const matrix = JSON.parse(readFileSync(REAL_MATRIX, 'utf8'));
+    const surface = matrix.surfaces.find((s) => s.id === 'mission-control');
+    surface.vercelEnvironments.staging = surface.vercelEnvironments.production;
+    const matrixPath = join(dir, 'hostname-matrix.json');
+    writeFileSync(matrixPath, JSON.stringify(matrix, null, 2));
+    let err;
+    try {
+      await exec('node', [SCRIPT, matrixPath, REAL_FLY_DIR, REPO_ROOT]);
+    } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail when both stable hostnames bind to the same Vercel environment');
+    const stderr = (err.stderr || '') + (err.stdout || '');
+    assert.match(stderr, /must be different Vercel environments/, `expected a Vercel environment-binding error, got: ${stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('synthetic matrix whose cnameTargets.production drifts from the production Fly app host fails the check', async () => {
+  // `flyApp` is the PRODUCTION Fly app name. The matrix carries two
+  // views of the deployment topology — flyApp and cnameTargets — and
+  // they must not drift: when task 020f423e renames the production apps,
+  // the CNAME target has to move in the same change.
+  const dir = mkdtempSync(join(tmpdir(), 'check-stable-hostname-matrix-'));
+  try {
+    const matrix = JSON.parse(readFileSync(REAL_MATRIX, 'utf8'));
+    const surface = matrix.surfaces.find((s) => s.id === 'budget-api');
+    surface.cnameTargets.production = 'sindustries-budget-api-prod.fly.dev';
+    const matrixPath = join(dir, 'hostname-matrix.json');
+    writeFileSync(matrixPath, JSON.stringify(matrix, null, 2));
+    let err;
+    try {
+      await exec('node', [SCRIPT, matrixPath, REAL_FLY_DIR, REPO_ROOT]);
+    } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail when cnameTargets.production drifts from the flyApp production host');
+    const stderr = (err.stderr || '') + (err.stdout || '');
+    assert.match(stderr, /must be the production Fly app host/, `expected a flyApp drift error, got: ${stderr}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -100,30 +100,52 @@ function main() {
 
     const text = readText(workflowPath);
     const expectedUrl = `https://${surface.staging}${req.healthPath}`;
-    const fallbackHost = surface.providerFallback; // e.g. sindustries-tasks-api-staging.fly.dev
 
     // The active smoke URL must be the matrix stable staging hostname.
     if (!text.includes(expectedUrl)) {
       errors.push(`${req.workflow}: smoke check does not target matrix stable URL "${expectedUrl}" (current deploys would smoke through the provider URL, violating AC4)`);
     }
-    // The provider URL must NOT be the active smoke URL (it can only
-    // appear as a documented `<!-- stable-fallback -->` line). We
-    // detect this by checking the file does not construct
-    // `https://<providerFallback><healthPath>` without a stable-fallback
-    // annotation on the same or an adjacent line.
-    const providerUrl = `https://${fallbackHost}${req.healthPath}`;
-    if (text.includes(providerUrl)) {
-      const lines = text.split(/\r?\n/);
-      let unannotated = 0;
-      for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i];
-        if (!line.includes(providerUrl)) continue;
-        const window = [lines[i - 1] ?? '', lines[i - 2] ?? '', line, lines[i + 1] ?? ''];
-        const annotated = window.some((l) => /<!--\s*stable-fallback\b/.test(l) || /<!--\s*documented-migration\b/.test(l));
-        if (!annotated) unannotated += 1;
-      }
-      if (unannotated > 0) {
-        errors.push(`${req.workflow}: provider URL "${providerUrl}" appears ${unannotated} time(s) without a \`<!-- stable-fallback -->\` or \`<!-- documented-migration -->\` annotation on the same or an adjacent line`);
+    // Every provider-shaped URL in the workflow must be a DOCUMENTED
+    // fallback for THIS surface (AC4).
+    //
+    // `providerFallback` is the PRODUCTION provider host. The staging
+    // provider host the workflows actually document is the Fly app the
+    // workflow itself deploys to (`FLY_APP:`), which is what its own
+    // provider-shaped URL has to be. The old check compared one
+    // hard-coded `https://<providerFallback><healthPath>` string — a
+    // production host that no workflow contains — so the branch never
+    // fired and the provider URL that DOES appear went unchecked. This
+    // block reads the URLs that are actually there instead.
+    const flyAppMatch = text.match(/^\s*FLY_APP:\s*(\S+)\s*$/m);
+    const declaredStagingApp = flyAppMatch ? flyAppMatch[1] : null;
+    const allowedProviderHosts = new Set(
+      [
+        surface.providerFallback,
+        declaredStagingApp ? `${declaredStagingApp}.fly.dev` : null,
+        surface.cnameTargets?.staging,
+        surface.cnameTargets?.production,
+        ...(surface.stagingRoutes ?? []).map((route) => route?.host),
+      ]
+        .filter((host) => typeof host === 'string' && host.length > 0)
+        .map((host) => host.toLowerCase()),
+    );
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const providerHosts = [
+        ...line.matchAll(/https?:\/\/([a-z0-9.-]+\.(?:fly\.dev|vercel\.app))/gi),
+      ].map((match) => match[1].toLowerCase());
+      if (providerHosts.length === 0) continue;
+      const window = [lines[i - 1] ?? '', lines[i - 2] ?? '', line, lines[i + 1] ?? ''];
+      const annotated = window.some((l) => /<!--\s*stable-fallback\b/.test(l) || /<!--\s*documented-migration\b/.test(l));
+      for (const host of providerHosts) {
+        if (!allowedProviderHosts.has(host)) {
+          errors.push(`${req.workflow}: provider URL host "${host}" is not a provider host of matrix surface "${surface.id}" — a deploy workflow must not reference another surface's provider host (AC4)`);
+          continue;
+        }
+        if (!annotated) {
+          errors.push(`${req.workflow}: provider URL "https://${host}" appears without a \`<!-- stable-fallback -->\` or \`<!-- documented-migration -->\` annotation on the same or an adjacent line (AC4)`);
+        }
       }
     }
     // The 20-attempt retry loop must be present on the multi-attempt smoke

@@ -1106,6 +1106,14 @@ jobs:
       - name: Run stable-hostname matrix shape check
         run: node tests/cloud/scripts/check-stable-hostname-matrix.mjs
 
+      # The matrix check's own contract test guards the AC2
+      # cross-environment alias guard: without it in the merge gate, a
+      # future PR could delete the whole guard block and CI would stay
+      # green. Run by explicit path so the repository-wide contract-test
+      # orphan guard sees it as executed.
+      - name: Run stable-hostname matrix contract test
+        run: node --test tests/cloud/tests/check-stable-hostname-matrix.test.mjs
+
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
 

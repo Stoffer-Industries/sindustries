@@ -8,15 +8,21 @@
 //   1. Dry-run mode emits a verdict=pass JSON result with one row per
 //      committed matrix surface, all rows status=skip, and the result
 //      conforms to tests/cloud/stable-hostname-verification.schema.json.
-//   2. Live mode (--mode live) without DNS set returns verdict=fail
-//      because the DNS resolution cannot find the unprovisioned
-//      CNAMEs; the harness must surface the failure cleanly without
-//      crashing.
-//   3. A synthetic matrix whose surfaces list is empty fails the
+//   2. Dry-run rows assert the matrix's per-environment CNAME target
+//      rather than the production provider fallback.
+//   3. Live mode against a synthetic matrix with unresolvable hostnames
+//      returns verdict=fail; the harness must surface the failure
+//      cleanly without crashing, and must record the DNS, HTTPS and
+//      CORS stages independently (no short-circuit).
+//   4. A synthetic matrix whose surfaces list is empty fails the
 //      harness with a clean error and a non-zero exit code.
-//   4. The dry-run output is the same shape regardless of whether
-//      --run-id is supplied (default vs. explicit), proving the
-//      runId pattern is stable for cross-harness correlation.
+//   5. The default runId is generated and matches the stable pattern.
+//   6. The pure helpers are unit-tested directly: the AC2
+//      production-target set is the union of cnameTargets.production and
+//      providerFallback, host comparison normalises case and the
+//      trailing root dot and matches on a label boundary, and the
+//      Content Scheduler surface is probed at the auto-post health
+//      endpoint AC5 names.
 //
 // Run with: node --test tests/cloud/tests/stable-hostname-verification.test.mjs
 
@@ -27,6 +33,13 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import {
+  expectedCnameTarget,
+  normalizeHost,
+  isSameOrSubdomain,
+  productionCnameTargets,
+  healthPathsForSurface,
+} from '../scripts/stable-hostname-verification.mjs';
 
 const exec = promisify(execFile);
 const REPO_ROOT = new URL('../../..', import.meta.url).pathname;
@@ -242,6 +255,86 @@ test('live mode with unresolvable hostnames returns verdict=fail and the failure
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the AC2 production-target set is the union of cnameTargets.production and providerFallback', () => {
+  // C1/I3. The two fields are deliberately allowed to diverge — task
+  // 020f423e renames the production apps, so the CNAME target moves
+  // while the documented provider fallback stays. If the leak guard
+  // only knew about `cnameTargets.production`, a staging hostname aimed
+  // at a surface's own provider fallback would pass the guard the moment
+  // the two diverged.
+  const matrix = {
+    surfaces: [
+      {
+        id: 'health-probe',
+        kind: 'api',
+        providerFallback: 'sindustries-health-probe.fly.dev',
+        cnameTargets: { staging: 'sindustries-health-probe-staging.fly.dev', production: 'sindustries-health-probe-prod.fly.dev' },
+      },
+    ],
+  };
+  const targets = productionCnameTargets(matrix);
+  assert.ok(
+    targets.has('sindustries-health-probe-prod.fly.dev'),
+    'the cnameTargets.production host must be in the production-target set',
+  );
+  assert.ok(
+    targets.has('sindustries-health-probe.fly.dev'),
+    'the providerFallback host must be in the production-target set even when cnameTargets.production has diverged from it',
+  );
+  // Vercel's shared managed target carries no environment identity and
+  // must never be treated as a production target.
+  const withVercel = productionCnameTargets({
+    surfaces: [{ id: 'mission-control', kind: 'frontend', providerFallback: 'sindustries-mission-control.vercel.app', cnameTargets: { staging: 'cname.vercel-dns.com', production: 'cname.vercel-dns.com' } }],
+  });
+  assert.ok(withVercel.has('sindustries-mission-control.vercel.app'), 'the Vercel production provider host must be in the production-target set');
+  assert.ok(!withVercel.has('cname.vercel-dns.com'), 'Vercel shared managed target must not be treated as a production target');
+});
+
+test('host comparison normalises case and the trailing root dot, and matches on a label boundary', () => {
+  // I4. DNS is case-insensitive and a FQDN may carry a trailing root
+  // dot, so both are normalised. Leak comparisons must also hold for a
+  // subdomain of a production target — "foo.sindustries-tasks-api.fly.dev"
+  // is the same production host for AC2 purposes.
+  assert.equal(normalizeHost('SIndustries-Tasks-Api.Fly.Dev.'), 'sindustries-tasks-api.fly.dev');
+  assert.ok(isSameOrSubdomain('SIndustries-Tasks-Api.Fly.Dev', 'sindustries-tasks-api.fly.dev'));
+  assert.ok(isSameOrSubdomain('foo.sindustries-tasks-api.fly.dev', 'sindustries-tasks-api.fly.dev'));
+  assert.ok(!isSameOrSubdomain('sindustries-budget-api.fly.dev', 'sindustries-tasks-api.fly.dev'));
+  // A staging-shaped sibling is not a subdomain of the production host.
+  assert.ok(!isSameOrSubdomain('sindustries-health-probe-staging.fly.dev', 'sindustries-health-probe.fly.dev'));
+});
+
+test('the expected CNAME target comes from cnameTargets, not providerFallback, for staging', () => {
+  const surface = {
+    id: 'tasks-api',
+    kind: 'api',
+    providerFallback: 'sindustries-tasks-api.fly.dev',
+    cnameTargets: { staging: 'sindustries-platform-staging.fly.dev', production: 'sindustries-tasks-api.fly.dev' },
+  };
+  assert.equal(expectedCnameTarget(surface, 'staging'), 'sindustries-platform-staging.fly.dev');
+  assert.equal(expectedCnameTarget(surface, 'production'), 'sindustries-tasks-api.fly.dev');
+  // With no explicit production target the provider fallback is the
+  // production expectation — the only place that fallback is correct.
+  assert.equal(
+    expectedCnameTarget({ id: 'x', kind: 'api', providerFallback: 'x.fly.dev', cnameTargets: null }, 'production'),
+    'x.fly.dev',
+  );
+});
+
+test('the Content Scheduler surface is probed at the auto-post health endpoint AC5 names', () => {
+  // AC5 names "the Content Scheduler auto-post health endpoint"
+  // explicitly. The auto-post worker has no HTTP surface of its own, so
+  // the endpoint is served by the content-scheduler-api surface.
+  const paths = healthPathsForSurface({ id: 'content-scheduler-api', kind: 'api' });
+  assert.ok(
+    paths.includes('/api/v1/content-scheduler/auto-post/health'),
+    `content-scheduler-api must be probed at the auto-post health endpoint, got: ${paths.join(', ')}`,
+  );
+  assert.ok(paths.includes('/health'), 'content-scheduler-api must still be probed at /health');
+  assert.deepEqual(healthPathsForSurface({ id: 'health-probe', kind: 'api' }), ['/healthz']);
+  assert.deepEqual(healthPathsForSurface({ id: 'tasks-api', kind: 'api' }), ['/health']);
+  assert.deepEqual(healthPathsForSurface({ id: 'tasks-app', kind: 'frontend' }), ['/']);
 });
 
 test('synthetic empty matrix fails the harness cleanly with a non-zero exit', async () => {
