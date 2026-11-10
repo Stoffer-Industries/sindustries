@@ -118,8 +118,41 @@ describe('SignUpPage Google OAuth (task 7e7826c5)', () => {
     await user.click(screen.getByTestId('signup-google'));
 
     expect(await screen.findByTestId('signup-error')).toHaveTextContent(
-      'Sign-up with google is not available right now. Try another option.'
+      'Sign-up with Google is not available right now. Try another option.'
     );
     expect(screen.queryByTestId('signup-google')).not.toBeInTheDocument();
+  });
+
+  it('shows a visible inline error when the provider error has no message', async () => {
+    // A provider error without a usable message used to render nothing at
+    // all — the exact silent no-op this task exists to remove.
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: null,
+      error: { code: 'oauth_failed', message: '' },
+      providerDisabled: false
+    });
+    const user = userEvent.setup();
+    renderSignup();
+
+    await user.click(screen.getByTestId('signup-google'));
+
+    expect(await screen.findByTestId('signup-error')).toHaveTextContent(
+      'Could not start Google sign-in. Try again, or use email + password instead.'
+    );
+  });
+
+  it('disables the Google button while the redirect is in flight', async () => {
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: { url: 'https://accounts.google.com/o/oauth2/auth?client_id=fixture', redirecting: true },
+      error: null,
+      providerDisabled: false
+    });
+    const user = userEvent.setup();
+    renderSignup();
+
+    await user.click(screen.getByTestId('signup-google'));
+
+    await screen.findByTestId('signup-oauth-status');
+    expect(screen.getByTestId('signup-google')).toBeDisabled();
   });
 });

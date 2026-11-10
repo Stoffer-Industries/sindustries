@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -146,8 +146,67 @@ describe('LoginScreen Google OAuth (task 7e7826c5)', () => {
     await user.click(screen.getByTestId('login-google'));
 
     expect(await screen.findByTestId('login-error')).toHaveTextContent(
-      'Sign-in with google is not available right now. Try another option.'
+      'Sign-in with Google is not available right now. Try another option.'
     );
     expect(screen.queryByTestId('login-google')).not.toBeInTheDocument();
+  });
+
+  it('shows a visible inline error when the provider error has no message', async () => {
+    // A provider error without a usable message used to render nothing at
+    // all — the exact silent no-op this task exists to remove.
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: null,
+      error: { code: 'oauth_failed' },
+      providerDisabled: false
+    });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.click(screen.getByTestId('login-google'));
+
+    expect(await screen.findByTestId('login-error')).toHaveTextContent(
+      'Could not start Google sign-in. Try again, or use email + password instead.'
+    );
+  });
+
+  it('clears a stale OAuth error when the email flow takes over', async () => {
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: null,
+      error: new Error('Google sign-in blew up.'),
+      providerDisabled: false
+    });
+    mockSignIn.mockResolvedValueOnce({
+      data: { needsVerification: true, verificationMode: 'client_trust_email_code' },
+      error: null
+    });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.click(screen.getByTestId('login-google'));
+    expect(await screen.findByTestId('login-error')).toHaveTextContent('Google sign-in blew up.');
+
+    await user.type(screen.getByTestId('login-email'), 'tom@example.com');
+    await user.type(screen.getByTestId('login-password'), 'correctpassword');
+    await user.click(screen.getByTestId('login-submit'));
+
+    await screen.findByTestId('login-verification-form');
+    await waitFor(() => {
+      expect(screen.queryByTestId('login-error')).not.toBeInTheDocument();
+    });
+  });
+
+  it('disables the Google button while the redirect is in flight', async () => {
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: { url: 'https://accounts.google.com/o/oauth2/auth?client_id=fixture', redirecting: true },
+      error: null,
+      providerDisabled: false
+    });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.click(screen.getByTestId('login-google'));
+
+    await screen.findByTestId('login-oauth-status');
+    expect(screen.getByTestId('login-google')).toBeDisabled();
   });
 });

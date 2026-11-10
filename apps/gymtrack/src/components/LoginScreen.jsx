@@ -19,6 +19,7 @@ export default function LoginScreen() {
   const { session, signIn, verifySignInCode } = useAuth();
   const {
     startOAuth,
+    clearError: clearOAuthError,
     pending: oauthPending,
     error: oauthError,
     redirecting,
@@ -51,11 +52,16 @@ export default function LoginScreen() {
     const result = await startOAuth(provider, from);
     if (result.providerDisabled) {
       setAvailableProviders((prev) => prev.filter((value) => value !== provider));
-      setError(`Sign-in with ${provider} is not available right now. Try another option.`);
+      setError(
+        `Sign-in with ${oauthProviderLabel(provider)} is not available right now. Try another option.`
+      );
       return;
     }
     if (result.error) {
-      setError(result.error.message);
+      // The hook owns the provider error and already guarantees a non-empty
+      // message, so it is not duplicated into the page-local error state.
+      // Keeping the two sources exclusive is what stops a stale OAuth
+      // error from shadowing — or outliving — the email flow.
       return;
     }
     if (result.data?.url) {
@@ -67,6 +73,9 @@ export default function LoginScreen() {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    // The email flow owns the screen from here: drop any OAuth error so it
+    // cannot linger above the email or verification form.
+    clearOAuthError();
     const { data, error: signInError } = await signIn(email, password);
     setSubmitting(false);
     if (signInError) {
@@ -84,6 +93,7 @@ export default function LoginScreen() {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    clearOAuthError();
     const { error: verificationError } = await verifySignInCode(verificationCode, verificationMode);
     setSubmitting(false);
     if (verificationError) {
@@ -106,7 +116,7 @@ export default function LoginScreen() {
             type="button"
             className="btn-primary oauth-google"
             onClick={() => handleOAuth('google')}
-            disabled={oauthPending}
+            disabled={oauthPending || redirecting}
             data-testid="login-google"
           >
             Continue with Google
@@ -118,7 +128,7 @@ export default function LoginScreen() {
             type="button"
             className="btn-primary oauth-apple"
             onClick={() => handleOAuth('apple')}
-            disabled={oauthPending}
+            disabled={oauthPending || redirecting}
             data-testid="login-apple"
           >
             Continue with Apple

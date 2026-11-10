@@ -68,7 +68,7 @@ References: task `bb09eaed` (Migrate GymTrack identity from Supabase Auth to Cle
 3. A collapsed "Use email + password instead" panel reveals the fallback form.
 4. On success, Supabase creates the user and the visitor is redirected to `/workout` or to the originally intended protected destination.
 5. Errors render inline and the buttons re-enable for retry.
-6. Clicking the Google CTA either redirects to Google's consent screen or shows a visible inline error — it never fails silently. The OAuth click is owned by the shared `useOAuthRedirect()` hook (`apps/gymtrack/src/lib/useOAuthRedirect.js`), which both `/login` and `/signup` consume, so the two pages behave identically. While the redirect is in flight the page shows "Redirecting to Google…"; if the provider accepts the request but the browser has not navigated after 5 seconds, the hook surfaces "Could not start Google sign-in. Try again, or use email + password instead." Errors render outside the collapsed email panel, so an OAuth failure is visible on the default (panel-collapsed) view.
+6. Clicking the Google CTA either redirects to Google's consent screen or shows a visible inline error — it never fails silently. The OAuth click is owned by the shared `useOAuthRedirect()` hook (`apps/gymtrack/src/lib/useOAuthRedirect.js`), which both `/login` and `/signup` consume, so the two pages behave identically. Every provider failure carries a non-empty message: a provider error with an empty or missing `message` is normalised to the fallback copy rather than rendering nothing. While the redirect is in flight the page shows "Redirecting to Google…" and the Google button stays disabled, so a second click cannot cancel the pending fallback; if the provider accepts the request but the browser has not navigated after 5 seconds, the hook surfaces "Could not start Google sign-in. Try again, or use email + password instead." Errors render outside the collapsed email panel, so an OAuth failure is visible on the default (panel-collapsed) view. Starting the email + password flow clears any OAuth error, so a failed Google attempt cannot linger above the email form.
 
 ### Sign in
 
@@ -77,7 +77,7 @@ References: task `bb09eaed` (Migrate GymTrack identity from Supabase Auth to Cle
 3. If Clerk reports that the account has no password factor but does support `email_code`, GymTrack sends a one-time email code and asks the user to enter it; the entered password is not submitted to Clerk.
 4. On success → redirect to `/workout` or back to the protected destination that triggered the redirect.
 5. On error → inline error banner; controls re-enable.
-6. The Google CTA follows the same contract as sign-up: redirect or visible inline error, never a silent no-op (shared `useOAuthRedirect()` hook, 5-second bounded fallback, "Redirecting to Google…" status while in flight).
+6. The Google CTA follows the same contract as sign-up: redirect or visible inline error, never a silent no-op (shared `useOAuthRedirect()` hook, 5-second bounded fallback, "Redirecting to Google…" status while in flight, button disabled while the redirect is in flight). Every provider failure carries a non-empty message, and starting the email + password flow clears any OAuth error so it cannot linger above the email or verification form.
 
 ### Connect and authorize an external MCP client
 
