@@ -142,6 +142,74 @@ function main() {
     }
   }
 
+  // ------------------------------------------------------------------
+  // CNAME targets (task 5cb4a8fe, live-run repair 2026-11-10).
+  //
+  // `providerFallback` records the PRODUCTION provider host (the
+  // documented migration path). The DNS target a stable hostname CNAMEs
+  // to is environment-specific and lives in `cnameTargets`:
+  //
+  //   - the three consolidated API surfaces CNAME to the one platform
+  //     Fly app in staging,
+  //   - health-probe CNAMEs to its own staging Fly app,
+  //   - the two Vercel frontends CNAME to Vercel's shared managed
+  //     custom-domain target (the domain-to-project binding lives in
+  //     the Vercel project, not in DNS).
+  //
+  // The harness (tests/cloud/scripts/stable-hostname-verification.mjs)
+  // asserts the live CNAME against these values. Without them the
+  // harness compared staging hostnames against production provider
+  // hosts, which demanded an alias onto production — the thing AC2
+  // forbids.
+  // ------------------------------------------------------------------
+  const VERCEL_MANAGED_CNAME_TARGET = 'cname.vercel-dns.com';
+
+  for (const [idx, surface] of matrix.surfaces.entries()) {
+    const path = `surfaces[${idx}] (${surface.id})`;
+    if (surface.kind === 'worker') {
+      expect(surface.cnameTargets === null || surface.cnameTargets === undefined, `${path}.cnameTargets must be null (worker has no public URL)`);
+      continue;
+    }
+    expect(surface.cnameTargets && typeof surface.cnameTargets === 'object', `${path}.cnameTargets must be an object with per-environment CNAME targets`);
+    if (!surface.cnameTargets || typeof surface.cnameTargets !== 'object') continue;
+    expect(typeof surface.cnameTargets.staging === 'string' && surface.cnameTargets.staging.length > 0, `${path}.cnameTargets.staging must be a non-empty string`);
+    expect(typeof surface.cnameTargets.production === 'string' && surface.cnameTargets.production.length > 0, `${path}.cnameTargets.production must be a non-empty string`);
+    if (surface.kind === 'frontend') {
+      expect(surface.cnameTargets.staging.endsWith('.vercel-dns.com'), `${path}.cnameTargets.staging must be Vercel's managed custom-domain target ("${VERCEL_MANAGED_CNAME_TARGET}")`);
+      expect(surface.cnameTargets.production.endsWith('.vercel-dns.com'), `${path}.cnameTargets.production must be Vercel's managed custom-domain target ("${VERCEL_MANAGED_CNAME_TARGET}")`);
+    } else if (surface.kind === 'api') {
+      expect(surface.cnameTargets.staging.endsWith('.fly.dev'), `${path}.cnameTargets.staging must be a Fly app hostname (*.fly.dev)`);
+      expect(surface.cnameTargets.production.endsWith('.fly.dev'), `${path}.cnameTargets.production must be a Fly app hostname (*.fly.dev)`);
+    }
+    // A staging hostname must never CNAME to a production provider
+    // target. Vercel's shared managed target is the one exception: it
+    // is environment-agnostic by design, and the environment separation
+    // is enforced by the domain-to-project binding in Vercel.
+    if (surface.cnameTargets.staging === surface.cnameTargets.production && surface.cnameTargets.staging !== VERCEL_MANAGED_CNAME_TARGET) {
+      fail(`${path}.cnameTargets.staging and .production are the same target ("${surface.cnameTargets.staging}") — a staging hostname must not alias its production provider host (AC2)`);
+    }
+  }
+
+  // Cross-row: no surface's staging CNAME target may be another
+  // surface's production CNAME target (again, except Vercel's shared
+  // managed target, which carries no environment identity).
+  const productionTargets = new Map();
+  for (const surface of matrix.surfaces) {
+    if (surface.kind === 'worker') continue;
+    const target = surface.cnameTargets?.production ?? null;
+    if (typeof target === 'string' && target.length > 0) productionTargets.set(target, surface.id);
+  }
+  for (const surface of matrix.surfaces) {
+    if (surface.kind === 'worker') continue;
+    const stagingTarget = surface.cnameTargets?.staging ?? null;
+    if (typeof stagingTarget !== 'string' || stagingTarget.length === 0) continue;
+    if (stagingTarget === VERCEL_MANAGED_CNAME_TARGET) continue;
+    const owner = productionTargets.get(stagingTarget);
+    if (owner && owner !== surface.id) {
+      fail(`surfaces (${surface.id}).cnameTargets.staging ("${stagingTarget}") is the production CNAME target of surface "${owner}" — cross-environment alias (AC2)`);
+    }
+  }
+
   // Cross-row uniqueness for surface ids + hostnames.
   const seen = new Set();
   for (const [idx, surface] of matrix.surfaces.entries()) {
@@ -216,6 +284,12 @@ function main() {
     }
     expect(sawStable, `${path} must include the stable hostname "${surface.staging}" as a route`);
     expect(sawPlatform, `${path} must include the consolidated platform host "${platformHost}" as a route`);
+    // The CNAME target and the route list are two views of the same
+    // staging topology; they must not drift apart.
+    expect(
+      surface.cnameTargets?.staging === platformHost,
+      `${path}: cnameTargets.staging must be the consolidated platform host "${platformHost}" (the staging CNAME points at the one platform app)`,
+    );
   }
 
   // The matrix's platform prefixes and the router's location blocks must

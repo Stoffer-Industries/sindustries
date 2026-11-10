@@ -7,6 +7,13 @@
 // auto-post health endpoint and emits a single JSON result that conforms
 // to tests/cloud/stable-hostname-verification.schema.json.
 //
+// The CNAME expectation comes from the matrix's per-surface
+// `cnameTargets` (staging + production), NOT from `providerFallback`:
+// providerFallback is the production provider host (the documented
+// migration path), while a staging hostname must CNAME to the staging
+// deployment topology. Asserting providerFallback for a staging
+// hostname would demand an alias onto the production provider host.
+//
 // The harness has two modes:
 //
 //   --mode live  (default when MATRIX_LIVE=1 or the env vars are set)
@@ -166,6 +173,48 @@ function redactMessage(msg) {
     .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/g, `Bearer ${REDACTED}`);
 }
 
+// ---------------------------------------------------------------------------
+// CNAME expectation
+// ---------------------------------------------------------------------------
+
+// The DNS target a surface's stable hostname must CNAME to. The matrix
+// records it per environment in `cnameTargets`. `providerFallback` is the
+// PRODUCTION provider host (the documented migration path), so it is only
+// used as the production fallback when a surface records no explicit
+// production target.
+function expectedCnameTarget(surface, environment) {
+  const targets = surface.cnameTargets ?? null;
+  if (targets && typeof targets[environment] === 'string' && targets[environment].length > 0) {
+    return targets[environment];
+  }
+  if (environment === 'production' && typeof surface.providerFallback === 'string' && surface.providerFallback.length > 0) {
+    return surface.providerFallback;
+  }
+  return null;
+}
+
+// Every production CNAME target in the matrix. A staging hostname that
+// resolves to one of these is aliasing staging onto production (AC2).
+//
+// Vercel's shared managed custom-domain target is excluded: it is
+// environment-agnostic by design (every Vercel custom domain CNAMEs to
+// it), so it carries no environment identity and cannot be a leak
+// signal. The staging/production separation for a Vercel surface lives
+// in the domain-to-project binding in the Vercel project, which the
+// HTTPS check exercises.
+const VERCEL_MANAGED_CNAME_TARGET = 'cname.vercel-dns.com';
+
+function productionCnameTargets(matrix) {
+  const out = new Set();
+  for (const surface of matrix?.surfaces ?? []) {
+    const target = expectedCnameTarget(surface, 'production');
+    if (typeof target !== 'string' || target.length === 0) continue;
+    if (target === VERCEL_MANAGED_CNAME_TARGET) continue;
+    out.add(target);
+  }
+  return out;
+}
+
 function makeRow(surface, environment, status, details, evidence) {
   // Per-surface row shape (see schema). environment: "staging" or
   // "production"; status: "ok" | "fail" | "skip"; details is a structured
@@ -183,32 +232,67 @@ function makeRow(surface, environment, status, details, evidence) {
   };
 }
 
-async function checkDns(surface, environment) {
+async function checkDns(surface, environment, matrix) {
   // Uses node:dns/promises. The harness asserts the CNAME chain
-  // terminates at the matching *.fly.dev or *.vercel.app provider URL.
+  // terminates at the target the matrix records for THIS environment
+  // (`cnameTargets[environment]`), NOT at `providerFallback`.
+  //
+  // Why the distinction matters (task 5cb4a8fe, 2026-11-10): the
+  // `providerFallback` field records the PRODUCTION provider host (the
+  // documented migration path), while a staging hostname must CNAME to
+  // the staging deployment topology. Asserting `providerFallback` for a
+  // staging hostname demanded a CNAME to the production provider host —
+  // which would alias staging onto production, the exact thing AC2
+  // forbids, and which the staging deployment does not serve anyway.
   if (!surface[environment]) {
     return { ok: false, evidence: 'no public URL' };
   }
   const host = surface[environment];
+  const expected = expectedCnameTarget(surface, environment);
   const { promises: dns } = await import('node:dns');
   let records;
   try {
     records = await dns.resolveCname(host);
   } catch (err) {
-    return { ok: false, evidence: `CNAME resolution failed: ${redactMessage(err.message)}` };
+    return {
+      ok: false,
+      evidence: `CNAME resolution failed: ${redactMessage(err.message)}`,
+      details: { expectedCnameTarget: expected ?? null, providerFallback: surface.providerFallback ?? null },
+    };
   }
   if (!Array.isArray(records) || records.length === 0) {
-    return { ok: false, evidence: 'no CNAME records returned' };
+    return {
+      ok: false,
+      evidence: 'no CNAME records returned',
+      details: { expectedCnameTarget: expected ?? null, providerFallback: surface.providerFallback ?? null },
+    };
   }
   const target = records[0];
-  const expected = surface.providerFallback;
-  const matches = expected ? target === expected : false;
+  if (!expected) {
+    return {
+      ok: false,
+      evidence: `matrix records no ${environment} CNAME target for ${surface.id} (add cnameTargets.${environment} to infra/cloud/hostname-matrix.json)`,
+      details: { cnameTarget: target, expectedCnameTarget: null, providerFallback: surface.providerFallback ?? null },
+    };
+  }
+  // AC2 guard: a staging hostname must never CNAME to a production
+  // provider target. Catch that before the equality check so the
+  // evidence names the cross-environment leak rather than a bare
+  // "expected X" mismatch.
+  if (environment !== 'production' && productionCnameTargets(matrix).has(target)) {
+    return {
+      ok: false,
+      evidence: `CNAME ${host} -> ${target} (${environment} hostname points at a PRODUCTION provider target — cross-environment leak)`,
+      details: { cnameTarget: target, expectedCnameTarget: expected, providerFallback: surface.providerFallback ?? null },
+    };
+  }
+  const matches = target === expected;
   return {
     ok: matches,
     evidence: matches
       ? `CNAME ${host} -> ${target}`
-      : `CNAME ${host} -> ${target} (expected ${expected ?? 'none'})`,
-    details: { cnameTarget: target, providerFallback: expected ?? null },
+      : `CNAME ${host} -> ${target} (expected ${expected})`,
+    details: { cnameTarget: target, expectedCnameTarget: expected, providerFallback: surface.providerFallback ?? null },
   };
 }
 
@@ -286,46 +370,32 @@ async function checkCorsPreflight(surface, environment, args) {
   };
 }
 
-async function runLiveChecks(surface, environment, args) {
-  // Live mode runs all three checks in order. The first failure is
-  // captured and the rest are skipped (we want a single dominant
-  // signal per surface, not a 4-row waterfall).
-  const dnsCheck = await checkDns(surface, environment);
-  if (!dnsCheck.ok) {
-    return {
-      status: 'fail',
-      details: { dns: dnsCheck.details ?? null },
-      evidence: dnsCheck.evidence,
-    };
-  }
+async function runLiveChecks(surface, environment, args, matrix) {
+  // Live mode runs all three checks and reports each one. It does NOT
+  // short-circuit on the first failure: a DNS failure used to hide the
+  // HTTPS and CORS results behind it, so those stages stayed
+  // unevidenced until DNS was fixed. The row still fails when any
+  // check fails; it just now carries every stage's evidence.
+  const dnsCheck = await checkDns(surface, environment, matrix);
   const httpsCheck = await checkHttps(surface, environment);
-  if (!httpsCheck.ok) {
-    return {
-      status: 'fail',
-      details: { dns: dnsCheck.details ?? null, https: httpsCheck.details ?? null },
-      evidence: httpsCheck.evidence,
-    };
-  }
   const corsCheck = await checkCorsPreflight(surface, environment, args);
-  if (!corsCheck.ok) {
+  const details = {
+    dns: dnsCheck.details ?? null,
+    https: httpsCheck.details ?? null,
+    cors: corsCheck.details ?? null,
+  };
+  const failures = [dnsCheck, httpsCheck, corsCheck].filter((c) => !c.ok);
+  if (failures.length === 0) {
     return {
-      status: 'fail',
-      details: {
-        dns: dnsCheck.details ?? null,
-        https: httpsCheck.details ?? null,
-        cors: corsCheck.details ?? null,
-      },
-      evidence: corsCheck.evidence,
+      status: 'ok',
+      details,
+      evidence: `dns + https + cors-preflight all passed for ${surface.id}@${environment}`,
     };
   }
   return {
-    status: 'ok',
-    details: {
-      dns: dnsCheck.details ?? null,
-      https: httpsCheck.details ?? null,
-      cors: corsCheck.details ?? null,
-    },
-    evidence: `dns + https + cors-preflight all passed for ${surface.id}@${environment}`,
+    status: 'fail',
+    details,
+    evidence: failures.map((c) => c.evidence).join(' | '),
   };
 }
 
@@ -341,10 +411,18 @@ function runDryCheck(surface, environment) {
       evidence: `matrix records ${surface.id}.${environment}=null (worker; no public URL)`,
     };
   }
-  const checks = ['dns (CNAME -> provider fallback)', 'https (GET <health>)', 'cors preflight (Origin -> API)'];
+  const checks = ['dns (CNAME -> matrix cname target)', 'https (GET <health>)', 'cors preflight (Origin -> API)'];
   return {
     status: 'skip',
-    details: { reason: 'dry-run mode — set --mode live or MATRIX_LIVE=1 to execute', plannedChecks: checks },
+    details: {
+      reason: 'dry-run mode — set --mode live or MATRIX_LIVE=1 to execute',
+      plannedChecks: checks,
+      // The CNAME target this row would assert in live mode. Recorded in
+      // dry-run too so the expectation is reviewable offline (and so a
+      // matrix that still points staging at a production provider host
+      // is visible without a live run).
+      expectedCnameTarget: expectedCnameTarget(surface, environment),
+    },
     evidence: `dry-run: would check ${checks.length} properties on ${surface[environment]}`,
   };
 }
@@ -401,7 +479,7 @@ async function main() {
     let result;
     if (mode === 'live') {
       try {
-        result = await runLiveChecks(surface, environment, args);
+        result = await runLiveChecks(surface, environment, args, matrix);
       } catch (err) {
         errors.push(`${surface.id}: ${redactMessage(err.message)}`);
         result = {

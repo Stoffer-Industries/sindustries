@@ -377,6 +377,22 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 - Six public surfaces: mission-control, tasks-app, tasks-api, budget-api, content-scheduler-api, health-probe.
 - The auto-post worker row with `staging: null`, `production: null`, and `publicUrl: false` — the explicit non-public nature is auditable from the matrix and from the per-hostname comment block at the top of `infra/cloud/fly/auto-post-worker.fly.toml`.
 - A `providerFallback` per public surface (the `*.fly.dev` / `*.vercel.app` URL the design records as the migration path until the stable CNAMEs + certs land).
+- A `cnameTargets` per public surface (the DNS target each stable hostname's CNAME must resolve to, per environment).
+
+`providerFallback` and `cnameTargets` are different things and are not interchangeable. `providerFallback` is the **production** provider host — the documented migration path. `cnameTargets` is the per-environment DNS target:
+
+| Surface | `cnameTargets.staging` | `cnameTargets.production` |
+| --- | --- | --- |
+| mission-control | `cname.vercel-dns.com` | `cname.vercel-dns.com` |
+| tasks-app | `cname.vercel-dns.com` | `cname.vercel-dns.com` |
+| tasks-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.staging.sindustries.co.nz --> | `sindustries-tasks-api.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.sindustries.co.nz --> |
+| budget-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.staging.sindustries.co.nz --> | `sindustries-budget-api.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.sindustries.co.nz --> |
+| content-scheduler-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.staging.sindustries.co.nz --> | `sindustries-content-scheduler-api.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.sindustries.co.nz --> |
+| health-probe | `sindustries-health-probe-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.staging.sindustries.co.nz --> | `sindustries-health-probe.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.sindustries.co.nz --> |
+
+The staging column differs from the production column because the staging topology differs from production: the three API surfaces are served by the one consolidated platform Fly app (task `219fb673`), and health-probe keeps its own staging Fly app. The Vercel frontends CNAME to Vercel's shared managed custom-domain target in both environments — the domain-to-project binding lives in the Vercel project, not in DNS, so the frontend separation is evidenced by the HTTPS check rather than the CNAME target.
+
+Asserting `providerFallback` against a staging hostname demands a CNAME to the **production** provider host. That is a cross-environment alias — the thing AC2 forbids — and no staging deployment serves it. The harness therefore reads `cnameTargets[environment]`; `tests/cloud/scripts/check-stable-hostname-matrix.mjs` additionally fails the build if a staging target equals a production target (Vercel's shared managed target excepted, since it carries no environment identity).
 
 The static checks `tests/cloud/scripts/check-stable-hostname-matrix.mjs` and `tests/cloud/scripts/check-stable-url-fallbacks.mjs` enforce the matrix on every CI run; both pass on the committed tree at the time of writing.
 
@@ -388,6 +404,22 @@ Until the stable CNAMEs land, staging is reached on the one consolidated platfor
 - auto-post worker — it has no HTTP surface of its own (it is a queue-bound child process with no listener). Its health is observed on the content-scheduler-api surface at `https://sindustries-platform-staging.fly.dev/content-scheduler-api/api/v1/content-scheduler/auto-post/health` <!-- stable-fallback: documented-migration; auto-post worker keeps no public URL on the stable hostname matrix either (task 5cb4a8fe) -->
 
 The same host-and-path-prefix pairs are recorded per surface in `infra/cloud/hostname-matrix.json` (`stagingRoutes`).
+
+### Live AC5 harness result (2026-11-11)
+
+`MATRIX_LIVE=1 node tests/cloud/scripts/stable-hostname-verification.mjs --mode live` against the real staging hostnames:
+
+| Surface | DNS | HTTPS | CORS preflight | Row |
+| --- | --- | --- | --- | --- |
+| tasks-api | ok | ok | ok | ok |
+| budget-api | ok | ok | ok | ok |
+| content-scheduler-api | ok | ok | ok | ok |
+| health-probe | ok | ok | ok | ok |
+| mission-control | ok | **502** | skipped | fail |
+| tasks-app | ok | **502** | skipped | fail |
+| auto-post-worker | — | — | — | skip (no public URL by design) |
+
+The four API surfaces now pass the full DNS + HTTPS + CORS chain through their stable staging hostnames. The two Vercel frontends have correct CNAMEs but no deployment serving them — `mission-control.staging.sindustries.co.nz` and `tasks.staging.sindustries.co.nz` return HTTP 502, and the projects' own `*.vercel.app` hostnames return 404, so there is no Vercel deployment for the staging domains and no deploy workflow in this repo for them. That is a deployment gap, not a DNS-shape gap: repointing the CNAME would turn a 502 into a 404 with no gain. Until the staging frontend deployments exist, the harness verdict stays `fail` for those two rows and the AC5 live gate stays open.
 
 Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the consolidated platform app (the router already serves each stable hostname at the root of its own surface) and update the smoke-check URLs in the live deploy workflow, `.github/workflows/deploy-staging-platform.yml`. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; each still defines its own `deploy` job, but nothing calls them since their caller jobs were removed from `ci.yml` on 2026-11-07) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
 

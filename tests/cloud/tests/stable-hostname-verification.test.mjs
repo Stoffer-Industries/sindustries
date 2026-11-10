@@ -124,44 +124,124 @@ test('dry-run mode emits verdict=pass with one row per committed matrix surface,
   }
 });
 
-test('live mode without DNS set returns verdict=fail and the failure is surfaced cleanly', async () => {
-  // We do not run --mode live against the public internet here — the
-  // committed matrix's stable hostnames are not yet registered. The point
-  // of this test is to prove the harness does not crash when DNS
-  // resolution fails; the verdict must be fail, every public surface row
-  // must be fail, and the run must exit non-zero so CI catches a future
-  // regression where live mode silently reports pass.
-  let err;
-  let stdout;
+test('dry-run rows assert the matrix staging CNAME target, not the production provider fallback', async () => {
+  // The harness used to compare a staging hostname's CNAME against
+  // `providerFallback`, which is the PRODUCTION provider host. That
+  // demanded an alias onto production — the thing AC2 forbids — and
+  // made every live staging row fail on an expectation mismatch rather
+  // than on a real deployment fault. The expectation now comes from the
+  // matrix's per-environment `cnameTargets`, and dry-run records it so
+  // the contract is reviewable without a live run.
+  const dir = mkdtempSync(join(tmpdir(), 'stable-hostname-verification-'));
   try {
-    ({ stdout } = await exec('node', [
-      SCRIPT,
-      '--mode', 'live',
-      '--run-id', 'test-live-no-dns',
-      '--output', '/tmp/stable-hostname-verification-live-test.json',
-    ], { cwd: REPO_ROOT, timeout: 60_000 }));
-  } catch (e) { err = e; }
-  assert.ok(err, 'live mode without DNS must exit non-zero (verdict=fail)');
-  assert.ok(err.code === 1, `live mode must exit 1, got ${err.code}`);
-  // stdout may be empty because Node writes the JSON to stdout before
-  // exit, but stderr should also not contain a stack trace (the harness
-  // swallows the DNS error into the row.evidence field).
-  assert.ok(!String(err.stderr).includes('Error:'), `live mode must not crash with a stack trace; got stderr: ${err.stderr}`);
-  // The output file should still be written so CI can upload it.
-  const out = JSON.parse(readFileSync('/tmp/stable-hostname-verification-live-test.json', 'utf8'));
-  assert.equal(out.mode, 'live', 'mode must be live');
-  assert.equal(out.verdict, 'fail', 'live mode without DNS must verdict=fail');
-  // Every public surface row must be fail; worker surface must remain
-  // skip (the worker has no public URL by design).
-  for (const row of out.surfaces) {
-    if (row.kind === 'worker') {
-      assert.equal(row.status, 'skip', `worker surface row must remain skip (id=${row.id})`);
-    } else {
-      assert.equal(row.status, 'fail', `public surface row must be fail when DNS is unprovisioned (id=${row.id})`);
+    const outPath = join(dir, 'cname-target.json');
+    await exec('node', [SCRIPT, '--mode', 'dry-run', '--output', outPath], { cwd: REPO_ROOT });
+    const result = JSON.parse(readFileSync(outPath, 'utf8'));
+    const matrix = JSON.parse(readFileSync(REAL_MATRIX, 'utf8'));
+    let checked = 0;
+    for (const row of result.surfaces) {
+      if (row.kind === 'worker') continue;
+      const surface = matrix.surfaces.find((s) => s.id === row.id);
+      assert.ok(surface, `row ${row.id} must map to a matrix surface`);
+      assert.ok(surface.cnameTargets, `matrix surface ${row.id} must record cnameTargets`);
+      assert.equal(
+        row.details.expectedCnameTarget,
+        surface.cnameTargets.staging,
+        `row ${row.id} must expect the matrix staging CNAME target (${surface.cnameTargets.staging})`,
+      );
+      assert.notEqual(
+        row.details.expectedCnameTarget,
+        surface.providerFallback,
+        `row ${row.id} must not expect the production provider fallback (${surface.providerFallback})`,
+      );
+      checked += 1;
     }
+    assert.equal(checked, 6, 'all six public surfaces must carry a staging CNAME expectation');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  // Production blockers must be present in live mode.
-  assert.ok(out.productionBlockers.length >= 1, 'live mode must list the production manual-gate blocker');
+});
+
+test('live mode with unresolvable hostnames returns verdict=fail and the failure is surfaced cleanly', async () => {
+  // A synthetic matrix whose hostnames cannot resolve. The point of
+  // this test is to prove the harness does not crash when DNS
+  // resolution fails; the verdict must be fail, every public surface
+  // row must be fail, and the run must exit non-zero so CI catches a
+  // future regression where live mode silently reports pass.
+  //
+  // The synthetic matrix (rather than the committed one) keeps the
+  // assertion stable now that the real staging DNS exists: the
+  // committed matrix's rows may legitimately become "ok" as staging
+  // converges, and this test must keep proving the failure path.
+  const dir = mkdtempSync(join(tmpdir(), 'stable-hostname-verification-'));
+  try {
+    const matrixPath = join(dir, 'unresolvable-matrix.json');
+    writeFileSync(matrixPath, JSON.stringify({
+      taskId: 'test-live-no-dns',
+      surfaces: [
+        {
+          id: 'tasks-api',
+          kind: 'api',
+          staging: 'tasks-api.unresolvable.sindustries.co.nz',
+          production: 'tasks-api.sindustries.co.nz',
+          providerFallback: 'sindustries-tasks-api.fly.dev',
+          cnameTargets: { staging: 'sindustries-platform-staging.fly.dev', production: 'sindustries-tasks-api.fly.dev' },
+        },
+        {
+          id: 'auto-post-worker',
+          kind: 'worker',
+          staging: null,
+          production: null,
+          providerFallback: null,
+          cnameTargets: null,
+          publicUrl: false,
+          rationale: 'no public URL',
+        },
+      ],
+    }, null, 2));
+    const outPath = join(dir, 'live.json');
+    let err;
+    try {
+      await exec('node', [
+        SCRIPT,
+        '--mode', 'live',
+        '--matrix', matrixPath,
+        '--run-id', 'test-live-no-dns',
+        '--output', outPath,
+      ], { cwd: REPO_ROOT, timeout: 180_000 });
+    } catch (e) { err = e; }
+    assert.ok(err, 'live mode with unresolvable hostnames must exit non-zero (verdict=fail)');
+    assert.ok(err.code === 1, `live mode must exit 1, got ${err.code}`);
+    // stdout may be empty because Node writes the JSON to stdout before
+    // exit, but stderr should also not contain a stack trace (the harness
+    // swallows the DNS error into the row.evidence field).
+    assert.ok(!String(err.stderr).includes('Error:'), `live mode must not crash with a stack trace; got stderr: ${err.stderr}`);
+    // The output file should still be written so CI can upload it.
+    const out = JSON.parse(readFileSync(outPath, 'utf8'));
+    assert.equal(out.mode, 'live', 'mode must be live');
+    assert.equal(out.verdict, 'fail', 'live mode with unresolvable hostnames must verdict=fail');
+    // Every public surface row must be fail; worker surface must remain
+    // skip (the worker has no public URL by design).
+    for (const row of out.surfaces) {
+      if (row.kind === 'worker') {
+        assert.equal(row.status, 'skip', `worker surface row must remain skip (id=${row.id})`);
+        continue;
+      }
+      assert.equal(row.status, 'fail', `public surface row must be fail when DNS cannot resolve (id=${row.id})`);
+      assert.match(row.evidence, /CNAME resolution failed/, `the DNS failure must be named in the row evidence (id=${row.id}): ${row.evidence}`);
+      // The DNS stage is no longer the only stage that can fail: the
+      // harness now records the HTTPS and CORS evidence even when DNS
+      // failed, so a broken DNS record no longer hides the deployment
+      // state behind it.
+      assert.ok('dns' in row.details, `row ${row.id} must record the dns stage detail`);
+      assert.ok('https' in row.details, `row ${row.id} must record the https stage detail`);
+      assert.ok('cors' in row.details, `row ${row.id} must record the cors stage detail`);
+    }
+    // Production blockers must be present in live mode.
+    assert.ok(out.productionBlockers.length >= 1, 'live mode must list the production manual-gate blocker');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('synthetic empty matrix fails the harness cleanly with a non-zero exit', async () => {
