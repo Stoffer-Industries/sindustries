@@ -268,10 +268,17 @@ export function ClerkAuthProvider({ children }) {
 
   /**
    * Email + password sign-up. Maps Clerk's `signUp.create({ emailAddress,
-   * password })` to `{ data, error }`. Email verification (Clerk sends a
-   * one-time code) is treated as success for parity with Supabase's
-   * "create account, then verify email" flow — the user can log in after
-   * verifying, and SignUpPage navigates to the post-signup route as today.
+   * password })` to `{ data, error }`.
+   *
+   * When the new account still needs its email address verified, Clerk has
+   * sent a one-time code and NO session exists yet. The envelope says so
+   * explicitly — `data.needsVerification === true` with
+   * `data.verificationMode === 'signup_email_code'` — so SignUpPage renders
+   * the code-entry step instead of navigating to a protected route that
+   * bounces the user straight back to /login (task 6e9410d5).
+   *
+   * When a session is issued immediately, `data.needsVerification` is
+   * false, so callers branch on one field regardless of identity provider.
    */
   const signUp = useCallback(
     async (email, password) => {
@@ -297,13 +304,16 @@ export function ClerkAuthProvider({ children }) {
               error: new Error(clerkErrorMessage(finalizeError, 'Sign-up failed.'))
             };
           }
-          return { data: { user: clerkSignUp.createdUserId }, error: null };
+          return {
+            data: { user: clerkSignUp.createdUserId, needsVerification: false },
+            error: null
+          };
         }
-        // Status === 'missing_requirements' | 'abandoned' etc. — the
-        // email-verification step is queued by Clerk. Surface as success
-        // for UI parity with Supabase's email-confirmation-required flow.
-        // The user verifies via Clerk's hosted email link; on next
-        // sign-in, status flips to 'complete'.
+        // Status === 'missing_requirements' | 'abandoned' etc. — Clerk has
+        // created the account but the address is not verified yet, so no
+        // session exists. The prepare call below sends the one-time code;
+        // report that a verification step is required so SignUpPage can ask
+        // for it (task 6e9410d5).
         const verificationError = await clerkSignUpPrepareEmailAddressVerification(clerkSignUp);
         if (verificationError) {
           reportClerkError(verificationError, 'signup_prepare_verification');
@@ -312,13 +322,62 @@ export function ClerkAuthProvider({ children }) {
             error: new Error(clerkErrorMessage(verificationError, 'Sign-up failed.'))
           };
         }
-        return { data: { pendingVerification: true }, error: null };
+        return {
+          data: { needsVerification: true, verificationMode: 'signup_email_code' },
+          error: null
+        };
       } catch (err) {
         if (err?.name === 'AuthRequestTimeoutError') {
           await clerkSignUp.reset().catch(() => {});
         }
         reportClerkError(err, 'signup_throw');
         return { data: null, error: new Error(clerkErrorMessage(err, 'Sign-up failed.')) };
+      }
+    },
+    [clerkSignUp]
+  );
+
+  /**
+   * Verify the one-time code that was emailed when the account was created.
+   *
+   * The code lives on the Clerk `signUp` resource (not the `signIn`
+   * resource), so it is a distinct method from `verifySignInCode` — the
+   * two provider resources model different code types, and folding them
+   * together would put a provider-shaped switch in the shared contract.
+   *
+   * Contract: `verifySignUpCode(code) -> { data: { session }, error }`.
+   * The page never passes the email address; Clerk already owns the
+   * pending sign-up attempt, so the view stays provider-agnostic.
+   */
+  const verifySignUpCode = useCallback(
+    async (code) => {
+      try {
+        const { error } = await clerkSignUp.verifications.verifyEmailCode({ code });
+        if (error) {
+          reportClerkError(error, 'verify_signup_code');
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(error, 'Verification failed.'))
+          };
+        }
+        if (clerkSignUp.status !== 'complete') {
+          return {
+            data: null,
+            error: new Error('Additional sign-up verification is still required.')
+          };
+        }
+        const { error: finalizeError } = await clerkSignUp.finalize();
+        if (finalizeError) {
+          reportClerkError(finalizeError, 'verify_signup_code_finalize');
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(finalizeError, 'Sign-up failed.'))
+          };
+        }
+        return { data: { session: clerkSignUp.createdSessionId }, error: null };
+      } catch (err) {
+        reportClerkError(err, 'verify_signup_code_throw');
+        return { data: null, error: new Error(clerkErrorMessage(err, 'Verification failed.')) };
       }
     },
     [clerkSignUp]
@@ -521,11 +580,22 @@ export function ClerkAuthProvider({ children }) {
       signIn,
       verifySignInCode,
       signUp,
+      verifySignUpCode,
       signOut,
       startOAuthRedirect,
       getAccessToken
     }),
-    [session, loading, signIn, verifySignInCode, signUp, signOut, startOAuthRedirect, getAccessToken]
+    [
+      session,
+      loading,
+      signIn,
+      verifySignInCode,
+      signUp,
+      verifySignUpCode,
+      signOut,
+      startOAuthRedirect,
+      getAccessToken
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
