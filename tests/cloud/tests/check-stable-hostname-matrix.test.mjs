@@ -14,7 +14,7 @@
 // Run with: node --test tests/cloud/tests/check-stable-hostname-matrix.test.mjs
 
 import { execFile } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -24,6 +24,8 @@ import { strict as assert } from 'node:assert';
 const exec = promisify(execFile);
 const REPO_ROOT = new URL('../../..', import.meta.url).pathname;
 const SCRIPT = join(REPO_ROOT, 'tests/cloud/scripts/check-stable-hostname-matrix.mjs');
+const REAL_MATRIX = join(REPO_ROOT, 'infra/cloud/hostname-matrix.json');
+const REAL_FLY_DIR = join(REPO_ROOT, 'infra/cloud/fly');
 
 test('real repo tree: check-stable-hostname-matrix exits 0 on the committed matrix + fly.toml comment blocks', async () => {
   const { stdout, stderr } = await exec('node', [SCRIPT], { cwd: REPO_ROOT });
@@ -41,9 +43,9 @@ test('synthetic matrix missing a required public surface fails the check', async
       stagingSubdomainSuffix: 'staging.sindustries.co.nz',
       productionApex: 'sindustries.co.nz',
       surfaces: [
-        { id: 'tasks-api', kind: 'api', staging: 'tasks-api.staging.sindustries.co.nz', production: 'tasks-api.sindustries.co.nz', providerFallback: 'sindustries-tasks-api.fly.dev' },
-        { id: 'budget-api', kind: 'api', staging: 'budget-api.staging.sindustries.co.nz', production: 'budget-api.sindustries.co.nz', providerFallback: 'sindustries-budget-api.fly.dev' },
-        { id: 'auto-post-worker', kind: 'worker', staging: null, production: null, providerFallback: null, publicUrl: false, rationale: 'no public URL' },
+        { id: 'tasks-api', kind: 'api', staging: 'tasks-api.staging.sindustries.co.nz', production: 'tasks-api.sindustries.co.nz', providerFallback: 'sindustries-tasks-api.fly.dev', cnameTargets: { staging: 'sindustries-platform-staging.fly.dev', production: 'sindustries-tasks-api.fly.dev' } },
+        { id: 'budget-api', kind: 'api', staging: 'budget-api.staging.sindustries.co.nz', production: 'budget-api.sindustries.co.nz', providerFallback: 'sindustries-budget-api.fly.dev', cnameTargets: { staging: 'sindustries-platform-staging.fly.dev', production: 'sindustries-budget-api.fly.dev' } },
+        { id: 'auto-post-worker', kind: 'worker', staging: null, production: null, providerFallback: null, cnameTargets: null, publicUrl: false, rationale: 'no public URL' },
       ],
     };
     const matrixPath = join(dir, 'hostname-matrix.json');
@@ -68,6 +70,55 @@ test('synthetic matrix missing a required public surface fails the check', async
   }
 });
 
+test('synthetic matrix without cnameTargets fails the check', async () => {
+  // The CNAME target per environment is what the live harness asserts
+  // against. A matrix row without it cannot be checked, so the static
+  // check must reject the row rather than let the harness fall back to
+  // the production provider host.
+  const dir = mkdtempSync(join(tmpdir(), 'check-stable-hostname-matrix-'));
+  try {
+    const matrix = JSON.parse(readFileSync(REAL_MATRIX, 'utf8'));
+    const surface = matrix.surfaces.find((s) => s.id === 'tasks-api');
+    delete surface.cnameTargets;
+    const matrixPath = join(dir, 'hostname-matrix.json');
+    writeFileSync(matrixPath, JSON.stringify(matrix, null, 2));
+    let err;
+    try {
+      await exec('node', [SCRIPT, matrixPath, REAL_FLY_DIR, REPO_ROOT]);
+    } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail on a surface without cnameTargets');
+    const stderr = (err.stderr || '') + (err.stdout || '');
+    assert.match(stderr, /tasks-api\)\.cnameTargets must be an object/, `expected a missing-cnameTargets error, got: ${stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('synthetic matrix whose staging CNAME target aliases a production provider host fails the check', async () => {
+  // AC2: "Staging hostnames resolve only to staging deployments and
+  // production hostnames resolve only to production deployments." A
+  // staging CNAME pointing at a production provider host is a
+  // cross-environment leak, even when the matrix row itself is
+  // otherwise well-formed.
+  const dir = mkdtempSync(join(tmpdir(), 'check-stable-hostname-matrix-'));
+  try {
+    const matrix = JSON.parse(readFileSync(REAL_MATRIX, 'utf8'));
+    const surface = matrix.surfaces.find((s) => s.id === 'tasks-api');
+    surface.cnameTargets.staging = 'sindustries-tasks-api.fly.dev';
+    const matrixPath = join(dir, 'hostname-matrix.json');
+    writeFileSync(matrixPath, JSON.stringify(matrix, null, 2));
+    let err;
+    try {
+      await exec('node', [SCRIPT, matrixPath, REAL_FLY_DIR, REPO_ROOT]);
+    } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail on a staging CNAME target that aliases production');
+    const stderr = (err.stderr || '') + (err.stdout || '');
+    assert.match(stderr, /cross-environment alias|must not alias its production provider host/, `expected a cross-environment alias error, got: ${stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('synthetic fly.toml whose comment block omits the staging hostname fails the check', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'check-stable-hostname-matrix-'));
   try {
@@ -77,7 +128,7 @@ test('synthetic fly.toml whose comment block omits the staging hostname fails th
       stagingSubdomainSuffix: 'staging.sindustries.co.nz',
       productionApex: 'sindustries.co.nz',
       surfaces: [
-        { id: 'tasks-api', kind: 'api', flyApp: 'sindustries-tasks-api', staging: 'tasks-api.staging.sindustries.co.nz', production: 'tasks-api.sindustries.co.nz', providerFallback: 'sindustries-tasks-api.fly.dev' },
+        { id: 'tasks-api', kind: 'api', flyApp: 'sindustries-tasks-api', staging: 'tasks-api.staging.sindustries.co.nz', production: 'tasks-api.sindustries.co.nz', providerFallback: 'sindustries-tasks-api.fly.dev', cnameTargets: { staging: 'sindustries-platform-staging.fly.dev', production: 'sindustries-tasks-api.fly.dev' } },
       ],
     };
     const matrixPath = join(dir, 'hostname-matrix.json');
