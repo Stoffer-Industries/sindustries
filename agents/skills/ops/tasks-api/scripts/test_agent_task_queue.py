@@ -1019,7 +1019,7 @@ class GhApiTimeoutTest(unittest.TestCase):
         ):
             with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
                 mock_safe_run.return_value.stdout = "[]"
-                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+                agent_task_queue._gh_api("~/.config/gh-rowan", "TOKEN", "/x")
         self.assertEqual(
             mock_safe_run.call_args.kwargs.get("timeout"),
             agent_task_queue._GH_API_TIMEOUT_SECONDS,
@@ -1040,7 +1040,7 @@ class GhApiTimeoutTest(unittest.TestCase):
                 side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=10),
             ):
                 with self.assertRaises(agent_task_queue._GhApiTimeout):
-                    agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+                    agent_task_queue._gh_api("~/.config/gh-rowan", "TOKEN", "/x")
 
     def test_gh_api_does_not_swallow_called_process_error(self):
         with patch.object(
@@ -1056,7 +1056,7 @@ class GhApiTimeoutTest(unittest.TestCase):
                 ),
             ):
                 with self.assertRaises(subprocess.CalledProcessError):
-                    agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+                    agent_task_queue._gh_api("~/.config/gh-rowan", "TOKEN", "/x")
 
     def test_gh_api_strips_proxy_env_so_gh_bypasses_the_secret_egress_proxy(self):
         # `gh` is a Go binary; on macOS it does not honour SSL_CERT_FILE/
@@ -1082,7 +1082,7 @@ class GhApiTimeoutTest(unittest.TestCase):
             ):
                 with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
                     mock_safe_run.return_value.stdout = "[]"
-                    agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+                    agent_task_queue._gh_api("~/.config/gh-rowan", "TOKEN", "/x")
         called_args = mock_safe_run.call_args.args[0]
         self.assertTrue(called_args[0].endswith("agents/lib/github-cli.sh"))
         called_env = mock_safe_run.call_args.kwargs.get("env")
@@ -1297,8 +1297,13 @@ class IdentityDegradeTest(unittest.TestCase):
     def test_fetch_github_prs_returns_empty_when_unprovisioned(self):
         with patch.object(
             agent_task_queue, "_is_identity_provisioned", return_value=False
-        ), patch.object(agent_task_queue, "_gh_api") as gh:
+        ), patch.object(
+            agent_task_queue,
+            "resolve_gh_credentials",
+            side_effect=AssertionError("unprovisioned identity must not be probed"),
+        ) as resolver, patch.object(agent_task_queue, "_gh_api") as gh:
             self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+            resolver.assert_not_called()
             gh.assert_not_called()
 
     def test_fetch_github_prs_returns_empty_on_called_process_error(self):
@@ -1398,10 +1403,17 @@ class IdentityDegradeTest(unittest.TestCase):
         with self._patched_main(_unprovisioned):
             with patch.object(
                 agent_task_queue, "_is_identity_provisioned", return_value=False
-            ):
+            ), patch.object(
+                agent_task_queue,
+                "resolve_gh_credentials",
+                side_effect=AssertionError("unprovisioned identity must not be probed"),
+            ) as resolver:
                 agent_task_queue.main()
+            resolver.assert_not_called()
             queue = agent_task_queue.build_work_queue.return_value
             self.assertEqual(queue["prHydrationDegraded"], "unprovisioned")
+            self.assertEqual(queue["credentialSource"], "none")
+            self.assertEqual(queue["credentialReason"], "identity-unprovisioned")
             self.assertNotIn("identityNotProvisioned", queue)
 
     def test_main_omits_pr_hydration_degraded_when_healthy(self):
@@ -1873,7 +1885,7 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
             with self._patch_gh(runner):
                 result = agent_task_queue._gh_api(
-                    "~/.config/gh-test", self.TOKEN_ENV, "/x"
+                    "~/.config/gh-rowan", self.TOKEN_ENV, "/x"
                 )
         self.assertEqual(result, [{"number": 958}])
         probes = [call for call in calls if call["probe"]]
@@ -1890,7 +1902,7 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
             with self._patch_gh(runner):
                 result = agent_task_queue._gh_api(
-                    "~/.config/gh-test", self.TOKEN_ENV, "/x"
+                    "~/.config/gh-rowan", self.TOKEN_ENV, "/x"
                 )
         self.assertEqual(result, [])
         endpoints = [call for call in calls if not call["probe"]]
@@ -1910,7 +1922,7 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True):
             with self._patch_gh(_runner):
                 with self.assertRaises(subprocess.CalledProcessError):
-                    agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/x")
+                    agent_task_queue._gh_api("~/.config/gh-rowan", self.TOKEN_ENV, "/x")
         # The keyring candidate is probed once and fails, so the call fails
         # closed instead of silently degrading to an empty projection.
         self.assertEqual(len(calls), 1)
@@ -1924,12 +1936,12 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
                 with contextlib.redirect_stderr(stderr):
                     with self.assertRaises(subprocess.CalledProcessError):
                         agent_task_queue._gh_api(
-                            "~/.config/gh-test", self.TOKEN_ENV, "/x"
+                            "~/.config/gh-rowan", self.TOKEN_ENV, "/x"
                         )
         message = stderr.getvalue()
         self.assertIn(self.TOKEN_ENV, message)
         self.assertIn("falling back", message)
-        self.assertIn("~/.config/gh-test", message)
+        self.assertIn("~/.config/gh-rowan", message)
         self.assertIn("HTTP 401", message)
         self.assertNotIn(self.STALE, message)
 
@@ -1947,7 +1959,7 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
                 with contextlib.redirect_stderr(stderr):
                     with self.assertRaises(subprocess.CalledProcessError):
                         agent_task_queue._gh_api(
-                            "~/.config/gh-test", self.TOKEN_ENV, "/x"
+                            "~/.config/gh-rowan", self.TOKEN_ENV, "/x"
                         )
         message = stderr.getvalue()
         self.assertNotIn(self.STALE, message)
@@ -1957,7 +1969,7 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
         calls, runner = self._fake_gh(accept_token=True)
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
             with self._patch_gh(runner):
-                agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/x")
-                agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/y")
+                agent_task_queue._gh_api("~/.config/gh-rowan", self.TOKEN_ENV, "/x")
+                agent_task_queue._gh_api("~/.config/gh-rowan", self.TOKEN_ENV, "/y")
         probes = [call for call in calls if call["probe"]]
         self.assertEqual(len(probes), 1)

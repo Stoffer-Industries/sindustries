@@ -35,7 +35,13 @@ if _w is not None and str(_w) not in _sys.path:
 del _sys, _p, _w
 
 from agents.lib import safe_run
-from agents.lib.github_cli import GhCredentials, gh_command, gh_env, resolve_gh_credentials
+from agents.lib.github_cli import (
+    GITHUB_CLI_REQUEST_TIMEOUT_SECONDS,
+    GhCredentials,
+    gh_command,
+    gh_env,
+    resolve_gh_credentials,
+)
 
 CLIENT_PATH = pathlib.Path(__file__).parents[1] / "tasks_api_client.py"
 SPEC = importlib.util.spec_from_file_location("tasks_api_client", CLIENT_PATH)
@@ -111,7 +117,7 @@ TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
 # calls = ~144s); parallelization handles cumulative wall-time, this handles
 # pathological single-call latency. See
 # docs/specs/agent-task-queue-cumulative-fetch-hang-2026-08-20-tech-design.md.
-_GH_API_TIMEOUT_SECONDS = 10.0
+_GH_API_TIMEOUT_SECONDS = GITHUB_CLI_REQUEST_TIMEOUT_SECONDS
 # Cap the parallel fan-out in `fetch_linked_delivery_prs`. 8 is generous for
 # the current workload (12 URLs); `min(len, MAX_WORKERS)` is used at call sites.
 _MAX_PARALLEL_PR_FETCH_WORKERS = 8
@@ -1082,9 +1088,6 @@ def fetch_github_prs(
     scanned = _normalize_scanned_repos(repos)
     _REPO_COVERAGE = {}
     expected_login, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
-    credentials = _resolve_github_credentials(
-        config_dir, token_env, expected_login=expected_login
-    )
     if not _is_identity_provisioned(agent):
         _log(
             f"GitHub identity for {agent!r} is not provisioned (no profile dir, "
@@ -1096,6 +1099,9 @@ def fetch_github_prs(
         for repo in scanned:
             _record_repo_coverage(repo, "skipped", reason="identity-unprovisioned")
         return []
+    credentials = _resolve_github_credentials(
+        config_dir, token_env, expected_login=expected_login
+    )
     if credentials.source == "none":
         reason = credentials.reason or "no-valid-credential"
         _PR_HYDRATION_DEGRADE_REASON = reason
@@ -1423,9 +1429,6 @@ def main() -> None:
     # infra/runbooks/agent-github-identity-profile-unprovisioned.md.
     identity_not_provisioned = not _is_identity_provisioned(args.assignee)
     expected_login, config_dir, token_env = GITHUB_IDENTITIES[agent_key]
-    credentials = _resolve_github_credentials(
-        config_dir, token_env, expected_login=expected_login
-    )
     if identity_not_provisioned:
         _log(
             f"GitHub identity for {args.assignee!r} is not provisioned (no "
@@ -1433,11 +1436,22 @@ def main() -> None:
             f"empty. See infra/runbooks/agent-github-identity-profile-unprovisioned.md",
             verbose_only=False,
         )
+        credentials = GhCredentials(
+            "none", None, None, "identity-unprovisioned"
+        )
+    else:
+        credentials = _resolve_github_credentials(
+            config_dir, token_env, expected_login=expected_login
+        )
     tasks = fetch_agent_tasks(args.assignee)
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
     github_prs = fetch_github_prs(args.assignee, scanned_repos)
-    delivery_prs = fetch_linked_delivery_prs(
-        args.assignee, tasks, github_prs, repos=scanned_repos
+    delivery_prs = (
+        {}
+        if identity_not_provisioned
+        else fetch_linked_delivery_prs(
+            args.assignee, tasks, github_prs, repos=scanned_repos
+        )
     )
     attention_owner = args.attention_owner or args.assignee
     attention_owner_tasks = fetch_attention_owner_tasks(attention_owner)

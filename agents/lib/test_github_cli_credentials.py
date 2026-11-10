@@ -210,6 +210,49 @@ class ResolveGhCredentialsTest(unittest.TestCase):
         self.assertEqual(credentials.login, OTHER_LOGIN)
         self.assertEqual(credentials.reason, "identity-mismatch")
 
+    # Identity enforcement must fail closed when no expected login is known.
+
+    def test_missing_expected_login_refuses_the_credential_without_probing(self) -> None:
+        """An unknown attribution target is never safe to accept."""
+        os.environ[TOKEN_ENV] = "ghp_va…3456"
+        probe = _ScriptedProbe(token_login=EXPECTED_LOGIN)
+        self.safe_run.side_effect = probe
+
+        credentials = resolve_gh_credentials(
+            config_dir=CONFIG_DIR,
+            token_env=TOKEN_ENV,
+            expected_login="",
+        )
+
+        self.assertEqual(credentials.source, "none")
+        self.assertIsNone(credentials.token)
+        self.assertIsNone(credentials.login)
+        self.assertEqual(credentials.reason, "unknown-identity")
+        self.assertEqual(probe.calls, [])
+
+    # Probe and endpoint calls share one timeout.
+
+    def test_probe_uses_the_shared_github_request_timeout(self) -> None:
+        """The probe must not expire before the endpoint it authorises."""
+        os.environ[TOKEN_ENV] = "ghp_va…3456"
+        self.safe_run.side_effect = _ScriptedProbe(token_login=EXPECTED_LOGIN)
+
+        self._resolve()
+
+        self.assertEqual(
+            self.safe_run.call_args.kwargs.get("timeout"),
+            github_cli.GITHUB_CLI_REQUEST_TIMEOUT_SECONDS,
+        )
+
+    # Secret hygiene covers GitHub Enterprise tokens too.
+
+    def test_redaction_covers_github_enterprise_tokens(self) -> None:
+        """A `ghe_` token must never survive in diagnostic output."""
+        self.assertEqual(
+            github_cli._redact("failed with ghe_enterpriseSecret123"),
+            "failed with ***",
+        )
+
     # AC2 — cache key includes the token fingerprint.
 
     def test_rotated_token_is_reprobed_rather_than_inheriting_a_stale_verdict(self) -> None:
