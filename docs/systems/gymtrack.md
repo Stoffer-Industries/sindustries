@@ -68,6 +68,22 @@ The SPA owns:
 5. `AgentConsentPage` loads the client metadata from `public.gymtrack_oauth_clients`, then POSTs the user's approve/deny decision back to the MCP service with the current Supabase access token.
 6. The MCP service verifies that Supabase token server-side, creates or updates `gymtrack_oauth_consents`, stores a hashed authorization code, and returns the client redirect URL.
 
+### Sign-up email verification
+
+Creating an account is a two-step flow whenever the identity provider requires the new email address to be verified. The browser contract is provider-agnostic and lives in `apps/gymtrack/src/lib/authContext.jsx`; both providers implement it.
+
+- `signUp(email, password) -> { data, error }` returns `data.needsVerification === true` when the account was created but no session was issued. `data.verificationMode` names the mechanism (`'signup_email_code'` for both providers today). When a session is issued immediately, `data.needsVerification === false`.
+- `verifySignUpCode(code) -> { data: { session }, error }` completes the pending sign-up. **The page never supplies the email address** — each provider already owns the pending sign-up attempt — so the view never becomes a second source of truth for it.
+
+| Provider | Where the pending verification lives | How the code is verified |
+|---|---|---|
+| Clerk (`VITE_AUTH_PROVIDER=clerk`, production) | the `signUp` resource — `signUp.verifications` | `signUp.verifications.verifyEmailCode({ code })`, then `signUp.finalize()` |
+| Supabase (`VITE_AUTH_PROVIDER=supabase`, rollback path) | the provider's stored pending sign-up email, consumed with the token | `supabase.auth.verifyOtp({ email, token, type: 'signup' })` |
+
+`verifySignUpCode` is deliberately a separate method from `verifySignInCode`: the sign-in code and the sign-up code live on different provider resources (`signIn` vs `signUp`) and are different OTP types, so one combined method would put a provider-shaped switch in the shared contract.
+
+The code is sent exactly once, at sign-up time (`signUp.verifications.sendEmailCode()` / the provider's own confirmation email). The verification step never re-sends it — a second send would invalidate the code the user already has.
+
 ### OAuth token lifecycle
 
 1. The external client exchanges the authorization code at `POST /oauth/token` with `code_verifier`.
@@ -164,6 +180,7 @@ MCP service (`services/gymtrack-mcp`):
 - **Refresh-token replay** — the family is revoked. The user must reconnect the client through the browser flow.
 - **Missing service-role key** — both legacy REST and MCP OAuth server fail closed; they do not fall back to browser anon auth for server-side routes.
 - **Google sign-in does nothing on click (silent no-op)** — the OAuth click is owned by the shared `useOAuthRedirect()` hook (`apps/gymtrack/src/lib/useOAuthRedirect.js`), which is the single total error boundary for both `/login` and `/signup`. It never rejects, so a provider that throws surfaces as an inline error instead of an unhandled promise rejection; a provider error with an empty or missing `message` is normalised to the fallback copy so the banner always has something to render; a provider that resolves without navigating is caught by a 5-second bounded fallback that tells the user to retry or use email + password. The Google button stays disabled while a redirect is in flight, and starting the email + password flow clears the OAuth error so it cannot linger above the email or verification form. If the button now shows that error, the next question is the Clerk instance, not the app: the Clerk Backend API `GET /v1/oauth_applications` must return a Google OAuth application, with `https://gymtrack.sindustries.co.nz` and `https://gymtrack.sindustries.co.nz/sso-callback` allowlisted as redirect URLs. Google OAuth client credentials are Tom-only, so that wiring is a separate `[openclaw-needed]` escalation, not a code fix.
+- **Sign-up leaves the user at `/workout` and is bounced back to `/login`** — the account was created but no session was issued, so the provider reported `needsVerification` and the page did not render the code-entry step. Check that `signUp` returns `data.needsVerification` (not a boolean the page ignores) and that `SignUpPage` renders the verification block when it is set. The same symptom appears if the code was emailed but the page never asks for it. Note that a *wrong* code is expected to surface as an inline error with the entered credentials preserved — that is the designed behaviour, not this failure.
 - **SSO destination lost after the Clerk round trip** — `sessionStorage` is unavailable (iOS Safari with cookies blocked, some private-browsing states). The helper never throws now, and `/sso-callback` falls back to `/workout` instead of the requested protected route. Losing the destination is the accepted degradation; the sign-in itself still completes.
 
 ### Manual checks after deploy
