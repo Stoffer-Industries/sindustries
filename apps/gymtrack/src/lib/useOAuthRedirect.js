@@ -43,6 +43,23 @@ function fallbackErrorMessage(provider) {
 }
 
 /**
+ * Normalise a provider error into something that is guaranteed to render.
+ *
+ * The provider SDKs can reject with an error object that carries a `code`
+ * but no usable `message` (or an empty one). Storing that object verbatim
+ * left the pages with `error.message` falsy, so the error banner never
+ * rendered — the exact "click does nothing" symptom this hook exists to
+ * remove. Every provider failure therefore carries a non-empty message
+ * from this point on.
+ */
+function normaliseProviderError(provider, providerError) {
+  const message =
+    typeof providerError?.message === 'string' ? providerError.message.trim() : '';
+  if (message) return providerError;
+  return new Error(fallbackErrorMessage(provider));
+}
+
+/**
  * Shared OAuth click contract for the sign-in and sign-up pages.
  *
  * `useAuth().startOAuthRedirect` is provider-agnostic, but its failure modes
@@ -57,10 +74,18 @@ function fallbackErrorMessage(provider) {
  *   - `providerDisabled` — the provider is not configured; the page removes
  *     the button and shows the "not available" message.
  *   - `error` — the provider refused or threw; the page shows the message.
+ *     The message is always non-empty: a provider error without a usable
+ *     `message` is normalised to the fallback copy rather than rendering
+ *     nothing.
  *   - `redirecting` — the provider accepted the request and the browser is
  *     navigating. If the page has still not navigated after
  *     `OAUTH_REDIRECT_FALLBACK_MS`, the hook surfaces an actionable error
  *     so the outcome is never silent.
+ *
+ * `clearError()` abandons the OAuth attempt: it drops any pending fallback
+ * timer and resets the error and redirecting state. The pages call it when
+ * the user switches to the email flow, so a stale OAuth error can never
+ * outlive the click that produced it.
  */
 export function useOAuthRedirect() {
   const { startOAuthRedirect } = useAuth();
@@ -90,6 +115,20 @@ export function useOAuthRedirect() {
     }
   }, []);
 
+  /**
+   * Abandon the current OAuth attempt and clear everything it surfaces.
+   *
+   * Called by the pages when the user starts the email + password flow:
+   * without it, an OAuth error stayed on screen above the email form (and
+   * above the verification form) because the pages only cleared their own
+   * local error state.
+   */
+  const clearError = useCallback(() => {
+    clearFallbackTimer();
+    setError(null);
+    setRedirecting(false);
+  }, [clearFallbackTimer]);
+
   const startOAuth = useCallback(
     async (provider, redirectPath = '/workout') => {
       clearFallbackTimer();
@@ -114,11 +153,14 @@ export function useOAuthRedirect() {
         }
 
         if (providerError) {
+          // A provider error without a usable message would render nothing,
+          // so it is normalised before it becomes the displayed error.
+          const failure = normaliseProviderError(provider, providerError);
           if (mountedRef.current) {
-            setError(providerError);
+            setError(failure);
             setPending(false);
           }
-          return { data, error: providerError, providerDisabled: false, redirecting: false };
+          return { data, error: failure, providerDisabled: false, redirecting: false };
         }
 
         if (mountedRef.current) {
@@ -147,5 +189,5 @@ export function useOAuthRedirect() {
     [startOAuthRedirect, clearFallbackTimer]
   );
 
-  return { startOAuth, pending, error, providerDisabled, redirecting, provider };
+  return { startOAuth, clearError, pending, error, providerDisabled, redirecting, provider };
 }

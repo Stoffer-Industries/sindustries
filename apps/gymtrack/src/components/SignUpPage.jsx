@@ -38,6 +38,7 @@ export default function SignUpPage() {
   const { session, signUp } = useAuth();
   const {
     startOAuth,
+    clearError: clearOAuthError,
     pending: oauthPending,
     error: oauthError,
     redirecting,
@@ -73,11 +74,16 @@ export default function SignUpPage() {
       // Mark this provider as disabled in the UI by removing it from the
       // available list so the button disappears on re-render.
       setAvailableProviders((prev) => prev.filter((p) => p !== provider));
-      setError(`Sign-up with ${provider} is not available right now. Try another option.`);
+      setError(
+        `Sign-up with ${oauthProviderLabel(provider)} is not available right now. Try another option.`
+      );
       return;
     }
     if (result.error) {
-      setError(result.error.message);
+      // The hook owns the provider error and already guarantees a non-empty
+      // message, so it is not duplicated into the page-local error state.
+      // Keeping the two sources exclusive is what stops a stale OAuth
+      // error from shadowing — or outliving — the email flow.
       return;
     }
     if (result.data?.url) {
@@ -89,6 +95,9 @@ export default function SignUpPage() {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    // The email flow owns the screen from here: drop any OAuth error so it
+    // cannot flash above the email panel.
+    clearOAuthError();
     const { error: signUpError } = await signUp(email, password);
     setSubmitting(false);
     if (signUpError) {
@@ -117,7 +126,7 @@ export default function SignUpPage() {
             type="button"
             className="btn-primary oauth-google"
             onClick={() => handleOAuth('google')}
-            disabled={oauthPending}
+            disabled={oauthPending || redirecting}
             data-testid="signup-google"
           >
             Continue with Google
@@ -129,7 +138,7 @@ export default function SignUpPage() {
             type="button"
             className="btn-primary oauth-apple"
             onClick={() => handleOAuth('apple')}
-            disabled={oauthPending}
+            disabled={oauthPending || redirecting}
             data-testid="signup-apple"
           >
             Continue with Apple

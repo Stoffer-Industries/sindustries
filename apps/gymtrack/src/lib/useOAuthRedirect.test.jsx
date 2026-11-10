@@ -62,6 +62,49 @@ describe('useOAuthRedirect', () => {
     expect(hook.redirecting).toBe(false);
   });
 
+  it('replaces a provider error with an empty message with a visible fallback', async () => {
+    const providerError = { code: 'oauth_failed', message: '' };
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: null,
+      error: providerError,
+      providerDisabled: false
+    });
+    render(<Harness />);
+
+    let result;
+    await act(async () => {
+      result = await hook.startOAuth('google', '/workout');
+    });
+
+    expect(result.error).toBeInstanceOf(Error);
+    expect(result.error.message).toBe(
+      'Could not start Google sign-in. Try again, or use email + password instead.'
+    );
+    expect(hook.error).toBe(result.error);
+    expect(hook.redirecting).toBe(false);
+  });
+
+  it('replaces a provider error with no message at all with a visible fallback', async () => {
+    const providerError = { code: 'oauth_failed' };
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: null,
+      error: providerError,
+      providerDisabled: false
+    });
+    render(<Harness />);
+
+    let result;
+    await act(async () => {
+      result = await hook.startOAuth('google', '/workout');
+    });
+
+    expect(result.error).toBeInstanceOf(Error);
+    expect(result.error.message).toBe(
+      'Could not start Google sign-in. Try again, or use email + password instead.'
+    );
+    expect(hook.error).toBe(result.error);
+  });
+
   it('preserves the providerDisabled signal', async () => {
     mockStartOAuthRedirect.mockResolvedValue({
       data: null,
@@ -107,6 +150,52 @@ describe('useOAuthRedirect', () => {
     expect(hook.error.message).toBe(
       'Could not start Google sign-in. Try again, or use email + password instead.'
     );
+  });
+
+  it('clearError drops the error and resets the redirecting state', async () => {
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: null,
+      error: new Error('OAuth redirect failed.'),
+      providerDisabled: false
+    });
+    render(<Harness />);
+
+    await act(async () => {
+      await hook.startOAuth('google', '/workout');
+    });
+    expect(hook.error).toBeInstanceOf(Error);
+
+    await act(async () => {
+      hook.clearError();
+    });
+
+    expect(hook.error).toBeNull();
+    expect(hook.redirecting).toBe(false);
+  });
+
+  it('clearError abandons a pending fallback so it cannot fire over the email flow', async () => {
+    vi.useFakeTimers();
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: { provider: 'google', redirecting: true },
+      error: null,
+      providerDisabled: false
+    });
+    render(<Harness />);
+
+    await act(async () => {
+      await hook.startOAuth('google', '/workout');
+    });
+    expect(hook.redirecting).toBe(true);
+
+    await act(async () => {
+      hook.clearError();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(OAUTH_REDIRECT_FALLBACK_MS + 1000);
+    });
+
+    expect(hook.error).toBeNull();
+    expect(hook.redirecting).toBe(false);
   });
 
   it('clears the fallback timer when a new attempt starts', async () => {
