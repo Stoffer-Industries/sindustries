@@ -35,7 +35,7 @@ const INITIAL_AVAILABLE_PROVIDERS = SUPPORTED_OAUTH_PROVIDERS.filter(
  * already exists; an empty-history state is rendered for fresh users.
  */
 export default function SignUpPage() {
-  const { session, signUp } = useAuth();
+  const { session, signUp, verifySignUpCode } = useAuth();
   const {
     startOAuth,
     clearError: clearOAuthError,
@@ -59,6 +59,15 @@ export default function SignUpPage() {
   const [availableProviders, setAvailableProviders] = useState(
     INITIAL_AVAILABLE_PROVIDERS
   );
+  // Verification step state (task 6e9410d5). `verificationMode` is null until
+  // the provider reports that the new account needs its email address
+  // verified; `verificationCode` is the code the user typed. Both live here
+  // so a failed verification can be retried without losing the address and
+  // password the user already entered (AC3).
+  const [verificationMode, setVerificationMode] = useState(null);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verificationError, setVerificationError] = useState(null);
+  const [verifying, setVerifying] = useState(false);
 
   if (session) {
     return <Navigate to={from} replace />;
@@ -98,10 +107,35 @@ export default function SignUpPage() {
     // The email flow owns the screen from here: drop any OAuth error so it
     // cannot flash above the email panel.
     clearOAuthError();
-    const { error: signUpError } = await signUp(email, password);
+    const { data, error: signUpError } = await signUp(email, password);
     setSubmitting(false);
     if (signUpError) {
       setError(signUpError.message);
+      return;
+    }
+    // The account was created but the address is not verified yet, so no
+    // session exists. Rendering the code-entry step is the only way the
+    // user can finish signing up — navigating to a protected route here
+    // bounced them straight back to /login (task 6e9410d5).
+    if (data?.needsVerification) {
+      setVerificationMode(data.verificationMode ?? 'signup_email_code');
+      setVerificationError(null);
+      return;
+    }
+    navigate(from, { replace: true });
+  }
+
+  async function handleVerifySubmit(e) {
+    e.preventDefault();
+    setVerifying(true);
+    setVerificationError(null);
+    const { error: verificationError } = await verifySignUpCode(verificationCode);
+    setVerifying(false);
+    if (verificationError) {
+      // The entered address, password and code all stay put so the user can
+      // correct a mistyped or expired code without retyping everything
+      // (AC3).
+      setVerificationError(verificationError.message);
       return;
     }
     navigate(from, { replace: true });
@@ -162,46 +196,104 @@ export default function SignUpPage() {
       ) : null}
 
       {emailPanelOpen ? (
-        <form onSubmit={handleSubmit} className="signup-form" data-testid="signup-form">
-          <label className="form-row">
-            <span>Email</span>
-            <input
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              data-testid="signup-email"
-            />
-          </label>
-          <label className="form-row">
-            <span>Password</span>
-            <input
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              data-testid="signup-password"
-            />
-          </label>
+        <>
+          <form onSubmit={handleSubmit} className="signup-form" data-testid="signup-form">
+            <label className="form-row">
+              <span>Email</span>
+              <input
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                data-testid="signup-email"
+              />
+            </label>
+            <label className="form-row">
+              <span>Password</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                data-testid="signup-password"
+              />
+            </label>
 
-          {/* Clerk mounts its bot-protection challenge at this stable DOM id
-              for custom sign-up flows. */}
-          <div id="clerk-captcha" data-testid="signup-captcha" />
+            {/* Clerk mounts its bot-protection challenge at this stable DOM id
+                for custom sign-up flows. */}
+            <div id="clerk-captcha" data-testid="signup-captcha" />
 
-          <div className="btn-row">
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={submitting}
-              data-testid="signup-submit"
+            <div className="btn-row">
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={submitting || verificationMode != null}
+                data-testid="signup-submit"
+              >
+                {submitting
+                  ? 'Creating account…'
+                  : verificationMode
+                    ? 'Verification pending'
+                    : 'Create account'}
+              </button>
+            </div>
+          </form>
+
+          {/* The verification step. Rendered BELOW the sign-up form rather
+              than replacing it: the address and password the user already
+              entered must survive a failed code so a mistyped or expired
+              code can be corrected and retried without retyping them (AC3).
+              The Create-account button above stays disabled and relabelled
+              while this step is showing, so the account is not created a
+              second time. */}
+          {verificationMode ? (
+            <form
+              onSubmit={handleVerifySubmit}
+              className="signup-form"
+              data-testid="signup-verification-form"
             >
-              {submitting ? 'Creating account…' : 'Create account'}
-            </button>
-          </div>
-        </form>
+              <p>
+                We emailed you a verification code to confirm this address. Enter the
+                code to finish creating your account.
+              </p>
+              <label className="form-row">
+                <span>Verification code</span>
+                <input
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value)}
+                  data-testid="signup-verification-code"
+                />
+              </label>
+
+              {verificationError ? (
+                <div
+                  className="status show error"
+                  role="alert"
+                  data-testid="signup-verification-error"
+                >
+                  {verificationError}
+                </div>
+              ) : null}
+
+              <div className="btn-row">
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={verifying}
+                  data-testid="signup-verify-submit"
+                >
+                  {verifying ? 'Verifying…' : 'Verify and create account'}
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </>
       ) : (
         <button
           type="button"
