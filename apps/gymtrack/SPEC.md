@@ -68,6 +68,7 @@ References: task `bb09eaed` (Migrate GymTrack identity from Supabase Auth to Cle
 3. A collapsed "Use email + password instead" panel reveals the fallback form.
 4. On success, Supabase creates the user and the visitor is redirected to `/workout` or to the originally intended protected destination.
 5. Errors render inline and the buttons re-enable for retry.
+6. Clicking the Google CTA either redirects to Google's consent screen or shows a visible inline error — it never fails silently. The OAuth click is owned by the shared `useOAuthRedirect()` hook (`apps/gymtrack/src/lib/useOAuthRedirect.js`), which both `/login` and `/signup` consume, so the two pages behave identically. While the redirect is in flight the page shows "Redirecting to Google…"; if the provider accepts the request but the browser has not navigated after 5 seconds, the hook surfaces "Could not start Google sign-in. Try again, or use email + password instead." Errors render outside the collapsed email panel, so an OAuth failure is visible on the default (panel-collapsed) view.
 
 ### Sign in
 
@@ -76,6 +77,7 @@ References: task `bb09eaed` (Migrate GymTrack identity from Supabase Auth to Cle
 3. If Clerk reports that the account has no password factor but does support `email_code`, GymTrack sends a one-time email code and asks the user to enter it; the entered password is not submitted to Clerk.
 4. On success → redirect to `/workout` or back to the protected destination that triggered the redirect.
 5. On error → inline error banner; controls re-enable.
+6. The Google CTA follows the same contract as sign-up: redirect or visible inline error, never a silent no-op (shared `useOAuthRedirect()` hook, 5-second bounded fallback, "Redirecting to Google…" status while in flight).
 
 ### Connect and authorize an external MCP client
 
@@ -150,8 +152,8 @@ References: task `bb09eaed` (Migrate GymTrack identity from Supabase Auth to Cle
 | Route | Component | Notes |
 |---|---|---|
 | `/` | redirect | → `/workout` if signed in, else `/login`. |
-| `/login` | `LoginScreen` | Email/password form plus Google CTA when available; preserves protected-route destination, selects only factors Clerk supports for the account, and handles first-factor and client-trust email codes. |
-| `/signup` | `SignUpPage` | Public sign-up — Google CTA + collapsed email/password panel. |
+| `/login` | `LoginScreen` | Email/password form plus Google CTA when available; preserves protected-route destination, selects only factors Clerk supports for the account, and handles first-factor and client-trust email codes. The Google CTA is a total error boundary (shared `useOAuthRedirect()` hook): redirect or visible inline error, never a silent no-op. |
+| `/signup` | `SignUpPage` | Public sign-up — Google CTA + collapsed email/password panel. Errors render outside the collapsed panel so an OAuth failure is always visible. |
 | `/sso-callback` | Clerk `HandleSSOCallback` | Public continuation route for Google SSO when Clerk needs another sign-in or sign-up step. |
 | `/agent-consent` | `AgentConsentPage` | Protected consent review screen for external MCP clients. |
 | `/workout` | `WorkoutLogger` | Date picker + exercise picker + pending sets; accepts `?date=YYYY-MM-DD`. |

@@ -163,11 +163,14 @@ MCP service (`services/gymtrack-mcp`):
 - **Consent appears revoked but a client still holds a token** — expected: the client may still possess the old plaintext token, but MCP requests fail because the service checks `consent.revoked_at` at request time.
 - **Refresh-token replay** — the family is revoked. The user must reconnect the client through the browser flow.
 - **Missing service-role key** — both legacy REST and MCP OAuth server fail closed; they do not fall back to browser anon auth for server-side routes.
+- **Google sign-in does nothing on click (silent no-op)** — the OAuth click is owned by the shared `useOAuthRedirect()` hook (`apps/gymtrack/src/lib/useOAuthRedirect.js`), which is the single total error boundary for both `/login` and `/signup`. It never rejects, so a provider that throws surfaces as an inline error instead of an unhandled promise rejection; a provider that resolves without navigating is caught by a 5-second bounded fallback that tells the user to retry or use email + password. If the button now shows that error, the next question is the Clerk instance, not the app: the Clerk Backend API `GET /v1/oauth_applications` must return a Google OAuth application, with `https://gymtrack.sindustries.co.nz` and `https://gymtrack.sindustries.co.nz/sso-callback` allowlisted as redirect URLs. Google OAuth client credentials are Tom-only, so that wiring is a separate `[openclaw-needed]` escalation, not a code fix.
+- **SSO destination lost after the Clerk round trip** — `sessionStorage` is unavailable (iOS Safari with cookies blocked, some private-browsing states). The helper never throws now, and `/sso-callback` falls back to `/workout` instead of the requested protected route. Losing the destination is the accepted degradation; the sign-in itself still completes.
 
 ### Manual checks after deploy
 
 1. Hit `GET /.well-known/oauth-authorization-server` and confirm issuer + endpoints are correct.
 2. Start an OAuth flow from a registered client and confirm `/agent-consent` loads with the expected scopes.
+3. On a fresh iOS Safari session, open `/login`, tap "Continue with Google", and confirm the Google consent screen appears. If the page instead shows "Could not start Google sign-in…" or a Clerk error, the app is behaving correctly (no silent no-op) and the Clerk OAuth application / redirect allowlist is missing.
 3. Approve, exchange the code, call `tools/list`, then revoke from `/settings/agents` and verify the same token stops working.
 4. Re-run the three legacy REST curl examples from `apps/gymtrack/README.md` with an existing static key.
 5. In a fresh Safari/WebKit context, verify both a password-enabled account and an account without a password reach the correct code/session state without `strategy_for_user_invalid`.
