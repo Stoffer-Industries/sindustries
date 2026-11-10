@@ -8,7 +8,8 @@ export default defineConfig({
       'test/db-integration.test.ts',
       'test/taskAttentionOwnersPositionMove.test.ts',
       'test/dedupeAttentionOwnersScript.test.ts',
-      'test/featureTaskAnalyticsBudget.integration.test.ts'
+      'test/featureTaskAnalyticsBudget.integration.test.ts',
+      'test/schemaPreflight.integration.test.ts'
     ],
     setupFiles: ['./test/setup.ts']
   }
