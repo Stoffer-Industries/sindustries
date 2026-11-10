@@ -1201,6 +1201,24 @@ class IdentityDegradeTest(unittest.TestCase):
     def setUp(self) -> None:
         agent_task_queue._VERBOSE = False
         agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+        github_cli._reset_credential_cache_for_tests()
+        self.addCleanup(github_cli._reset_credential_cache_for_tests)
+        # These tests exercise the queue's hydration/degradation paths, not
+        # credential discovery. Keep them hermetic: CI has no agent keyring,
+        # while a developer workstation may have one. The shared resolver has
+        # its own dedicated unit suite in agents/lib.
+        self._credential_patcher = patch.object(
+            agent_task_queue,
+            "resolve_gh_credentials",
+            return_value=github_cli.GhCredentials(
+                source="keyring",
+                token=None,
+                login="rowanstoffer",
+                reason=None,
+            ),
+        )
+        self._credential_patcher.start()
+        self.addCleanup(self._credential_patcher.stop)
 
     def tearDown(self) -> None:
         agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
@@ -1491,6 +1509,23 @@ class MultiRepoScanTest(unittest.TestCase):
         agent_task_queue._VERBOSE = False
         agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
         agent_task_queue._REPO_COVERAGE = {}
+        github_cli._reset_credential_cache_for_tests()
+        self.addCleanup(github_cli._reset_credential_cache_for_tests)
+        # Multi-repo projection is independent of which credential is
+        # available. Stub the shared resolver so this suite exercises only
+        # the repository fan-out and cannot depend on a workstation keyring.
+        self._credential_patcher = patch.object(
+            agent_task_queue,
+            "resolve_gh_credentials",
+            return_value=github_cli.GhCredentials(
+                source="keyring",
+                token=None,
+                login="rowanstoffer",
+                reason=None,
+            ),
+        )
+        self._credential_patcher.start()
+        self.addCleanup(self._credential_patcher.stop)
 
     def tearDown(self) -> None:
         agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
