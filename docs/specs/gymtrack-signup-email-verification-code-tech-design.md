@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 6e9410d5-7c02-41ae-846d-b655c1947d46
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 964
+shipped_date: 2026-11-10
 ---
 
 # GymTrack Sign-Up — Email Verification Code Step — Tech Design
