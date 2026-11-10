@@ -75,14 +75,51 @@ function rateLimit(token) {
 
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const BEARER_PATTERN = /Bearer\s+[A-Za-z0-9._-]+/gi;
-const PASSWORD_PATTERN = /password[=:]\s*\S+/gi;
+const BASIC_AUTH_PATTERN = /Basic\s+[A-Za-z0-9+/=]+/gi;
+// The key may be QUOTED — a JSON envelope spells it `"password":"…"`,
+// and the closing quote sits between the key and the separator. A
+// pattern that expects `password:` or `password=` therefore never
+// matches the JSON form, which is the form most error envelopes
+// actually use.
+const PASSWORD_PATTERN = /(password["']?\s*[=:]\s*["']?)[^"'\s,;&}\]]*/gi;
+// Session cookies / tokens and CAPTCHA payloads, in `key=value`,
+// `key: value` and JSON-quoted form. The value stops at a quote or
+// whitespace so only the secret is replaced, not the surrounding text.
+const SESSION_TOKEN_PATTERN =
+  /((?:__session|session[_-]?token|sb-access-token|refresh[_-]?token|captcha[_-]?(?:token|response))["']?\s*[=:]\s*["']?)[^"'\s,;&}\]]*/gi;
+// A whole Set-Cookie header line — the cookies inside it are secrets
+// too, so the line is replaced rather than parsed.
+const SET_COOKIE_PATTERN = /Set-Cookie:\s*[^\n]*/gi;
 
+// The shared sentinel for "this optional field is not present". Every
+// optional context field (`provider`, `errorCode`, `status`, `source`)
+// uses it, so the log body and the stream labels can never spell
+// "absent" three different ways.
+const NONE_SENTINEL = 'none';
+
+/**
+ * Redact credential-shaped substrings from a free-text field.
+ *
+ * This is the AUTHORITATIVE redaction layer: the browser bundle also
+ * redacts, but that pass is best-effort and uses a narrower pattern
+ * set. Nothing leaves this relay to the hosted Grafana tenant without
+ * passing through here, so the patterns below are the boundary that
+ * has to hold.
+ *
+ * Covered: email addresses, `Bearer …` and `Basic …` authorization
+ * values, quoted or unquoted password fields, Clerk session cookies /
+ * tokens, Supabase access tokens, CAPTCHA tokens and responses, and
+ * whole `Set-Cookie:` header lines.
+ */
 function redactString(input) {
   if (typeof input !== 'string') return null;
   return input
     .replace(EMAIL_PATTERN, '[redacted-email]')
     .replace(BEARER_PATTERN, 'Bearer [redacted]')
-    .replace(PASSWORD_PATTERN, 'password=[redacted]');
+    .replace(BASIC_AUTH_PATTERN, 'Basic [redacted]')
+    .replace(SET_COOKIE_PATTERN, 'Set-Cookie: [redacted]')
+    .replace(SESSION_TOKEN_PATTERN, '$1[redacted]')
+    .replace(PASSWORD_PATTERN, '$1[redacted]');
 }
 
 function truncate(input, max) {
@@ -96,14 +133,17 @@ function reRedactPayload(payload) {
     release: truncate(payload.release, 64) ?? '',
     route: truncate(payload.route, 128) ?? '',
     operation: truncate(payload.operation, 64) ?? '',
-    provider: typeof payload.provider === 'string' ? payload.provider.slice(0, 32) : null,
-    errorCode: truncate(payload.errorCode, 64) ?? null,
-    status: truncate(payload.status, 32) ?? null,
+    // The context fields are copied verbatim by the producer, so they
+    // are redacted here too: an error code or provider name that
+    // carries an email or a token must not reach the tenant unredacted.
+    provider: truncate(redactString(payload.provider ?? ''), 32) || null,
+    errorCode: truncate(redactString(payload.errorCode ?? ''), 64) || null,
+    status: truncate(redactString(payload.status ?? ''), 32) || null,
     message: truncate(redactString(payload.message ?? ''), 200),
     stack: truncate(redactString(payload.stack ?? ''), 1024),
     userAgent: truncate(payload.userAgent, 256) ?? '',
     timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : new Date().toISOString(),
-    source: typeof payload.source === 'string' ? payload.source.slice(0, 32) : 'browser'
+    source: typeof payload.source === 'string' ? payload.source.slice(0, 32) : NONE_SENTINEL
   };
 }
 
@@ -328,6 +368,22 @@ export function otlpEndpoint() {
 }
 
 /**
+ * Collapse an absent OR EMPTY optional field to the shared 'none'
+ * sentinel.
+ *
+ * `truncate('')` returns `''`, not `null`, so an empty string used to
+ * reach the transport as `errorCode=""` — a third spelling for "not
+ * present" that the dashboard panels would have had to special-case.
+ * Empty collapses to the same sentinel the missing-value case uses, so
+ * the body and the labels keep agreeing.
+ */
+function noneIfEmpty(value) {
+  if (value === null || value === undefined) return NONE_SENTINEL;
+  if (typeof value === 'string' && value.trim() === '') return NONE_SENTINEL;
+  return value;
+}
+
+/**
  * Normalize the optional context fields to the same sentinel the stream
  * labels use ('none').
  *
@@ -337,14 +393,19 @@ export function otlpEndpoint() {
  * `"errorCode": null` while the label said `errorCode="none"` would
  * give an operator two different answers for the same event depending
  * on which surface they queried.
+ *
+ * `source` is the EVENT source (`auth`, `window.error`,
+ * `unhandledrejection`). It uses the same 'none' sentinel as its
+ * siblings when it is absent — it is never the literal string
+ * `browser`, which is not an event source and matches no real event.
  */
 function normalizedEvent(sanitized) {
   return {
     ...sanitized,
-    provider: sanitized.provider ?? 'none',
-    errorCode: sanitized.errorCode ?? 'none',
-    status: sanitized.status ?? 'none',
-    source: sanitized.source ?? 'browser'
+    provider: noneIfEmpty(sanitized.provider),
+    errorCode: noneIfEmpty(sanitized.errorCode),
+    status: noneIfEmpty(sanitized.status),
+    source: noneIfEmpty(sanitized.source)
   };
 }
 
@@ -365,19 +426,27 @@ function normalizedEvent(sanitized) {
  * aggregations — a silent degradation that reads as "no errors
  * happened" rather than "the labels are in the wrong place".
  *
- * `service.name` / `service_name` (live production evidence, Quinn,
- * 2026-11-10, on the hosted Grafana Cloud tenant): the tenant indexes
- * `service_name` and nothing else reliably. Events pushed without a
- * service name landed under `service_name="unknown_service"`, and the
- * documented operator selector `{app="gymtrack", source="browser"}`
- * matched nothing — partly because `source` is the EVENT source
- * (`auth`, `window.error`, `unhandledrejection`), never the literal
- * string `browser`, and partly because `app` was not usable as an
- * indexed selector on that tenant. `service.name` is the OpenTelemetry
- * semantic convention for the service identity and is what Grafana
- * Cloud promotes to the indexed `service_name` label; the literal
- * `service_name` resource attribute keeps the contract intact on
- * tenants that promote resource attributes verbatim.
+ * `service.name` (live production evidence, Quinn, 2026-11-10, on the
+ * hosted Grafana Cloud tenant): the tenant indexes `service_name` and
+ * nothing else reliably. Events pushed without a service name landed
+ * under `service_name="unknown_service"`, and the documented operator
+ * selector `{app="gymtrack", source="browser"}` matched nothing —
+ * partly because `source` is the EVENT source (`auth`, `window.error`,
+ * `unhandledrejection`), never the literal string `browser`, and
+ * partly because `app` was not usable as an indexed selector on that
+ * tenant. `service.name` is the OpenTelemetry semantic convention for
+ * the service identity, and it is what Grafana Cloud's default
+ * `default_resource_attributes_as_index_labels` promotes to the
+ * indexed `service_name` label (Loki rewrites the dot).
+ *
+ * The relay deliberately does NOT also emit a literal `service_name`
+ * resource attribute. That attribute is not in the tenant's default
+ * promotion list, so it lands in structured metadata where no stream
+ * selector can match it — it is inert on the hosted tenant, and it
+ * would become a duplicate-label hazard if an operator ever widened
+ * the promotion list to cover every resource attribute. The Loki push
+ * path is unaffected: there `service_name` is the literal stream-label
+ * NAME the push API accepts, not a resource attribute.
  *
  * The log record body carries the sanitized event as a JSON string so
  * the browser-side redaction / allow-list / dedupe contract survives
@@ -390,7 +459,6 @@ export function buildOtlpLogsPayload(sanitized) {
   const event = normalizedEvent(sanitized);
   const resourceAttributes = [
     { key: 'service.name', value: { stringValue: 'gymtrack' } },
-    { key: 'service_name', value: { stringValue: 'gymtrack' } },
     { key: 'app', value: { stringValue: 'gymtrack' } },
     { key: 'source', value: { stringValue: event.source } },
     { key: 'environment', value: { stringValue: event.environment } },

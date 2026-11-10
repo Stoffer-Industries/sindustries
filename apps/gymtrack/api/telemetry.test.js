@@ -70,7 +70,7 @@ const validPayload = {
   stack: 'Error: bad\n  at signIn (app.js:1:1)',
   userAgent: 'vitest',
   timestamp: '2026-10-20T00:00:00.000Z',
-  source: 'browser'
+  source: 'auth'
 };
 
 async function post(overrides = {}, body = '') {
@@ -296,7 +296,7 @@ describe('telemetry relay', () => {
       expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).streams).toBeDefined();
     });
 
-    // Constraint #3: the operator query {app="gymtrack", source="browser"}
+    // Constraint #3: the operator query {service_name="gymtrack"}
     // only matches INDEXED stream labels. Loki's OTLP ingestion promotes
     // resource attributes; log-record attributes become structured
     // metadata, which a stream selector cannot match. Pin the shape.
@@ -315,7 +315,7 @@ describe('telemetry relay', () => {
         resourceLog.resource.attributes.map((a) => [a.key, a.value.stringValue])
       );
       expect(byKey.app).toBe('gymtrack');
-      expect(byKey.source).toBe('browser');
+      expect(byKey.source).toBe('auth');
       // Pin it in the negative direction too: nothing on the log record
       // itself may shadow the labels.
       const [record] = resourceLog.scopeLogs[0].logRecords;
@@ -342,7 +342,7 @@ describe('telemetry relay', () => {
       );
       expect(byKey).toMatchObject({
         app: 'gymtrack',
-        source: 'browser',
+        source: 'auth',
         environment: 'production',
         release: 'relay-test',
         route: '/sign-in',
@@ -374,12 +374,16 @@ describe('telemetry relay', () => {
     // Live production evidence (Quinn, 2026-11-10): the hosted Grafana
     // Cloud tenant indexes `service_name` and returned
     // `service_name="unknown_service"` for events pushed without a
-    // service name — the documented `{app="gymtrack", source="browser"}`
-    // selector matched nothing. `service.name` is the OpenTelemetry
-    // semantic convention the tenant promotes to the indexed
-    // `service_name` label; the literal `service_name` resource
-    // attribute covers tenants that promote resource attributes
-    // verbatim.
+    // service name — the documented selector matched nothing.
+    // `service.name` is the OpenTelemetry semantic convention the
+    // tenant promotes to the indexed `service_name` label (Loki
+    // rewrites the dot).
+    //
+    // The literal `service_name` resource attribute is NOT emitted: it
+    // is not in the tenant's default promotion list, so it lands in
+    // structured metadata where no stream selector can match it —
+    // inert on the hosted tenant, and a duplicate-label hazard if an
+    // operator ever widened the promotion list.
     it('emits the service identity so the tenant can index service_name', () => {
       const payload = _testInternals.buildOtlpLogsPayload({
         ...validPayload,
@@ -392,7 +396,7 @@ describe('telemetry relay', () => {
         payload.resourceLogs[0].resource.attributes.map((a) => [a.key, a.value.stringValue])
       );
       expect(byKey['service.name']).toBe('gymtrack');
-      expect(byKey.service_name).toBe('gymtrack');
+      expect(Object.keys(byKey)).not.toContain('service_name');
     });
 
     // The dashboard reads the per-event fields out of the JSON body with
@@ -419,12 +423,48 @@ describe('telemetry relay', () => {
       expect(body.errorCode).toBe(byKey.errorCode);
       expect(body.status).toBe(byKey.status);
       expect(body.errorCode).toBe('none');
+      expect(body.source).toBe(byKey.source);
+      expect(body.source).toBe('auth');
+    });
+
+    // `source` is the EVENT source (`auth`, `window.error`,
+    // `unhandledrejection`). When it is absent — or empty — it uses the
+    // same 'none' sentinel as its siblings. It is never the literal
+    // string `browser`: that value matches no real event, and it is
+    // what the auth panel filters on.
+    it('uses the none sentinel for an absent or empty source', () => {
+      const withoutSource = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        source: undefined
+      });
+      const withoutSourceByKey = Object.fromEntries(
+        withoutSource.resourceLogs[0].resource.attributes.map((a) => [
+          a.key,
+          a.value.stringValue
+        ])
+      );
+      const [withoutSourceRecord] = withoutSource.resourceLogs[0].scopeLogs[0].logRecords;
+      const withoutSourceBody = JSON.parse(withoutSourceRecord.body.stringValue);
+      expect(withoutSourceByKey.source).toBe('none');
+      expect(withoutSourceBody.source).toBe('none');
+
+      const emptySource = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        source: ''
+      });
+      const emptySourceByKey = Object.fromEntries(
+        emptySource.resourceLogs[0].resource.attributes.map((a) => [
+          a.key,
+          a.value.stringValue
+        ])
+      );
+      expect(emptySourceByKey.source).toBe('none');
     });
 
     it('keeps the sanitized event in the log record body', () => {
       const payload = _testInternals.buildOtlpLogsPayload({
         ...validPayload,
-        source: 'browser',
+        source: 'auth',
         environment: 'production',
         release: 'relay-test',
         route: '/sign-in',
@@ -552,7 +592,7 @@ describe('telemetry relay', () => {
       expect(stream.stream).toMatchObject({
         service_name: 'gymtrack',
         app: 'gymtrack',
-        source: 'browser',
+        source: 'auth',
         environment: 'production',
         route: '/sign-in',
         operation: 'signin'
@@ -572,6 +612,28 @@ describe('telemetry relay', () => {
         operation: 'unknown'
       });
       expect(payload.streams[0].stream.source).toBe('window.error');
+    });
+
+    // The body and the stream labels must agree on BOTH transports: the
+    // dashboard reads the per-event fields out of the body, so a body
+    // that spells "absent" differently from the label gives an operator
+    // two answers for the same event.
+    it('keeps the Loki push body and the stream labels in agreement', () => {
+      const payload = _testInternals.buildLokiPayload({
+        ...validPayload,
+        provider: null,
+        errorCode: null,
+        status: null,
+        source: ''
+      });
+      const [stream] = payload.streams;
+      const body = JSON.parse(stream.values[0][1]);
+      expect(body.source).toBe(stream.stream.source);
+      expect(stream.stream.source).toBe('none');
+      expect(body.provider).toBe(stream.stream.provider);
+      expect(stream.stream.provider).toBe('none');
+      expect(body.errorCode).toBe(stream.stream.errorCode);
+      expect(stream.stream.errorCode).toBe('none');
     });
 
     it('returns 204 when the relay is not configured, without calling upstream', async () => {
@@ -684,6 +746,70 @@ describe('telemetry relay', () => {
       expect(init.body).toContain('password=[redacted]');
       expect(init.body).not.toContain('abc.def.ghi');
       expect(init.body).not.toContain('hunter2');
+    });
+
+    // AC2 names session tokens, authorization headers and CAPTCHA
+    // payloads explicitly. The relay's re-redact pass is the
+    // AUTHORITATIVE boundary — the browser-side pass is best-effort —
+    // so each shape gets its own assertion against the forwarded body.
+    it('redacts a QUOTED password field in a JSON error envelope', async () => {
+      // A JSON envelope spells the key `"password":"…"`, so the closing
+      // quote sits between the key and the separator. A pattern that
+      // expects `password:` or `password=` never matches that form.
+      await post(
+        {},
+        JSON.stringify({
+          ...validPayload,
+          message: 'Sign-in failed: {"password":"hunter2"}'
+        })
+      );
+      const [, init] = globalThis.fetch.mock.calls[0];
+      expect(init.body).not.toContain('hunter2');
+      expect(init.body).toContain('[redacted]');
+    });
+
+    it('redacts Clerk session cookies and Supabase access tokens', async () => {
+      await post(
+        {},
+        JSON.stringify({
+          ...validPayload,
+          stack: 'Error: session expired\n__session=CLERKSESSIONVALUE\nsb-access-token=SUPABASETOKENVALUE'
+        })
+      );
+      const [, init] = globalThis.fetch.mock.calls[0];
+      expect(init.body).not.toContain('CLERKSESSIONVALUE');
+      expect(init.body).not.toContain('SUPABASETOKENVALUE');
+    });
+
+    it('redacts CAPTCHA payloads', async () => {
+      await post(
+        {},
+        JSON.stringify({
+          ...validPayload,
+          message: 'Turnstile rejected captcha_response=CAPTCHARESPONSEVALUE'
+        })
+      );
+      const [, init] = globalThis.fetch.mock.calls[0];
+      expect(init.body).not.toContain('CAPTCHARESPONSEVALUE');
+    });
+
+    it('redacts Basic authorization values and whole Set-Cookie headers', async () => {
+      await post(
+        {},
+        JSON.stringify({
+          ...validPayload,
+          stack: 'Authorization: Basic dXNlcjpwYXNzd29yZA==\nSet-Cookie: __session=SESSIONVALUE123; Path=/'
+        })
+      );
+      const [, init] = globalThis.fetch.mock.calls[0];
+      expect(init.body).not.toContain('dXNlcjpwYXNzd29yZA==');
+      expect(init.body).not.toContain('SESSIONVALUE123');
+    });
+
+    it('redacts a credential that arrives in a context field, not in the message', async () => {
+      await post({}, JSON.stringify({ ...validPayload, errorCode: 'foo@bar.com' }));
+      const [, init] = globalThis.fetch.mock.calls[0];
+      expect(init.body).not.toContain('foo@bar.com');
     });
 
     it('drops fields outside the allow-list', async () => {
