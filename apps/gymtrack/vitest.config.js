@@ -17,6 +17,13 @@ export default defineConfig({
     // trust boundary in front of the hosted Grafana credentials, so its
     // token check, rate limit, redaction, and size caps are asserted in
     // `api/telemetry.test.js` under the `node` environment.
-    include: ['src/**/*.test.{js,jsx}', 'api/**/*.test.{js,jsx}']
+    include: [
+      'src/**/*.test.{js,jsx}',
+      'api/**/*.test.{js,jsx}',
+      // The Grafana dashboard ships next to the app it visualizes, and
+      // its LogQL selectors are a contract with the relay — the
+      // dashboard-contract test asserts both halves line up.
+      'grafana/**/*.test.{js,jsx}'
+    ]
   }
 });

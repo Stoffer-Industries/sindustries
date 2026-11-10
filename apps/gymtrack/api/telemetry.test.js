@@ -371,6 +371,56 @@ describe('telemetry relay', () => {
       expect(byKey.source).toBe('auth');
     });
 
+    // Live production evidence (Quinn, 2026-11-10): the hosted Grafana
+    // Cloud tenant indexes `service_name` and returned
+    // `service_name="unknown_service"` for events pushed without a
+    // service name — the documented `{app="gymtrack", source="browser"}`
+    // selector matched nothing. `service.name` is the OpenTelemetry
+    // semantic convention the tenant promotes to the indexed
+    // `service_name` label; the literal `service_name` resource
+    // attribute covers tenants that promote resource attributes
+    // verbatim.
+    it('emits the service identity so the tenant can index service_name', () => {
+      const payload = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        environment: 'production',
+        release: 'relay-test',
+        route: '/sign-in',
+        operation: 'signin'
+      });
+      const byKey = Object.fromEntries(
+        payload.resourceLogs[0].resource.attributes.map((a) => [a.key, a.value.stringValue])
+      );
+      expect(byKey['service.name']).toBe('gymtrack');
+      expect(byKey.service_name).toBe('gymtrack');
+    });
+
+    // The dashboard reads the per-event fields out of the JSON body with
+    // `| json`, so the body and the labels must not disagree: a body
+    // carrying `"errorCode": null` next to an `errorCode="none"` label
+    // gives an operator two answers for the same event.
+    it('keeps the log body and the resource labels in agreement', () => {
+      const payload = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        environment: 'production',
+        release: 'relay-test',
+        route: '/sign-in',
+        operation: 'signin',
+        provider: null,
+        errorCode: null,
+        status: null
+      });
+      const byKey = Object.fromEntries(
+        payload.resourceLogs[0].resource.attributes.map((a) => [a.key, a.value.stringValue])
+      );
+      const [record] = payload.resourceLogs[0].scopeLogs[0].logRecords;
+      const body = JSON.parse(record.body.stringValue);
+      expect(body.provider).toBe(byKey.provider);
+      expect(body.errorCode).toBe(byKey.errorCode);
+      expect(body.status).toBe(byKey.status);
+      expect(body.errorCode).toBe('none');
+    });
+
     it('keeps the sanitized event in the log record body', () => {
       const payload = _testInternals.buildOtlpLogsPayload({
         ...validPayload,
@@ -500,12 +550,28 @@ describe('telemetry relay', () => {
       const [, init] = globalThis.fetch.mock.calls[0];
       const [stream] = JSON.parse(init.body).streams;
       expect(stream.stream).toMatchObject({
+        service_name: 'gymtrack',
         app: 'gymtrack',
         source: 'browser',
         environment: 'production',
         route: '/sign-in',
         operation: 'signin'
       });
+    });
+
+    // The Loki push path used to hardcode `source: 'browser'` while the
+    // OTLP path carried the real event source, so the two transports
+    // disagreed about the same event.
+    it('carries the real event source through on the Loki push path too', () => {
+      const payload = _testInternals.buildLokiPayload({
+        ...validPayload,
+        source: 'window.error',
+        environment: 'production',
+        release: 'relay-test',
+        route: '/login',
+        operation: 'unknown'
+      });
+      expect(payload.streams[0].stream.source).toBe('window.error');
     });
 
     it('returns 204 when the relay is not configured, without calling upstream', async () => {
