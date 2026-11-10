@@ -10,6 +10,8 @@ import time
 import unittest
 from unittest.mock import patch
 
+from agents.lib import github_cli
+
 MODULE_PATH = pathlib.Path(__file__).with_name("agent_task_queue.py")
 SPEC = importlib.util.spec_from_file_location("agent_task_queue", MODULE_PATH)
 agent_task_queue = importlib.util.module_from_spec(SPEC)
@@ -991,11 +993,33 @@ class GhApiTimeoutTest(unittest.TestCase):
 
     def setUp(self) -> None:
         agent_task_queue._VERBOSE = False
+        github_cli._reset_credential_cache_for_tests()
+        self.addCleanup(github_cli._reset_credential_cache_for_tests)
+
+    def _usable_credentials(self):
+        """A resolved credential, so `_gh_api` reaches the endpoint call.
+
+        Task a30b8fe6 resolves the credential before the endpoint call. These
+        tests exercise the endpoint path itself (timeout translation, error
+        propagation, proxy stripping), so the credential resolution is
+        stubbed rather than probed.
+        """
+        return github_cli.GhCredentials(
+            source="env-token",
+            token="ghp_stubbedtokenvalue12",
+            login="rowanstoffer",
+            reason=None,
+        )
 
     def test_gh_api_passes_explicit_timeout_to_safe_run(self):
-        with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
-            mock_safe_run.return_value.stdout = "[]"
-            agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+        with patch.object(
+            agent_task_queue,
+            "resolve_gh_credentials",
+            return_value=self._usable_credentials(),
+        ):
+            with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
+                mock_safe_run.return_value.stdout = "[]"
+                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
         self.assertEqual(
             mock_safe_run.call_args.kwargs.get("timeout"),
             agent_task_queue._GH_API_TIMEOUT_SECONDS,
@@ -1007,22 +1031,32 @@ class GhApiTimeoutTest(unittest.TestCase):
     def test_gh_api_translates_timeout_to_sentinel(self):
         with patch.object(
             agent_task_queue,
-            "safe_run",
-            side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=10),
+            "resolve_gh_credentials",
+            return_value=self._usable_credentials(),
         ):
-            with self.assertRaises(agent_task_queue._GhApiTimeout):
-                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+            with patch.object(
+                agent_task_queue,
+                "safe_run",
+                side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=10),
+            ):
+                with self.assertRaises(agent_task_queue._GhApiTimeout):
+                    agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
 
     def test_gh_api_does_not_swallow_called_process_error(self):
         with patch.object(
             agent_task_queue,
-            "safe_run",
-            side_effect=subprocess.CalledProcessError(
-                returncode=1, cmd="gh", stderr="boom"
-            ),
+            "resolve_gh_credentials",
+            return_value=self._usable_credentials(),
         ):
-            with self.assertRaises(subprocess.CalledProcessError):
-                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+            with patch.object(
+                agent_task_queue,
+                "safe_run",
+                side_effect=subprocess.CalledProcessError(
+                    returncode=1, cmd="gh", stderr="boom"
+                ),
+            ):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
 
     def test_gh_api_strips_proxy_env_so_gh_bypasses_the_secret_egress_proxy(self):
         # `gh` is a Go binary; on macOS it does not honour SSL_CERT_FILE/
@@ -1041,9 +1075,14 @@ class GhApiTimeoutTest(unittest.TestCase):
             "PATH": "/usr/bin",
         }
         with patch.dict(os.environ, proxy_env, clear=True):
-            with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
-                mock_safe_run.return_value.stdout = "[]"
-                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+            with patch.object(
+                agent_task_queue,
+                "resolve_gh_credentials",
+                return_value=self._usable_credentials(),
+            ):
+                with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
+                    mock_safe_run.return_value.stdout = "[]"
+                    agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
         called_args = mock_safe_run.call_args.args[0]
         self.assertTrue(called_args[0].endswith("agents/lib/github-cli.sh"))
         called_env = mock_safe_run.call_args.kwargs.get("env")
@@ -1352,6 +1391,48 @@ class IdentityDegradeTest(unittest.TestCase):
             agent_task_queue.main()
             queue = agent_task_queue.build_work_queue.return_value
             self.assertNotIn("prHydrationDegraded", queue)
+
+    def test_main_exposes_credential_source_and_reason_in_the_envelope(self):
+        """AC4: the envelope must say which credential was used, and why not.
+
+        A silent empty projection must never be confusable with an empty work
+        queue, so the caller can tell whether GitHub was reached at all.
+        """
+        credentials = github_cli.GhCredentials(
+            source="none",
+            token=None,
+            login=None,
+            reason="no-valid-credential",
+        )
+        with self._patched_main():
+            with patch.object(
+                agent_task_queue,
+                "resolve_gh_credentials",
+                return_value=credentials,
+            ):
+                agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertEqual(queue["credentialSource"], "none")
+            self.assertEqual(queue["credentialReason"], "no-valid-credential")
+
+    def test_main_exposes_the_resolved_credential_source_when_healthy(self):
+        """AC4: the envelope names the credential source that was used."""
+        credentials = github_cli.GhCredentials(
+            source="keyring",
+            token=None,
+            login="rowanstoffer",
+            reason=None,
+        )
+        with self._patched_main():
+            with patch.object(
+                agent_task_queue,
+                "resolve_gh_credentials",
+                return_value=credentials,
+            ):
+                agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertEqual(queue["credentialSource"], "keyring")
+            self.assertIsNone(queue["credentialReason"])
 
     def test_main_resets_degrade_reason_between_runs(self):
         """Module global must not leak a stale degrade into a later clean run."""
@@ -1687,6 +1768,11 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
     data as env unset; AC2 — a working env token behaves unchanged; AC3 — no
     env token and no keyring keeps the current failure mode; AC4 — the probe
     failure names its cause on stderr.
+
+    Task a30b8fe6 moved the probe into the shared resolver in
+    `agents/lib/github_cli.py`. The probe now runs there while the endpoint
+    call stays in the queue module, so one stub has to patch both references
+    to observe the whole exchange.
     """
 
     TOKEN_ENV = "ROWAN_GITHUB_TOKEN"
@@ -1694,15 +1780,32 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
 
     def setUp(self) -> None:
         agent_task_queue._VERBOSE = False
-        agent_task_queue._GH_TOKEN_PROBE_CACHE.clear()
-        self.addCleanup(agent_task_queue._GH_TOKEN_PROBE_CACHE.clear)
+        github_cli._reset_credential_cache_for_tests()
+        self.addCleanup(github_cli._reset_credential_cache_for_tests)
 
-    def _fake_gh(self, *, accept_token: bool, endpoint_stdout: str = "[]"):
+    def _patch_gh(self, runner):
+        """Patch the `gh` runner in every module that shells out to `gh`."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(
+            patch.object(agent_task_queue, "safe_run", side_effect=runner)
+        )
+        stack.enter_context(patch.object(github_cli, "safe_run", side_effect=runner))
+        return stack
+
+    def _fake_gh(
+        self,
+        *,
+        accept_token: bool,
+        keyring_ok: bool = False,
+        endpoint_stdout: str = "[]",
+    ):
         """Return (calls, runner) for a stubbed `gh`.
 
-        The probe (`api user`) succeeds only when a token is presented AND
-        `accept_token` is set; the endpoint call always succeeds, which models
-        the working keyring credential the fallback is meant to reach.
+        The resolver probes two candidates. The env-token candidate carries
+        `OPENCLAW_GH_TOKEN` and authenticates only when `accept_token` is
+        set; the keyring candidate carries no token and authenticates only
+        when `keyring_ok` is set. The endpoint call always succeeds, which
+        models the working credential the fallback is meant to reach.
         """
         calls: list[dict] = []
 
@@ -1712,7 +1815,10 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
             is_probe = "user" in cmd
             calls.append({"cmd": list(cmd), "token": presented, "probe": is_probe})
             if is_probe:
-                ok = accept_token and presented is not None
+                if presented is not None:
+                    ok = accept_token
+                else:
+                    ok = keyring_ok
                 return subprocess.CompletedProcess(
                     cmd,
                     0 if ok else 1,
@@ -1725,25 +1831,29 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
 
     def test_stale_token_falls_back_to_the_keyring_and_still_returns_data(self):
         calls, runner = self._fake_gh(
-            accept_token=False, endpoint_stdout='[{"number": 958}]'
+            accept_token=False,
+            keyring_ok=True,
+            endpoint_stdout='[{"number": 958}]',
         )
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
-            with patch.object(agent_task_queue, "safe_run", side_effect=runner):
+            with self._patch_gh(runner):
                 result = agent_task_queue._gh_api(
                     "~/.config/gh-test", self.TOKEN_ENV, "/x"
                 )
         self.assertEqual(result, [{"number": 958}])
         probes = [call for call in calls if call["probe"]]
         endpoints = [call for call in calls if not call["probe"]]
-        self.assertEqual(len(probes), 1)
+        # The env token is probed first, then the keyring candidate.
+        self.assertEqual(len(probes), 2)
         self.assertEqual(probes[0]["token"], self.STALE)
+        self.assertIsNone(probes[1]["token"])
         self.assertEqual(len(endpoints), 1)
         self.assertIsNone(endpoints[0]["token"])
 
     def test_working_token_is_still_injected(self):
         calls, runner = self._fake_gh(accept_token=True)
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
-            with patch.object(agent_task_queue, "safe_run", side_effect=runner):
+            with self._patch_gh(runner):
                 result = agent_task_queue._gh_api(
                     "~/.config/gh-test", self.TOKEN_ENV, "/x"
                 )
@@ -1763,19 +1873,24 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
 
         env = {k: v for k, v in os.environ.items() if k != self.TOKEN_ENV}
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(agent_task_queue, "safe_run", side_effect=_runner):
+            with self._patch_gh(_runner):
                 with self.assertRaises(subprocess.CalledProcessError):
                     agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/x")
+        # The keyring candidate is probed once and fails, so the call fails
+        # closed instead of silently degrading to an empty projection.
         self.assertEqual(len(calls), 1)
-        self.assertNotIn("user", calls[0])
+        self.assertIn("user", calls[0])
 
     def test_probe_failure_names_its_cause_on_stderr(self):
         calls, runner = self._fake_gh(accept_token=False)
         stderr = io.StringIO()
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
-            with patch.object(agent_task_queue, "safe_run", side_effect=runner):
+            with self._patch_gh(runner):
                 with contextlib.redirect_stderr(stderr):
-                    agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/x")
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        agent_task_queue._gh_api(
+                            "~/.config/gh-test", self.TOKEN_ENV, "/x"
+                        )
         message = stderr.getvalue()
         self.assertIn(self.TOKEN_ENV, message)
         self.assertIn("falling back", message)
@@ -1793,9 +1908,12 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
 
         stderr = io.StringIO()
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
-            with patch.object(agent_task_queue, "safe_run", side_effect=_runner):
+            with self._patch_gh(_runner):
                 with contextlib.redirect_stderr(stderr):
-                    agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/x")
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        agent_task_queue._gh_api(
+                            "~/.config/gh-test", self.TOKEN_ENV, "/x"
+                        )
         message = stderr.getvalue()
         self.assertNotIn(self.STALE, message)
         self.assertIn("***", message)
@@ -1803,7 +1921,7 @@ class GhTokenProbeFallbackTest(unittest.TestCase):
     def test_probe_runs_once_per_process(self):
         calls, runner = self._fake_gh(accept_token=True)
         with patch.dict(os.environ, {self.TOKEN_ENV: self.STALE}, clear=False):
-            with patch.object(agent_task_queue, "safe_run", side_effect=runner):
+            with self._patch_gh(runner):
                 agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/x")
                 agent_task_queue._gh_api("~/.config/gh-test", self.TOKEN_ENV, "/y")
         probes = [call for call in calls if call["probe"]]

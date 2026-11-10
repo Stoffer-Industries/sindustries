@@ -460,6 +460,57 @@ during shell startup.
 Operational recovery and credential-precedence detail live in
 `infra/runbooks/github-ambient-token-override.md`.
 
+### Shared credential resolution for repository-owned `gh` callers
+
+`agents/lib/github_cli.py` owns credential resolution for every repository-owned
+caller that shells out to `gh`. `resolve_gh_credentials()` is the single entry
+point; callers must not re-derive credential precedence on their own.
+
+It resolves one identity per call and returns a `GhCredentials` value carrying:
+
+- `source` — `env-token`, `keyring`, or `none`.
+- `token` — the value the caller injects into the shared wrapper. `None` means
+  the wrapper should use the credential at `GH_CONFIG_DIR`.
+- `login` — the GitHub login the selected credential authenticated as.
+- `reason` — why a fallback happened, or why no credential is available.
+
+**Resolution order.** The `<AGENT>_GITHUB_TOKEN` env token is probed first. If
+it authenticates, it is used. If it does not, the resolver falls back to the
+keyring credential at `GH_CONFIG_DIR`, and `reason` records `stale-token-fallback`.
+A rotated or revoked token therefore stops shadowing a working keyring
+credential — the failure mode that used to degrade the agent task queue's PR
+projection into an empty result that read as "nothing assigned".
+
+**Identity enforcement.** A credential whose resolved login is not the expected
+agent identity is refused rather than used for attribution: `source` becomes
+`none` and `reason` becomes `identity-mismatch`. Attribution recorded under
+another agent's identity is worse than no attribution.
+
+**Caching.** The resolution is cached per process. The cache key includes a
+fingerprint of the token, so a rotated token is re-probed instead of inheriting
+the previous verdict. A per-key lock with double-checked locking keeps the
+agent task queue's threaded PR-hydration fan-out to one probe per identity per
+process.
+
+**Agent task queue envelope.** The queue's JSON envelope exposes
+`credentialSource` and `credentialReason`. An empty PR projection is only
+meaningful next to those fields: "no open PRs" and "the credential did not
+resolve, so the projection is empty" are different states, and the reader must
+be able to tell them apart.
+
+**Failure modes and checks:**
+
+- `credentialSource` is `none` in the queue envelope: read `credentialReason`
+  first. `identity-mismatch` means the credential belongs to another GitHub
+  account; `no-valid-credential` means neither the env token nor the keyring
+  authenticated; `probe-error` means the probe itself failed (network, timeout,
+  or a non-authentication error) — check connectivity before rotating anything.
+- A probe that times out is reported as `probe-error`, not as a stale token.
+  The probe runs through the shared wrapper so ambient credentials cannot make
+  a keyring-only check succeed for the wrong identity.
+- Probe diagnostics are redacted: the exact token and any token-shaped
+  substring are replaced before the detail reaches a log line.
+
 ### Shared subprocess helper
 
 `agents/lib/subprocess_safe.py` is the shared wrapper for bounded-time

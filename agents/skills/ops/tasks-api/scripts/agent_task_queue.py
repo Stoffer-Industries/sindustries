@@ -35,7 +35,7 @@ if _w is not None and str(_w) not in _sys.path:
 del _sys, _p, _w
 
 from agents.lib import safe_run
-from agents.lib.github_cli import gh_command, gh_env
+from agents.lib.github_cli import GhCredentials, gh_command, gh_env, resolve_gh_credentials
 
 CLIENT_PATH = pathlib.Path(__file__).parents[1] / "tasks_api_client.py"
 SPEC = importlib.util.spec_from_file_location("tasks_api_client", CLIENT_PATH)
@@ -149,18 +149,43 @@ def _log(msg: str, *, verbose_only: bool = False) -> None:
     print(f"[agent_task_queue] {msg}", file=sys.stderr, flush=True)
 
 
+def _expected_login_for(config_dir: str, token_env: str) -> str:
+    """Return the expected GitHub login for one configured identity."""
+    for login, identity_config_dir, identity_token_env in GITHUB_IDENTITIES.values():
+        if identity_token_env != token_env:
+            continue
+        if str(pathlib.Path(identity_config_dir).expanduser()) == str(
+            pathlib.Path(config_dir).expanduser()
+        ):
+            return login
+    return ""
+
+
+def _resolve_github_credentials(
+    config_dir: str,
+    token_env: str,
+    expected_login: str | None = None,
+) -> GhCredentials:
+    """Resolve and remember the shared credential for this queue run."""
+    global _CREDENTIAL_RESOLUTION
+    resolved = resolve_gh_credentials(
+        config_dir=config_dir,
+        token_env=token_env,
+        expected_login=expected_login
+        if expected_login is not None
+        else _expected_login_for(config_dir, token_env),
+    )
+    _CREDENTIAL_RESOLUTION = resolved
+    return resolved
+
+
 # Module-level counter for `_gh_api` calls. Surfaced in the --verbose exit summary
 # (AC4). Tests reset this in setUp so counts don't leak across cases.
 _GH_API_CALL_COUNT = 0
-# Cache of the per-agent GitHub credential probe, keyed by
-# (config_dir, token_env). One probe per process per identity keeps the
-# ~36-call hydration fan-out from paying for it once per endpoint.
-_GH_TOKEN_PROBE_CACHE: dict[tuple[str, str], bool] = {}
-# PAT-shaped substrings are redacted from any probe detail that reaches a log
-# line. The repo is public, so a leaked token would be published permanently.
-_TOKEN_REDACTION_RE = re.compile(
-    r"(gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"
-)
+# The shared credential resolver owns the process cache and its per-key lock.
+# The queue keeps only the latest resolution so it can expose the actual
+# credential source and reason in the JSON envelope.
+_CREDENTIAL_RESOLUTION: GhCredentials | None = None
 URL_RE = re.compile(r"https?://[^\s)>]+")
 # PR URLs carry the repository, and PR numbers are repo-scoped: a bare number
 # is ambiguous across repos. The parser keeps both halves so every fetched or
@@ -702,60 +727,6 @@ def _build_attention_page_items(
     return items
 
 
-def _gh_token_is_usable(config_dir: str, token_env: str, token: str) -> bool:
-    """True when `token` authenticates `gh` against the agent's own profile.
-
-    `gh` prefers an env token over the keyring credential at
-    `GH_CONFIG_DIR`, so a token that was rotated or revoked out from under a
-    long-lived session wins over a perfectly good keyring credential and
-    every call fails with `Bad credentials (HTTP 401)`. The PR-hydration
-    fan-out then degrades to an empty projection that reads as "nothing
-    assigned" — the false-negative this probe exists to remove (task
-    76f00654 AC1).
-
-    The probe runs `gh api user` through the shared wrapper with the SAME
-    environment a real call would use, so what it measures is what the
-    endpoint call will get. A bare `gh api user` would inherit the ambient
-    `GITHUB_TOKEN` and could report success for the wrong identity, hiding
-    the very failure being detected.
-
-    The verdict is cached per (config_dir, token_env) so the fan-out pays for
-    the probe once per process instead of once per endpoint.
-    """
-    key = (config_dir, token_env)
-    cached = _GH_TOKEN_PROBE_CACHE.get(key)
-    if cached is not None:
-        return cached
-    env = gh_env(config_dir=config_dir, token=token)
-    detail: list[str] = []
-    try:
-        result = safe_run(
-            gh_command("api", "user", "--jq", ".login"),
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=_GH_API_TIMEOUT_SECONDS,
-        )
-        usable = result.returncode == 0
-        stderr_lines = (result.stderr or "").strip().splitlines()
-        if stderr_lines:
-            detail.append(stderr_lines[0])
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        usable = False
-        detail.append(f"{type(exc).__name__}: {exc}")
-    if not usable:
-        excerpt = _TOKEN_REDACTION_RE.sub("***", " ".join(detail)).strip()
-        print(
-            f"[agent_task_queue] WARN: {token_env} env token failed the gh auth "
-            f"probe ({excerpt or 'no detail'}); falling back to the "
-            f"GH_CONFIG_DIR={config_dir} keyring credential",
-            file=sys.stderr,
-            flush=True,
-        )
-    _GH_TOKEN_PROBE_CACHE[key] = usable
-    return usable
-
-
 def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
     """Run `gh api <endpoint>` and parse JSON. Wraps `_GH_API_TIMEOUT_SECONDS`.
 
@@ -771,10 +742,14 @@ def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
     """
     global _GH_API_CALL_COUNT
     _GH_API_CALL_COUNT += 1
-    token = os.environ.get(token_env)
-    if token and not _gh_token_is_usable(config_dir, token_env, token):
-        token = None
-    env = gh_env(config_dir=config_dir, token=token)
+    credentials = _resolve_github_credentials(config_dir, token_env)
+    if credentials.source == "none":
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=gh_command("api", endpoint),
+            stderr=credentials.reason or "no-valid-credential",
+        )
+    env = gh_env(config_dir=config_dir, token=credentials.token)
     started = time.monotonic()
     try:
         result = safe_run(
@@ -1106,6 +1081,10 @@ def fetch_github_prs(
     global _PR_HYDRATION_DEGRADE_REASON, _REPO_COVERAGE
     scanned = _normalize_scanned_repos(repos)
     _REPO_COVERAGE = {}
+    expected_login, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
+    credentials = _resolve_github_credentials(
+        config_dir, token_env, expected_login=expected_login
+    )
     if not _is_identity_provisioned(agent):
         _log(
             f"GitHub identity for {agent!r} is not provisioned (no profile dir, "
@@ -1117,8 +1096,13 @@ def fetch_github_prs(
         for repo in scanned:
             _record_repo_coverage(repo, "skipped", reason="identity-unprovisioned")
         return []
-    _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
-    login = GITHUB_IDENTITIES[agent.lower()][0].lower()
+    if credentials.source == "none":
+        reason = credentials.reason or "no-valid-credential"
+        _PR_HYDRATION_DEGRADE_REASON = reason
+        for repo in scanned:
+            _record_repo_coverage(repo, "skipped", reason=reason)
+        return []
+    login = expected_login.lower()
     work: list[tuple[str, dict[str, Any]]] = []
     for repo in scanned:
         try:
@@ -1416,9 +1400,10 @@ def main() -> None:
     global _VERBOSE, _GH_API_CALL_COUNT
     _VERBOSE = args.verbose
     _GH_API_CALL_COUNT = 0
-    global _PR_HYDRATION_DEGRADE_REASON, _REPO_COVERAGE
+    global _PR_HYDRATION_DEGRADE_REASON, _REPO_COVERAGE, _CREDENTIAL_RESOLUTION
     _PR_HYDRATION_DEGRADE_REASON = None
     _REPO_COVERAGE = {}
+    _CREDENTIAL_RESOLUTION = None
     try:
         scanned_repos = _normalize_scanned_repos(
             [part for part in str(args.repos or "").split(",") if part.strip()]
@@ -1437,6 +1422,10 @@ def main() -> None:
     # identity whose `gh api` call fails — see
     # infra/runbooks/agent-github-identity-profile-unprovisioned.md.
     identity_not_provisioned = not _is_identity_provisioned(args.assignee)
+    expected_login, config_dir, token_env = GITHUB_IDENTITIES[agent_key]
+    credentials = _resolve_github_credentials(
+        config_dir, token_env, expected_login=expected_login
+    )
     if identity_not_provisioned:
         _log(
             f"GitHub identity for {args.assignee!r} is not provisioned (no "
@@ -1477,6 +1466,8 @@ def main() -> None:
     # actionable for the reader (task 7fba23bf AC3).
     queue["scannedRepos"] = scanned_repos
     queue["repoCoverage"] = _repo_coverage_rows(scanned_repos)
+    queue["credentialSource"] = credentials.source
+    queue["credentialReason"] = credentials.reason
     if args.json:
         print(json.dumps(queue, indent=2))
     else:
