@@ -1,6 +1,6 @@
 ---
-status: draft
-task_id: 76f00654-e31d-485b-9dcb-50305d021800
+status: approved
+task_id: a30b8fe6-26ea-4f1e-93a4-b59b37d158e9
 product_spec: "n/a"
 shipped_pr: null
 shipped_date: null
@@ -8,17 +8,13 @@ shipped_date: null
 
 # Stale GitHub env token must not silently empty the agent task queue — tech design
 
-> **Scope note (2026-11-10).** This task already carried a
-> `[tech-design-not-required]` waiver (the spec author embedded the design and
-> the patch in the task description) and Quinn's structured `tech_design`
-> approval of 2026-10-10. The implementation on this branch therefore follows
-> the **approved minimal scope** — a probe-and-fallback inside `_gh_api`, plus
-> its test ladder and the runbook/system-doc updates — and deliberately does
-> **not** implement the wider shared-helper boundary described below. The
-> shared helper in `agents/lib/github_cli.py`, the `credentialSource` envelope
-> field, and the identity-mismatch hard-degrade are proposed here for a
-> follow-up task and need their own approval; this document records the
-> reasoning, not a commitment to that shape.
+> **Scope note (2026-11-10).** Task `76f00654` shipped the approved minimal
+> scope — a probe-and-fallback inside `_gh_api` — in PR #959. Follow-up task
+> `a30b8fe6` received Quinn's structured `tech_design` approval and implements
+> the wider shared-helper boundary described below: the resolver in
+> `agents/lib/github_cli.py`, the `credentialSource` / `credentialReason`
+> envelope fields, and the identity-mismatch hard-degrade. This document is the
+> approved source design for that follow-up implementation.
 
 ## Product spec link
 
@@ -40,12 +36,12 @@ The fix must:
 
 ## Task / branch / worktree
 
-- Task ID: `76f00654-e31d-485b-9dcb-50305d021800`
-- Title: 🔧 Harden agent_task_queue.py: probe-and-fallback on 401 instead of unconditional env-injection
-- Branch: `task-76f00654-harden-agent-task-queue-token-probe`
-- Worktree: `/Users/quinnstoffer/.openclaw/workspace/worktrees/rowan-76f00654-token-probe`
+- Task ID: `a30b8fe6-26ea-4f1e-93a4-b59b37d158e9`
+- Title: 🔧 Resolve GitHub credentials once per identity in the shared helper (follow-up to the agent_task_queue token probe)
+- Branch: `task-a30b8fe6-shared-github-credentials`
+- Worktree: `/Volumes/WD1/worktrees/rowan/task-a30b8fe6-shared-github-credentials`
 - Repository: `sindustries` (`Stoffer-Industries/sindustries`)
-- Workstream: Rowan owns AC1–AC4. Quinn approves the design; Tom's `spec` approval remains an upstream gate on the task itself (this design does not assume it).
+- Workstream: Rowan owns AC1–AC7. Quinn approves the design; Tom's `spec` approval remains an upstream gate on the task itself (this design does not assume it).
 
 ## Why this design exists
 
@@ -123,7 +119,7 @@ The result is cached per process, keyed by `(config_dir, token_env, sha256(token
 
 **Probe hygiene (non-negotiable):**
 - The probe runs through `agents/lib/github-cli.sh`, never bare `gh`. A bare `gh api user` would inherit the ambient `GITHUB_TOKEN` and could report success for the *wrong* identity, masking the very failure we are detecting.
-- The probe is bounded (`safe_run` with a 5 s timeout — shorter than the script's existing 10 s `_GH_API_TIMEOUT_SECONDS`) so a hanging probe cannot consume the heartbeat slot.
+- The probe uses the same 10 s timeout as the GitHub endpoint calls it authorises, so a slow link cannot make the probe fail while the endpoint it guards would have succeeded.
 - **The token value is never logged.** The WARN names the env var (`ROWAN_GITHUB_TOKEN`), the config dir, the exit code, and a redacted stderr excerpt (PAT-shaped substrings are replaced with `***`).
 
 ### 2. `agents/skills/ops/tasks-api/scripts/agent_task_queue.py` — use the resolution
@@ -160,10 +156,13 @@ The result is cached per process, keyed by `(config_dir, token_env, sha256(token
 
 | AC | Verification layer | Test | Notes |
 | --- | --- | --- | --- |
-| AC1 — stale env token + working keyring returns the same data as env unset | unit (helper) + integration (queue) | `test_github_cli.py`: stale token + valid keyring → `source="keyring"`, `token=None`; `test_agent_task_queue.py`: with a stale token env, `fetch_github_prs` still returns the PR list and the review-request section is populated | No network: `gh` is stubbed on `PATH` and returns the same payload whether or not `GH_TOKEN` is set |
-| AC2 — working env token behaves unchanged | unit (helper) + regression (queue) | valid token → `source="env-token"`, token injected; existing `_gh_api` tests (`test_gh_api_passes_explicit_timeout_to_safe_run`, proxy-strip test) stay green unmodified | The env passed to the child keeps `GH_TOKEN` set and proxies stripped — asserted, not assumed |
-| AC3 — no env token and no keyring keeps the current failure mode | unit + integration | no token, stub `gh` exits non-zero → `source="none"`, `reason="no-valid-credential"`; queue degrades PR hydration exactly as today instead of raising | Asserts the degrade path, not an exception |
-| AC4 — probe failure logs clearly enough for Lox to attribute the cause | unit (log capture) | stderr WARN contains the token env var name, the config dir, the exit code, and the fallback sentence; the token value itself never appears | Redaction asserted with a PAT-shaped token |
+| AC1 — shared resolver returns source, token, login, and reason | unit | `test_github_cli_credentials.py`: valid token → `source="env-token"` with token/login; no valid credential → `source="none"` with an explicit reason | No network: the runner is stubbed |
+| AC2 — per-process cache includes a token fingerprint | unit | rotated token is re-probed; unchanged token is resolved from cache | Token values are never exposed |
+| AC3 — wrong-identity credentials are refused | unit | stale env token with another login's keyring → `source="none"`, `reason="identity-mismatch"` | Hard-degrade is asserted |
+| AC4 — envelope exposes credential source and reason | integration | `test_agent_task_queue.py`: `main()` exposes `credentialSource` and `credentialReason` | Empty PR projection remains distinguishable from a healthy empty queue |
+| AC5 — `_gh_api` consumes shared resolution | unit + integration | valid token is injected; stale token falls back to keyring; no valid credential fails closed | Existing endpoint timeout and proxy-strip tests stay green |
+| AC6 — concurrent PR hydration issues one probe per identity | unit (threaded helper) | eight concurrent resolves issue exactly one `gh api user` probe | Exercises the lock/double-check path under contention |
+| AC7 — credential decision matrix is covered | unit | valid token, stale token + valid keyring, stale token + wrong-login keyring, no token + valid keyring, no token + no keyring | Each branch has a named unit test |
 
 **E2E coverage.** Not applicable: this change has no user-visible or app-flow surface — it is a credential-selection policy inside a read-only agent script. The highest-value equivalent is the manual smoke test below, run once before the PR is marked ready.
 
@@ -195,12 +194,12 @@ Assumptions:
 1. **Identity mismatch on fallback.** Proposed: hard-degrade (`source="none"`, reason `identity-mismatch`) when the keyring credential resolves to a login other than the agent's expected one. Alternative: use it anyway with a loud warning. Recommendation: hard-degrade — silently acting as another agent violates the repo's "never use another agent's token" rule and would mis-attribute PRs.
 2. **Envelope surface.** Proposed: add `credentialSource` + `credentialReason` to the queue JSON. Is that acceptable to the agents that parse the envelope, or should the signal stay stderr-only?
 3. **Scope of adoption.** Proposed: build the helper in `agents/lib/github_cli.py` but adopt it only in the queue script this task; other `gh` callers (Rust workflows, `content-tasks/scripts/common.py`) adopt it in follow-ups. Confirm that matches your intent.
-4. **Probe timeout.** Proposed 5 s (bounded tighter than the script's 10 s API timeout). Confirm, or prefer the 10 s default.
+4. **Probe timeout.** Approved at 10 s, shared with the endpoint timeout it authorises. The probe may not expire before the request it guards.
 
 ## Risks
 
 - **Fallback changes acting identity** (mitigated by the expected-login check and the hard-degrade answer to OQ1).
-- **Extra network call.** One `gh api user` per process (~200 ms warm), capped at 5 s worst case, amortised across the fan-out by the cache.
+- **Extra network call.** One `gh api user` per process (~200 ms warm), capped at the shared 10 s request timeout, amortised across the fan-out by the cache.
 - **Network outage misread as a stale token.** Distinguished by classifying the probe's stderr (401/Bad credentials vs other). A non-401 probe failure falls back to the keyring, and if that also fails the queue degrades with `probe-error` / `no-valid-credential` — never a false "no PRs".
 - **Secret hygiene.** The token is never printed; the WARN carries only the env var name, exit code, and a redacted stderr excerpt. The repo is public.
 - **Behaviour drift for other callers.** None — the helper is opt-in; `gh_env` keeps its current signature and semantics.
