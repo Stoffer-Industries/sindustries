@@ -432,11 +432,17 @@ The same host-and-path-prefix pairs are recorded per surface in `infra/cloud/hos
 | budget-api | ok | ok | ok | ok |
 | content-scheduler-api | ok | ok | ok | ok |
 | health-probe | ok | ok | ok | ok |
-| mission-control | ok | **502** | skipped | fail |
-| tasks-app | ok | **502** | skipped | fail |
+| mission-control | ok | **502 (observer-side block)** | skipped | fail |
+| tasks-app | ok | **502 (observer-side block)** | skipped | fail |
 | auto-post-worker | — | — | — | skip (no public URL by design) |
 
-The four API surfaces now pass the full DNS + HTTPS + CORS chain through their stable staging hostnames. The two Vercel frontends have correct CNAMEs but no deployment serving them — `mission-control.staging.sindustries.co.nz` and `tasks.staging.sindustries.co.nz` return HTTP 502, and the projects' own `*.vercel.app` hostnames return 404, so there is no Vercel deployment for the staging domains and no deploy workflow in this repo for them. That is a deployment gap, not a DNS-shape gap: repointing the CNAME would turn a 502 into a 404 with no gain. Until the staging frontend deployments exist, the harness verdict stays `fail` for those two rows and the AC5 live gate stays open.
+The four API surfaces pass the full DNS + HTTPS + CORS chain through their stable staging hostnames.
+
+The two Vercel frontends could not be verified **from the host that ran the harness**: `mission-control.staging.sindustries.co.nz` and `tasks.staging.sindustries.co.nz` return HTTP 502 with the body `Secret egress proxy could not reach the upstream host.`, and a direct (proxy-bypassed) request from the same host fails to connect at all. The same host, through the same proxy, reaches those deployments' own `*.vercel.app` hostnames with HTTP 200 and the app HTML. The 502 is therefore produced by the proxy in the request path, **before** the request reaches the deployment — it is not evidence that the deployment is down, and it is not a DNS-shape gap either. The CNAMEs are correct (`cname.vercel-dns.com`, matching the matrix's `cnameTargets.staging`).
+
+The harness now classifies this case explicitly: a response whose body carries a proxy marker, or a gateway status behind a proxy that `NO_PROXY` does not exempt, is recorded as `failureMode: proxy_blocked` rather than an upstream status, and the row evidence says the harness could not reach the deployment. The row still fails — the harness could not verify the hostname, so the AC5 live gate stays open — but the failure is no longer attributed to the deployment.
+
+**Outstanding for AC5:** the two frontend rows must be verified from a host that is not behind the proxy block (or from CI) before the live gate can pass. Until then the AC5 live gate stays open for those two rows.
 
 Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the consolidated platform app (the router already serves each stable hostname at the root of its own surface) and update the smoke-check URLs in the live deploy workflow, `.github/workflows/deploy-staging-platform.yml`. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; each still defines its own `deploy` job, but nothing calls them since their caller jobs were removed from `ci.yml` on 2026-11-07) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
 
