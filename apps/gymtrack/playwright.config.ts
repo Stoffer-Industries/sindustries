@@ -25,9 +25,13 @@ export default defineConfig({
         // enabled and with build-time release metadata, so the browser
         // resolves `release` the same way a Vercel production build does.
         // The relay is intercepted by the test — nothing leaves the machine.
+        // `TELEMETRY_E2E_COMMIT_SHA` is validated against a SHA-like hex
+        // shape in `test/e2e/telemetry-env.ts` (it is interpolated into this
+        // shell command, so a metacharacter could otherwise alter it). The
+        // quotes are defence in depth on top of that validation.
         command: TELEMETRY_E2E_ENABLED
           ? `VITE_TELEMETRY_ENABLED=1 VITE_TELEMETRY_TOKEN=${TELEMETRY_E2E_RELAY_TOKEN} ` +
-            `VERCEL_GIT_COMMIT_SHA=${TELEMETRY_E2E_COMMIT_SHA} ` +
+            `VERCEL_GIT_COMMIT_SHA="${TELEMETRY_E2E_COMMIT_SHA}" ` +
             // `src/lib/supabase.js` throws at import time when these are
             // unset, so the app renders nothing. The telemetry suite never
             // talks to Supabase — placeholders are enough to mount the UI.
