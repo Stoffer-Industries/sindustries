@@ -450,6 +450,21 @@ The harness now classifies this case explicitly for both HTTPS and CORS prefligh
 
 **Outstanding for AC5:** the two frontend rows must be verified from a host that is not behind the proxy block (or from CI) before the live gate can pass. Until then the AC5 live gate stays open for those two rows.
 
+### Live verification from a public-internet runner
+
+`.github/workflows/stable-hostname-live-verify.yml` is the dispatch-only path that produces the public-internet verdict the operator host cannot. It runs the same harness (`--mode live`) on a GitHub-hosted `ubuntu-latest` runner with the proxy environment cleared and `NO_PROXY` pinned, so the request path is provably direct: a proxy in the path answers before the request leaves the runner and turns a deployment verdict into `failureMode: proxy_blocked`.
+
+The workflow is deliberately narrow:
+
+- **dispatch only** — no `push`, `pull_request` or `schedule` trigger, so it never fires unattended against a moving deployment;
+- **no deploy** — it does not touch the Fly or Vercel control planes;
+- **no credentials** — the harness performs DNS resolution, an HTTPS `GET` on a health endpoint and a CORS preflight and reads no token, so the job needs no GitHub environment and no secret;
+- **the redacted result JSON is uploaded as a run artifact**, including when the harness reports a failure, because a failing run is the evidence.
+
+`tests/cloud/tests/stable-hostname-live-verify-workflow.test.mjs` asserts that contract on every CI run, so the workflow cannot quietly start firing unattended, reading a credential, deploying, or running behind a proxy again.
+
+A failing row in that workflow is the honest signal that a surface is not serving as the matrix describes — the two Vercel frontends are expected to fail while the matrix names Vercel projects that do not exist (the staging deployments that do exist sit under different project names; which project owns the stable hostname is Quinn's pending decision). The workflow produces evidence; it does not assert an AC.
+
 Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the consolidated platform app (the router already serves each stable hostname at the root of its own surface) and update the smoke-check URLs in the live deploy workflow, `.github/workflows/deploy-staging-platform.yml`. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; each still defines its own `deploy` job, but nothing calls them since their caller jobs were removed from `ci.yml` on 2026-11-07) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
 
 ## Vercel env var matrix (task `5cb4a8fe`)

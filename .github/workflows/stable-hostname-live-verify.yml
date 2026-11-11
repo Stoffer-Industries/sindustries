@@ -1,0 +1,130 @@
+# GitHub Actions: stable hostname live verification (task 5cb4a8fe, AC5).
+#
+# Why this workflow exists
+# -----------------------
+# The AC5 live hostname harness (tests/cloud/scripts/stable-hostname-verification.mjs)
+# has so far only run from the operator's Mac, which sits behind a secret
+# egress proxy. Every request to a *.sindustries.co.nz host from there comes
+# back 502 with the body "Secret egress proxy could not reach the upstream
+# host", which the harness classifies as failureMode=proxy_blocked — an
+# observer-side block, not a deployment verdict. With the proxy unset the same
+# two frontend rows fail as failureMode=transport_error.
+#
+# Neither observation can close the AC5 frontend clause ("frontend roots and
+# assets work through the stable hostnames") or the AC2 TLS clause
+# ("certificates valid for every public hostname"): both need one run from a
+# host that is simply on the public internet, with nothing in the request path
+# between the runner and the deployment.
+#
+# This workflow is that path. It is deliberately narrow:
+#   * workflow_dispatch only — never on push, pull_request or schedule, so it
+#     can never fire unattended against a moving deployment.
+#   * No deploy. It does not touch the Fly or Vercel control planes.
+#   * No credentials. The harness performs DNS resolution, an HTTPS GET on a
+#     health endpoint and a CORS preflight; it never reads a token, so this
+#     job needs no `environment:` and no secret reference of any kind. The
+#     contract test asserts that no such reference is ever added.
+#   * The proxy environment variables are cleared explicitly and NO_PROXY is
+#     pinned, so the request path is provably direct even if a runner image
+#     or an org-level runner configuration sets one.
+#   * The redacted result JSON is uploaded as a run artifact, including when
+#     the harness reports a failure, because a failing run is the evidence.
+#
+# The result is AC5 evidence, not an AC5 assertion: the two Vercel frontend
+# rows are expected to fail while `infra/cloud/hostname-matrix.json` names
+# Vercel projects that do not exist — the staging deployments that do exist
+# sit under different project names, and which project owns the stable
+# hostname is Quinn's pending decision. A failing row here is the honest
+# signal that the surface is not serving as the matrix describes; the
+# workflow produces evidence, it does not assert an AC.
+
+name: Stable hostname live verification (task 5cb4a8fe)
+
+on:
+  workflow_dispatch:
+    inputs:
+      intent_commit:
+        description: 'Commit SHA this run verifies (default: the dispatched commit)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-hostname-live-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: AC5 live hostname verification (public-internet runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_VERSION: '22'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run the live hostname harness with a direct request path
+        id: harness
+        env:
+          INPUT_COMMIT: ${{ github.event.inputs.intent_commit }}
+          RESULT_PATH: ${{ runner.temp }}/stable-hostname-verification.json
+        run: |
+          set -o pipefail
+          # Nothing may sit between this runner and the deployment: a proxy
+          # in the path answers before the request leaves the runner and
+          # turns a deployment verdict into failureMode=proxy_blocked.
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          export NO_PROXY='*' no_proxy='*'
+          echo "proxy env after clear: HTTP_PROXY=${HTTP_PROXY:-unset} HTTPS_PROXY=${HTTPS_PROXY:-unset} ALL_PROXY=${ALL_PROXY:-unset}"
+
+          intent_arg=''
+          if [[ "${INPUT_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+            intent_arg="--intent-commit ${INPUT_COMMIT}"
+          else
+            echo "no valid intent_commit supplied; verifying the dispatched commit"
+          fi
+
+          status=0
+          node tests/cloud/scripts/stable-hostname-verification.mjs \
+            --mode live \
+            --run-id "stable-hostname-live-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            ${intent_arg} \
+            --output "${RESULT_PATH}" > /dev/null || status=$?
+          echo "harness_exit=${status}" >> "$GITHUB_OUTPUT"
+
+          if [[ -f "${RESULT_PATH}" ]]; then
+            node -e '
+              const fs = require("node:fs");
+              const r = JSON.parse(fs.readFileSync(process.env.RESULT_PATH, "utf8"));
+              console.log("verdict=" + r.verdict + " mode=" + r.mode + " runId=" + r.runId);
+              for (const s of (r.surfaces || [])) {
+                const why = (s.details && (s.details.failureMode || s.details.reason)) || "";
+                console.log("- " + s.id + ": " + s.status + (why ? " (" + why + ")" : ""));
+              }
+              for (const b of (r.productionBlockers || [])) {
+                console.log("production blocker: " + b.code + " (owner " + b.owner + ")");
+              }
+            '
+          else
+            echo "::error::harness produced no result JSON at ${RESULT_PATH}"
+            status=2
+          fi
+
+          exit "${status}"
+
+      - name: Upload the redacted result JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-hostname-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/stable-hostname-verification.json
+          if-no-files-found: error
+          retention-days: 14
