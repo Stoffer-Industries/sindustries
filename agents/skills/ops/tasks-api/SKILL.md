@@ -36,6 +36,31 @@ python3 tasks_api_client.py list -h
 python3 tasks_api_client.py create -h
 ```
 
+## Client path and required flags
+
+The client is a **single file at the skill root** — not inside `scripts/`:
+
+```
+/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py
+```
+
+`scripts/` holds only `agent_task_queue.py` and `pending_tech_design_approvals.py`. A path such as `.../tasks-api/scripts/tasks_api_client.py` does not exist and fails with `No such file or directory`.
+
+`--id` is **required** by every single-task subcommand and must be the full task UUID:
+
+| Subcommand | Required flags |
+|---|---|
+| `list` | none (optional filters: `--assignee`, `--status`, `--summary`, `--heartbeat`) |
+| `create` | `--title` (plus optional `--description`, `--priority`, `--type`, `--tags`) |
+| `get` | `--id <full-task-uuid>` |
+| `patch` | `--id <full-task-uuid>` (plus the fields to change) |
+| `approve` / `revoke-approval` | `--id <full-task-uuid>` + `--type {spec,tech_design,qa_agent,accepted}` |
+| `archive` | `--id <full-task-uuid>` |
+
+Omitting `--id` fails fast with an argparse error (`the following arguments are required: --id`) and performs no request. `python3 <client> <subcommand> -h` is the authoritative flag list.
+
+The `tasks-api` directory name contains a hyphen, so `from agents.skills.ops.tasks_api import tasks_api_client` does not import — use `importlib.util.spec_from_file_location`, or shell out to the CLI.
+
 Programmatic use: import `get_task`, `list_tasks`, and `get_base_url` from `tasks_api_client` for scripts that need to query tasks without the CLI.
 
 The client automatically prefers the current agent's scoped credential
