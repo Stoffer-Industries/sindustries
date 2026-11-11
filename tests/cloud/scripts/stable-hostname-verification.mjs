@@ -174,6 +174,113 @@ function redactMessage(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// Transport vs upstream classification
+// ---------------------------------------------------------------------------
+//
+// A failed HTTPS probe has two very different causes, and the harness used
+// to report them identically:
+//
+//   - the DEPLOYMENT answered with a non-2xx status — a real AC5 failure
+//     (the stable hostname does not serve the app), and
+//   - the request never reached the deployment — a proxy in the request
+//     path answered before the request left the machine.
+//
+// The second case was observed on 2026-11-11: every request from the
+// operator's Mac to a *.sindustries.co.nz host came back 502 with the body
+// "Secret egress proxy could not reach the upstream host.", while the same
+// machine reached the *.vercel.app deployment with 200. Read as an upstream
+// status, a local transport block becomes "no deployment serves this
+// hostname" — a false AC5 failure that sends the operator chasing a
+// deployment fault that does not exist.
+//
+// The classification keeps the row FAILING (the harness still could not
+// verify the hostname, and AC5 must never read a false pass) but records
+// WHICH side of the wire failed, so the evidence says "observer-side
+// block" instead of "the deployment is down".
+
+// Markers that identify a proxy-generated error body. Deliberately narrow:
+// an application body that merely mentions "proxy" must not be misread as
+// a transport block.
+const PROXY_BODY_MARKERS = [
+  'egress proxy',
+  'could not reach the upstream',
+  'upstream host',
+  'proxy error',
+  'tunnel connection failed',
+];
+
+// Status codes a proxy (rather than the origin) commonly answers with.
+const GATEWAY_STATUSES = new Set([407, 502, 503, 504]);
+
+function looksLikeProxyError(body) {
+  if (typeof body !== 'string' || body.length === 0) return false;
+  const haystack = body.toLowerCase();
+  return PROXY_BODY_MARKERS.some((marker) => haystack.includes(marker));
+}
+
+// Which proxy environment variables are in play for `host`.
+//
+// Only the variable NAMES are recorded: a proxy URL can carry credentials,
+// so the value must never reach the result JSON.
+function proxyEnvFacts(host, env = process.env) {
+  const envVars = [];
+  for (const name of ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy']) {
+    const value = env[name];
+    if (typeof value === 'string' && value.trim().length > 0) envVars.push(name);
+  }
+  const noProxy = String(env.NO_PROXY ?? env.no_proxy ?? '').trim();
+  const target = normalizeHost(host);
+  let noProxyApplies = false;
+  if (noProxy && target) {
+    noProxyApplies = noProxy
+      .split(',')
+      .map((entry) => normalizeHost(entry).replace(/^\.+/, ''))
+      .filter(Boolean)
+      .some((entry) => entry === '*' || target === entry || target.endsWith(`.${entry}`));
+  }
+  return { envVars, noProxyApplies };
+}
+
+// Classify a failed HTTPS/CORS probe.
+//
+//   none            — the probe succeeded (no failure to classify)
+//   upstream_status — the origin answered with a non-2xx/3xx status
+//   proxy_blocked   — a proxy in the request path answered instead
+//   transport_error — the request failed before any response
+//   timeout         — the request exceeded the harness timeout
+//
+// A proxy body marker is sufficient on its own (the marker only appears in
+// proxy-generated error bodies). Otherwise a gateway status counts as a
+// proxy block only when a proxy is actually configured for the host and
+// NO_PROXY does not exempt it — so a genuine 502 from a real deployment is
+// still reported as an upstream status.
+function classifyHttpsFailure({ status = null, body = null, error = null, proxy = null } = {}) {
+  if (error) {
+    const isTimeout = error.name === 'AbortError' || error.name === 'TimeoutError';
+    return { failureMode: isTimeout ? 'timeout' : 'transport_error' };
+  }
+  if (looksLikeProxyError(body)) {
+    return { failureMode: 'proxy_blocked' };
+  }
+  if (proxy && proxy.envVars.length > 0 && !proxy.noProxyApplies && GATEWAY_STATUSES.has(status)) {
+    return { failureMode: 'proxy_blocked' };
+  }
+  return { failureMode: 'upstream_status' };
+}
+
+// Read a bounded, redacted excerpt of a failed response body. The excerpt
+// is what lets a reader tell a proxy's error page from the deployment's
+// own error page — without it, both are just "returned 502".
+async function readBodyExcerpt(response, maxChars = 200) {
+  try {
+    const text = await response.text();
+    return redactMessage(text.slice(0, maxChars));
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CNAME expectation
 // ---------------------------------------------------------------------------
 
@@ -382,21 +489,58 @@ async function checkHttps(surface, environment) {
     const url = `https://${host}${path}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-    let response;
+    let response = null;
+    let error = null;
     try {
       response = await fetch(url, { signal: controller.signal, redirect: 'manual' });
     } catch (err) {
-      clearTimeout(timer);
-      checks.push({ path, url, ok: false, status: null, error: redactMessage(err.message) });
-      continue;
+      error = err;
     }
     clearTimeout(timer);
+    const proxy = proxyEnvFacts(host);
+    if (!response) {
+      const { failureMode } = classifyHttpsFailure({ status: null, body: null, error, proxy });
+      checks.push({
+        path,
+        url,
+        ok: false,
+        status: null,
+        failureMode,
+        error: redactMessage(error?.message ?? String(error)),
+        proxyInPath: proxy,
+      });
+      continue;
+    }
     const status = response.status;
-    checks.push({ path, url, ok: status >= 200 && status < 400, status });
+    const ok = status >= 200 && status < 400;
+    // The body excerpt is only read for a failure: it is what separates a
+    // proxy's error page from the deployment's own error page. A successful
+    // health response body is not evidence the harness needs.
+    const bodyExcerpt = ok ? null : await readBodyExcerpt(response);
+    const { failureMode } = ok
+      ? { failureMode: 'none' }
+      : classifyHttpsFailure({ status, body: bodyExcerpt, error: null, proxy });
+    checks.push({ path, url, ok, status, failureMode, bodyExcerpt, proxyInPath: proxy });
   }
   const ok = checks.every((c) => c.ok);
   const evidence = checks
-    .map((c) => (c.ok ? `fetch ${c.url} returned ${c.status}` : `fetch ${c.url} failed: ${c.error ?? `returned ${c.status}`}`))
+    .map((c) => {
+      if (c.ok) return `fetch ${c.url} returned ${c.status}`;
+      if (c.failureMode === 'proxy_blocked') {
+        return (
+          `fetch ${c.url} returned ${c.status} — blocked by a proxy in the request path` +
+          `${c.bodyExcerpt ? ` (body: ${c.bodyExcerpt})` : ''}; the harness could not reach the ` +
+          'deployment, so this is NOT evidence that the deployment is down'
+        );
+      }
+      if (c.failureMode === 'timeout') {
+        return `fetch ${c.url} timed out after ${DEFAULT_TIMEOUT_MS}ms`;
+      }
+      if (c.failureMode === 'transport_error') {
+        return `fetch ${c.url} failed before any response: ${c.error}`;
+      }
+      return `fetch ${c.url} returned ${c.status} (upstream status)`;
+    })
     .join(' | ');
   const details = { checks };
   // `status` is kept for the single-path case so existing consumers of
@@ -428,7 +572,9 @@ async function checkCorsPreflight(surface, environment, args) {
   const url = `https://${host}/api/v1/options`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-  let response;
+  const proxy = proxyEnvFacts(host);
+  let response = null;
+  let error = null;
   try {
     response = await fetch(url, {
       method: 'OPTIONS',
@@ -436,10 +582,23 @@ async function checkCorsPreflight(surface, environment, args) {
       headers: { Origin: origin, 'Access-Control-Request-Method': 'GET' },
     });
   } catch (err) {
-    clearTimeout(timer);
-    return { ok: false, evidence: `preflight ${url} failed: ${redactMessage(err.message)}` };
+    error = err;
   }
   clearTimeout(timer);
+  if (!response) {
+    const { failureMode } = classifyHttpsFailure({ status: null, body: null, error, proxy });
+    const evidence =
+      failureMode === 'timeout'
+        ? `preflight ${url} timed out after ${DEFAULT_TIMEOUT_MS}ms`
+        : failureMode === 'proxy_blocked'
+          ? `preflight ${url} was blocked by a proxy in the request path; the harness could not reach the deployment`
+          : `preflight ${url} failed before any response: ${redactMessage(error?.message ?? String(error))}`;
+    return {
+      ok: false,
+      evidence,
+      details: { failureMode, error: redactMessage(error?.message ?? String(error)), proxyInPath: proxy },
+    };
+  }
   const allowOrigin = response.headers.get('access-control-allow-origin');
   const ok = allowOrigin === origin || allowOrigin === '*';
   return {
@@ -447,7 +606,7 @@ async function checkCorsPreflight(surface, environment, args) {
     evidence: ok
       ? `preflight ${url} allow-origin=${allowOrigin}`
       : `preflight ${url} allow-origin=${allowOrigin ?? 'absent'} (expected ${origin})`,
-    details: { allowOrigin, expected: origin, status: response.status },
+    details: { allowOrigin, expected: origin, status: response.status, failureMode: 'none', proxyInPath: proxy },
   };
 }
 
@@ -675,6 +834,9 @@ export {
   productionCnameTargets,
   healthPathsForSurface,
   HEALTH_PATHS_BY_SURFACE,
+  classifyHttpsFailure,
+  looksLikeProxyError,
+  proxyEnvFacts,
 };
 
 // `main()` only runs when the file is invoked directly; importing the

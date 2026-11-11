@@ -39,6 +39,9 @@ import {
   isSameOrSubdomain,
   productionCnameTargets,
   healthPathsForSurface,
+  classifyHttpsFailure,
+  looksLikeProxyError,
+  proxyEnvFacts,
 } from '../scripts/stable-hostname-verification.mjs';
 
 const exec = promisify(execFile);
@@ -363,6 +366,147 @@ test('default runId is generated and matches the stable pattern when --run-id is
     const result = JSON.parse(readFileSync(outPath, 'utf8'));
     assert.match(result.runId, /^[A-Za-z0-9][A-Za-z0-9_.:-]+$/, `default runId must match schema pattern, got: ${result.runId}`);
     assert.ok(result.runId.startsWith('stable-hostname-'), `default runId must start with the harness prefix, got: ${result.runId}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- Transport vs upstream classification (task 5cb4a8fe, AC5) ----
+//
+// A failed probe has two causes the harness used to report identically:
+// the deployment answered with a non-2xx status, or the request never
+// reached the deployment because a proxy in the request path answered
+// first. On 2026-11-11 the second case was observed live: every request
+// from the operator's Mac to a *.sindustries.co.nz Vercel-backed host
+// came back 502 with the body "Secret egress proxy could not reach the
+// upstream host." — which, read as an upstream status, is a false AC5
+// failure that sends the operator chasing a deployment fault that does
+// not exist.
+
+test('a proxy-generated body classifies as proxy_blocked, not an upstream status', () => {
+  const { failureMode } = classifyHttpsFailure({
+    status: 502,
+    body: 'Secret egress proxy could not reach the upstream host.',
+    error: null,
+    proxy: proxyEnvFacts('tasks.staging.sindustries.co.nz', {}),
+  });
+  assert.equal(failureMode, 'proxy_blocked', 'a proxy error body must not be reported as an upstream status');
+});
+
+test('a gateway status counts as a proxy block only when a proxy is actually in the path', () => {
+  const withProxy = { envVars: ['HTTPS_PROXY'], noProxyApplies: false };
+  const exempt = { envVars: ['HTTPS_PROXY'], noProxyApplies: true };
+  const none = { envVars: [], noProxyApplies: false };
+
+  assert.equal(
+    classifyHttpsFailure({ status: 502, body: null, error: null, proxy: withProxy }).failureMode,
+    'proxy_blocked',
+    'a gateway status behind a configured proxy is a proxy block',
+  );
+  assert.equal(
+    classifyHttpsFailure({ status: 502, body: null, error: null, proxy: exempt }).failureMode,
+    'upstream_status',
+    'NO_PROXY exempts the host, so a 502 came from the deployment',
+  );
+  assert.equal(
+    classifyHttpsFailure({ status: 502, body: null, error: null, proxy: none }).failureMode,
+    'upstream_status',
+    'with no proxy in the path a 502 is an upstream status',
+  );
+  assert.equal(
+    classifyHttpsFailure({ status: 500, body: null, error: null, proxy: withProxy }).failureMode,
+    'upstream_status',
+    'a non-gateway status is an upstream status even behind a proxy',
+  );
+});
+
+test('a request that never got a response classifies as transport_error or timeout', () => {
+  const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
+  assert.equal(
+    classifyHttpsFailure({ status: null, body: null, error: abort, proxy: null }).failureMode,
+    'timeout',
+    'an aborted request is a timeout, not a transport error',
+  );
+  const dns = Object.assign(new Error('getaddrinfo ENOTFOUND'), { name: 'TypeError' });
+  assert.equal(
+    classifyHttpsFailure({ status: null, body: null, error: dns, proxy: null }).failureMode,
+    'transport_error',
+    'a request that failed before any response is a transport error',
+  );
+});
+
+test('the proxy body marker is narrow enough not to misread an application body', () => {
+  assert.ok(looksLikeProxyError('Secret egress proxy could not reach the upstream host.'));
+  assert.ok(!looksLikeProxyError('{"error":"NotFound","message":"No route for GET /"}'));
+  assert.ok(!looksLikeProxyError(''));
+  assert.ok(!looksLikeProxyError(null));
+});
+
+test('proxyEnvFacts records variable names only, never the proxy URL', () => {
+  const facts = proxyEnvFacts('tasks.staging.sindustries.co.nz', {
+    HTTPS_PROXY: 'http://user:secret@127.0.0.1:51667',
+    HTTP_PROXY: 'http://user:secret@127.0.0.1:51667',
+  });
+  assert.deepEqual(facts.envVars.sort(), ['HTTPS_PROXY', 'HTTP_PROXY']);
+  assert.ok(
+    !JSON.stringify(facts).includes('secret'),
+    `the proxy URL must never reach the result JSON, got: ${JSON.stringify(facts)}`,
+  );
+  assert.equal(facts.noProxyApplies, false, 'no NO_PROXY means the proxy applies');
+});
+
+test('NO_PROXY exemptions are honoured for exact hosts, subdomains and the wildcard', () => {
+  const env = { HTTPS_PROXY: 'http://127.0.0.1:51667', NO_PROXY: '.sindustries.co.nz,localhost' };
+  assert.equal(proxyEnvFacts('tasks.staging.sindustries.co.nz', env).noProxyApplies, true);
+  assert.equal(proxyEnvFacts('sindustries.co.nz', env).noProxyApplies, true);
+  assert.equal(proxyEnvFacts('localhost', env).noProxyApplies, true);
+  assert.equal(proxyEnvFacts('example.com', env).noProxyApplies, false);
+  assert.equal(
+    proxyEnvFacts('anything.example.com', { HTTPS_PROXY: 'http://127.0.0.1:51667', NO_PROXY: '*' }).noProxyApplies,
+    true,
+    'a wildcard NO_PROXY exempts every host',
+  );
+});
+
+test('live mode records a failureMode on every HTTPS check, so a failure is never unattributed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'stable-hostname-verification-'));
+  try {
+    const matrixPath = join(dir, 'live-matrix.json');
+    writeFileSync(matrixPath, JSON.stringify({
+      taskId: 'test',
+      surfaces: [
+        {
+          id: 'tasks-api',
+          kind: 'api',
+          staging: 'nonexistent-host-for-tests.invalid',
+          production: null,
+          providerFallback: 'sindustries-tasks-api.fly.dev',
+          cnameTargets: { staging: 'sindustries-platform-staging.fly.dev', production: 'sindustries-tasks-api.fly.dev' },
+        },
+      ],
+    }, null, 2));
+    const outPath = join(dir, 'live.json');
+    let err;
+    try {
+      await exec('node', [SCRIPT, '--mode', 'live', '--matrix', matrixPath, '--run-id', 'test-live-failuremode', '--output', outPath], { cwd: REPO_ROOT, timeout: 180_000 });
+    } catch (e) { err = e; }
+    assert.ok(err, 'live mode against an unresolvable host must exit non-zero');
+    const out = JSON.parse(readFileSync(outPath, 'utf8'));
+    const row = out.surfaces[0];
+    const checks = row.details?.https?.checks ?? [];
+    assert.ok(checks.length > 0, 'the https stage must record its per-path checks');
+    for (const check of checks) {
+      assert.ok(
+        ['none', 'upstream_status', 'proxy_blocked', 'transport_error', 'timeout'].includes(check.failureMode),
+        `every https check must carry a known failureMode, got: ${JSON.stringify(check)}`,
+      );
+      assert.ok(check.failureMode !== 'none', `a failed check must not be classified as "none": ${JSON.stringify(check)}`);
+      assert.ok('proxyInPath' in check, 'every https check must record whether a proxy was in the request path');
+      assert.ok(
+        !JSON.stringify(check.proxyInPath).includes('secret'),
+        'the recorded proxy facts must never carry a credential',
+      );
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
