@@ -127,6 +127,14 @@ export function ClerkAuthProvider({ children }) {
       try {
         const { error: identifyError } = await clerkSignIn.create({ identifier: email });
         if (identifyError) {
+          // An unknown or malformed identifier is an explicitly handled
+          // authentication failure, so it belongs in the browser telemetry
+          // surface like every other sign-in failure. It used to return
+          // early without a report, which meant the most common sign-in
+          // failure (a typo'd or unregistered address) produced no
+          // telemetry at all and AC1 could not be evidenced from a real
+          // sign-in attempt.
+          reportClerkError(identifyError, 'signin_identify');
           return { data: null, error: new Error(clerkErrorMessage(identifyError, 'Sign-in failed.')) };
         }
 

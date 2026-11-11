@@ -206,6 +206,8 @@ Coverage mapping:
 | Export of an uncaught exception and an auth failure with the retained field set, and the `release` identifier reaching the relay in a real browser | `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` (Playwright, `GT_TELEMETRY_E2E=1`) |
 | A blocked / failing relay is non-blocking — page rendering and navigation are unaffected | `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` § "AC3: a blocked relay does not break page rendering or navigation" (Playwright) |
 | A real sign-in failure still renders inline in the application | `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` § "live app" (Playwright, gated on `CLERK_TEST_URL` + credentials) |
+| A sign-in failure at the identifier step (unknown or unregistered address) is exported, not swallowed before the telemetry report | `apps/gymtrack/src/lib/clerkAuth.test.jsx` § "browser telemetry contract" (unit) |
+| A blocked relay is non-blocking in the **deployed** application — sign-in failure, sign-up, and routed navigation all keep working with `/api/telemetry` aborted | production verification, 2026-11-12 (Playwright against `https://gymtrack.sindustries.co.nz` with the relay route aborted) |
 
 The Playwright suite intercepts the relay endpoint, so no event leaves the machine during a test run.
 
