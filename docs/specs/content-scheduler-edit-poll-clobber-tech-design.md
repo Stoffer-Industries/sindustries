@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 8352c722-7953-474a-82ed-a9e8a7fb8fa6
 product_spec: n/a
 shipped_pr: null
-shipped_date: null
+shipped_date: 2026-11-12
 ---
 
 # Content Scheduler: preserve in-progress edits across the 10-second refresh — tech design

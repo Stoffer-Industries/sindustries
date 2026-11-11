@@ -105,6 +105,16 @@ surface.
      Tom must re-approve after saving. Approve / Unapprove / Publish /
      Remove / drag-to-reschedule all operate on the aggregate id, never
      on individual parts.
+   - **Open edit draft ownership.** The 10s background refresh (below)
+     replaces the queue with fresh server copies. While an item's edit form
+     is open, the operator's unsaved draft is the source of truth: the
+     refresh must NOT overwrite the body, the schedule, or the thread parts
+     with the server copy, even when the server copy is unchanged. The draft
+     is adopted from the server only when no edit session is open — on the
+     initial render, when the operator clicks **Edit**, and again after
+     **Cancel** or a completed **Save**. Rows that are not being edited
+     still refresh normally, so auto-posted items keep appearing while
+     another row is mid-edit.
    - **Calendar grid.** The primary view is a 10-day forward calendar
      from today through today + 9 in `Pacific/Auckland`. Each day is a
      column labelled "Wed 16 Jul" style (weekday short + day + month
@@ -185,6 +195,7 @@ specimen mount.
 | Compounding % (7d) KPI tile | Vitest: `compoundingSignal.test.js` covers schema validation, classify, stale, bands (24.9/25.0/49.9/50.0 boundaries), subtitle, headline formatting; `tabs/BookmarksKpiRow.test.jsx` covers the same bands at the component level plus missing/malformed placeholders, stale marker, subtitle, and independent-failure semantics |
 | SIndustries tab iframe + fallback | Vitest: `tabs/SIndustriesTab.test.jsx` covers initial iframe render, fallback after timeout, and success-path load event |
 | Content Scheduler 10-day calendar | Vitest: `tabs/ContentSchedulerTab.test.jsx` covers composer create/approve/publish/remove, calendar grid layout, Unscheduled overflow, drag-and-drop reschedule (HH:MM preservation + 09:00 default), max-one-per-day drop guard, published read-only badge, today-status banner; pure helpers in `tabs/contentSchedulerCalendar.test.js` cover NZST/NZDT offset + DST start edge + day-key grouping |
+| Content Scheduler open-edit draft ownership | Vitest: `tabs/ContentSchedulerEditDraft.test.jsx` covers the 10s refresh against an open edit form — single and thread drafts survive an unchanged poll and a changed poll, a non-edited row still refreshes while another row is mid-edit, **Save** sends the local draft rather than the polled server copy, and **Cancel** discards the draft back to the latest server copy |
 
 ## Data Sources
 

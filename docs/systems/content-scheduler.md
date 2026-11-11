@@ -170,6 +170,33 @@ The route maps each guard code to a structured `4xx`/`5xx` response with a stabl
 6. Published cards have `draggable={false}`, a greyed style, and a "Published" badge. Their day column shows a `✓ Published` indicator.
 7. The day-status banner at the bottom shows `✓ N / cap posts published today` from the latest `today-status` poll.
 
+### Open-edit draft ownership (task 8352c722)
+
+The 10s refresh replaces the queue with fresh server copies. An open edit
+form owns its draft for the duration of the edit session:
+
+- The Content Scheduler API and database remain the source of truth for
+  **persisted** item state.
+- An open edit form's local React state is the source of truth for an
+  **unsaved** draft. A background read must not mutate that draft.
+- `SchedulerItemCard` adopts server values into the draft only when no edit
+  session is open — on the initial render, when the operator clicks **Edit**
+  (which snapshots the latest server copy), and again after **Cancel** or a
+  completed **Save**.
+- The guard covers both single items and threads, and it does not depend on
+  whether the server copy happens to be byte-for-byte equal. A poll returns
+  newly allocated objects, so reference equality is not a proxy for "the
+  server changed" — the thread draft used to be clobbered even when the
+  server copy was identical.
+- Rows that are **not** being edited still refresh normally, so auto-posted
+  items keep appearing while another row is mid-edit.
+
+The Content Scheduler API remains authoritative after **Save**. Before
+**Save**, the local draft wins against background refreshes by design. Save
+is last-write-wins: the API has no version/precondition contract, so a
+concurrent remote edit is still overwritten by a later **Save**. Conflict
+detection is a separate API product decision.
+
 ### Publish (manual)
 
 1. Tom clicks **Publish** on an approved item whose `scheduledFor` has arrived.
@@ -274,6 +301,25 @@ When `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq`, both the API process and the worker
 ---
 
 ## Runbook notes and common failure modes
+
+### Editing a tweet reverts to the old content a few seconds after typing
+
+- Cause was the 10s background refresh in
+  `apps/mission-control/src/tabs/useContentScheduler.js` replacing the
+  queue while an edit form was open, and `SchedulerItemCard` copying the
+  server copy back into the draft.
+- Fixed in task `8352c722` (branch
+  `task-8352c722-content-scheduler-edit-poll-clobber`): the card no longer
+  adopts server values into the draft while an edit session is open.
+- If this symptom returns, check that the `editing` guard is still present
+  in both draft-sync effects in `SchedulerItemCard.jsx`. A regression guard
+  lives in `apps/mission-control/src/tabs/ContentSchedulerEditDraft.test.jsx`
+  — the "survives an unchanged server copy" case is the one that catches the
+  thread-path variant, because the thread draft used to be clobbered even
+  when the server copy was identical.
+- Note the asymmetry when reproducing: the single-item path only showed the
+  bug when the server copy actually changed, because its effect dependencies
+  masked the unchanged-copy case. The thread path showed it either way.
 
 ### `GET /content-scheduler/today-status` returns `publishedCount` >= `cap` for a day Tom is sure he hasn't posted to
 

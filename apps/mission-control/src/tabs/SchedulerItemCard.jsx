@@ -50,25 +50,51 @@ export function SchedulerItemCard({
   );
   const [expanded, setExpanded] = useState(false);
 
-  useEffect(() => {
+  // Copy the latest server values into the drafts. Only ever called when no
+  // edit session is open: an open edit form owns its draft, and a background
+  // poll must never overwrite unsaved operator input (task 8352c722).
+  const adoptServerCopy = () => {
     setDraftBody(item.body);
     setDraftSchedule(toDatetimeLocal(item.scheduledFor));
-  }, [item.body, item.scheduledFor]);
-
-  useEffect(() => {
     if (normalizedParts) {
       setDraftParts(normalizedParts.map((p) => ({ body: p.body })));
     }
-  }, [normalizedParts]);
+  };
 
+  // Drafts follow the server only while the card is closed. While an edit
+  // session is open the local draft is the source of truth, so both sync
+  // effects are no-ops for the duration of the session. `editing` is in the
+  // dependency lists so the drafts re-sync the moment the session closes.
   useEffect(() => {
+    if (editing) return;
     setDraftBody(item.body);
     setDraftSchedule(toDatetimeLocal(item.scheduledFor));
-  }, [item.body, item.scheduledFor]);
+  }, [editing, item.body, item.scheduledFor]);
+
+  useEffect(() => {
+    if (editing) return;
+    if (normalizedParts) {
+      setDraftParts(normalizedParts.map((p) => ({ body: p.body })));
+    }
+  }, [editing, normalizedParts]);
 
   const disabled = isPublishDisabled(item, today);
   const tip = publishTooltip(item, today);
   const published = item.status === 'published';
+
+  // Open an edit session. The draft is seeded from the latest server copy at
+  // the moment the operator clicks Edit, so the form never opens showing a
+  // value that a poll has already replaced (task 8352c722).
+  const beginEditing = () => {
+    adoptServerCopy();
+    setEditing(true);
+  };
+
+  // Discard the local draft and fall back to the latest server copy. The
+  // sync effects above re-adopt the server values once `editing` is false.
+  const cancelEditing = () => {
+    setEditing(false);
+  };
   // Imported CTO Craft items can already have a schedule from before the
   // draft-to-queued transition was deployed. Keep those rows actionable so
   // Tom can approve them without having to move them again.
@@ -243,14 +269,14 @@ export function SchedulerItemCard({
             >
               Save
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+            <Button variant="ghost" size="sm" onClick={cancelEditing} data-testid={`content-scheduler-cancel-${item.id}`}>
               Cancel
             </Button>
           </>
         ) : (
           <>
             {!published && (
-              <Button variant="ghost" size="sm" onClick={() => setEditing(true)} data-testid={`content-scheduler-edit-${item.id}`}>
+              <Button variant="ghost" size="sm" onClick={beginEditing} data-testid={`content-scheduler-edit-${item.id}`}>
                 Edit
               </Button>
             )}
