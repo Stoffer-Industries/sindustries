@@ -193,6 +193,22 @@ All protected routes (`/workout`, `/history`, `/workouts`, `/agent-consent`, `/s
 - MCP JSON-RPC errors use standard JSON-RPC envelopes with GymTrack-specific messages.
 - Production browser errors (uncaught exceptions, unhandled promise rejections, and explicitly handled Clerk/Supabase auth failures) are reported to the hosted Grafana observability stack via a Vercel serverless relay (`apps/gymtrack/api/telemetry.js`). The telemetry surface is opt-in (`VITE_TELEMETRY_ENABLED=1`) and never bundles the Grafana Cloud credentials — only a per-deploy shared token. No user-visible UI change; failures still render inline as before. The redaction allow-list, dedupe, and volume cap are part of the public spec contract (see `docs/systems/observability.md` § "Browser-side error telemetry" and `docs/specs/gymtrack-browser-error-telemetry-tech-design.md`). The operator contract for the hosted tenant is the Loki query `{service_name="gymtrack"}` — the relay emits the service identity as a resource attribute so the tenant indexes it — with the per-event fields (`source`, `errorCode`, `operation`, `route`) read from the sanitized JSON body via a selective `| json <field>="<field>"` extraction; `source` is the event source (`auth`, `window.error`, `unhandledrejection`), never the literal string `browser`.
 
+### Browser telemetry — release identifier and coverage mapping
+
+Every exported event carries a `release` that identifies the build that produced it. Resolution order: `VITE_RELEASE_TAG` (explicit per-deploy tag) → `VERCEL_GIT_COMMIT_SHA` → `VERCEL_DEPLOYMENT_ID` → `unknown` for a production build / `dev` for a development build. A production build is **never** labelled `dev`: a build with no release metadata reports `unknown`, so a production event can never be mistaken for a local one. `vite.config.js` allow-lists exactly `VERCEL_GIT_COMMIT_SHA` and `VERCEL_DEPLOYMENT_ID` in `envPrefix` — the bare `VERCEL_` prefix is deliberately not enabled, so no other Vercel-provided variable reaches the browser bundle.
+
+Coverage mapping:
+
+| Contract | Covered by |
+| --- | --- |
+| Redaction allow-list, dedupe, volume cap, never-throws | `apps/gymtrack/src/lib/browserTelemetry.test.js` (unit) |
+| `release` resolution — explicit tag, Vercel commit, deployment id, production-never-`dev` | `apps/gymtrack/src/lib/browserTelemetry.test.js` § "release identifier" (unit) |
+| Export of an uncaught exception and an auth failure with the retained field set, and the `release` identifier reaching the relay in a real browser | `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` (Playwright, `GT_TELEMETRY_E2E=1`) |
+| A blocked / failing relay is non-blocking — page rendering and navigation are unaffected | `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` § "AC3: a blocked relay does not break page rendering or navigation" (Playwright) |
+| A real sign-in failure still renders inline in the application | `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` § "live app" (Playwright, gated on `CLERK_TEST_URL` + credentials) |
+
+The Playwright suite intercepts the relay endpoint, so no event leaves the machine during a test run.
+
 ## Agent surfaces
 
 ### OAuth-protected REST endpoints

@@ -87,6 +87,40 @@ function redactMessage(message) {
   return truncate(redactString(message).toLowerCase(), 200);
 }
 
+/**
+ * Resolve the release identifier of the deployed build.
+ *
+ * Order:
+ *   1. `VITE_RELEASE_TAG` — an explicit per-deploy tag, when the
+ *      operator sets one.
+ *   2. `VERCEL_GIT_COMMIT_SHA` — the commit Vercel is deploying. It is
+ *      reachable from the bundle only because `vite.config.js` lists
+ *      that exact name in `envPrefix`.
+ *   3. `VERCEL_DEPLOYMENT_ID` — the deployment identifier, as a last
+ *      resort for a build with no commit metadata.
+ *   4. `unknown` for a production build, `dev` otherwise.
+ *
+ * The previous behaviour fell back to the literal `'dev'` whenever
+ * `VITE_RELEASE_TAG` was unset, so every production row in Grafana was
+ * labelled `release=dev` and could not be told apart from a local run.
+ * A production build with no release metadata is now labelled
+ * `unknown` — never `dev`. The relay requires `release` to be a
+ * string, so the fallback keeps the payload valid.
+ */
+function resolveRelease() {
+  const explicit = truncate(import.meta.env?.VITE_RELEASE_TAG ?? '', 64);
+  if (explicit) return explicit;
+
+  const commit = truncate(import.meta.env?.VERCEL_GIT_COMMIT_SHA ?? '', 64);
+  if (commit) return commit;
+
+  const deployment = truncate(import.meta.env?.VERCEL_DEPLOYMENT_ID ?? '', 64);
+  if (deployment) return deployment;
+
+  const mode = (import.meta.env?.MODE ?? '').toString();
+  return mode === 'production' ? 'unknown' : 'dev';
+}
+
 function buildPayload({ error, context, source }) {
   const safeMessage =
     redactMessage(context?.safeMessage) ??
@@ -100,7 +134,7 @@ function buildPayload({ error, context, source }) {
   return {
     environment:
       (import.meta.env?.MODE ?? 'unknown').toString().slice(0, 32) || 'unknown',
-    release: truncate(import.meta.env?.VITE_RELEASE_TAG ?? '', 64) || 'dev',
+    release: resolveRelease(),
     route: truncate(window?.location?.pathname ?? '', 128),
     operation: truncate(context?.operation ?? source ?? 'unknown', 64),
     provider: context?.provider ?? null,

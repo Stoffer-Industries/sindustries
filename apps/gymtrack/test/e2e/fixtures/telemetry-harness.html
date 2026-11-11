@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GymTrack browser telemetry e2e harness</title>
+  </head>
+  <body>
+    <main>
+      <h1 data-testid="harness-heading">GymTrack telemetry e2e harness</h1>
+
+      <p data-testid="harness-page">page-one</p>
+      <p data-testid="harness-status">idle</p>
+
+      <button data-testid="harness-auth-failure" type="button">
+        Simulate auth failure
+      </button>
+
+      <button data-testid="harness-uncaught-error" type="button">
+        Simulate uncaught exception
+      </button>
+
+      <a data-testid="harness-nav-link" href="#page-two">Go to page two</a>
+    </main>
+
+    <script type="module">
+      // The telemetry module is imported straight from the app source so the
+      // test exercises the real browser bundle (build-time env inlining
+      // included) rather than a copy of it.
+      import {
+        installBrowserTelemetry,
+        reportAuthError
+      } from '/src/lib/browserTelemetry.js';
+
+      const status = document.querySelector('[data-testid="harness-status"]');
+      const page = document.querySelector('[data-testid="harness-page"]');
+
+      const renderPage = () => {
+        page.textContent = window.location.hash === '#page-two' ? 'page-two' : 'page-one';
+      };
+
+      window.addEventListener('hashchange', renderPage);
+      renderPage();
+
+      installBrowserTelemetry();
+
+      document
+        .querySelector('[data-testid="harness-auth-failure"]')
+        .addEventListener('click', () => {
+          // Mirrors the `{ data: null, error }` call sites in
+          // `clerkAuth.jsx` / `supabaseAuth.jsx`.
+          reportAuthError(new Error('gymtrack-browser-error-telemetry-evidence-e2e'), {
+            provider: 'clerk',
+            operation: 'signin',
+            errorCode: 'form_password_incorrect'
+          });
+          status.textContent = 'auth-failure-reported';
+        });
+
+      document
+        .querySelector('[data-testid="harness-uncaught-error"]')
+        .addEventListener('click', () => {
+          setTimeout(() => {
+            throw new Error('gymtrack-browser-error-telemetry-evidence-e2e');
+          }, 0);
+        });
+    </script>
+  </body>
+</html>

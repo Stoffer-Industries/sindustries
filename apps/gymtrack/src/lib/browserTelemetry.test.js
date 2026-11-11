@@ -176,3 +176,80 @@ describe('browserTelemetry', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Release-identifier resolution (task e89db27f, AC1 — QA repair 2026-11-11).
+ *
+ * The QA verifier found that both live production rows in Grafana carried
+ * `release=dev`: `VITE_RELEASE_TAG` was unset in the deployed build and the
+ * module fell back to the literal `'dev'`, so a production event could not
+ * be told apart from a local one. These cases pin the new contract:
+ * an explicit tag wins, then the Vercel build metadata, and a production
+ * build with no metadata is `unknown` — never `dev`.
+ */
+describe('browserTelemetry — release identifier', () => {
+  beforeEach(() => {
+    _resetBrowserTelemetryForTests();
+    vi.resetModules();
+    vi.stubEnv('VITE_TELEMETRY_ENABLED', '1');
+    vi.stubEnv('VITE_TELEMETRY_TOKEN', 'relay-test-token');
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+  });
+
+  afterEach(() => {
+    _resetBrowserTelemetryForTests();
+    vi.unstubAllEnvs();
+    globalThis.fetch = originalFetch;
+  });
+
+  function capturedRelease() {
+    const fetchSpy = globalThis.fetch;
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    return JSON.parse(fetchSpy.mock.calls[0][1].body).release;
+  }
+
+  it('uses the explicit VITE_RELEASE_TAG when one is configured', () => {
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('VITE_RELEASE_TAG', 'gymtrack-v2026.11.11');
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'a'.repeat(40));
+    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    expect(capturedRelease()).toBe('gymtrack-v2026.11.11');
+  });
+
+  it('falls back to the Vercel commit sha when no explicit tag is set', () => {
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('VITE_RELEASE_TAG', '');
+    const sha = 'b'.repeat(40);
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', sha);
+    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    expect(capturedRelease()).toBe(sha);
+  });
+
+  it('falls back to the Vercel deployment id when no tag or commit is set', () => {
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('VITE_RELEASE_TAG', '');
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
+    vi.stubEnv('VERCEL_DEPLOYMENT_ID', 'dpl_abc123');
+    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    expect(capturedRelease()).toBe('dpl_abc123');
+  });
+
+  it('never labels a production build as dev', () => {
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('VITE_RELEASE_TAG', '');
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
+    vi.stubEnv('VERCEL_DEPLOYMENT_ID', '');
+    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    expect(capturedRelease()).toBe('unknown');
+    expect(capturedRelease()).not.toBe('dev');
+  });
+
+  it('keeps dev for a development build with no release metadata', () => {
+    vi.stubEnv('MODE', 'development');
+    vi.stubEnv('VITE_RELEASE_TAG', '');
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
+    vi.stubEnv('VERCEL_DEPLOYMENT_ID', '');
+    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    expect(capturedRelease()).toBe('dev');
+  });
+});
