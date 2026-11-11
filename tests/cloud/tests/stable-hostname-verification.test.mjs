@@ -40,8 +40,11 @@ import {
   productionCnameTargets,
   healthPathsForSurface,
   classifyHttpsFailure,
+  classifyCorsPreflight,
   looksLikeProxyError,
   proxyEnvFacts,
+  readBodyExcerpt,
+  redactMessage,
 } from '../scripts/stable-hostname-verification.mjs';
 
 const exec = promisify(execFile);
@@ -418,6 +421,91 @@ test('a gateway status counts as a proxy block only when a proxy is actually in 
     'upstream_status',
     'a non-gateway status is an upstream status even behind a proxy',
   );
+});
+
+test('CORS preflight rejects non-2xx responses and classifies the failed response', () => {
+  const expectedOrigin = 'https://tasks.staging.sindustries.co.nz';
+  const configuredProxy = { envVars: ['HTTPS_PROXY'], noProxyApplies: false };
+  const exemptProxy = { envVars: ['HTTPS_PROXY'], noProxyApplies: true };
+
+  const proxyResponse = classifyCorsPreflight({
+    status: 502,
+    body: 'Secret egress proxy could not reach the upstream host.',
+    allowOrigin: expectedOrigin,
+    expectedOrigin,
+    proxy: configuredProxy,
+  });
+  assert.equal(proxyResponse.ok, false, 'a proxy 502 must fail even when the expected ACAO header is present');
+  assert.equal(proxyResponse.failureMode, 'proxy_blocked', 'a proxy marker must classify a CORS response as proxy_blocked');
+
+  const gatewayResponse = classifyCorsPreflight({
+    status: 502,
+    body: null,
+    allowOrigin: expectedOrigin,
+    expectedOrigin,
+    proxy: configuredProxy,
+  });
+  assert.equal(gatewayResponse.ok, false, 'a gateway response must fail the CORS preflight');
+  assert.equal(gatewayResponse.failureMode, 'proxy_blocked', 'a gateway status behind a configured proxy is proxy_blocked');
+
+  const exemptResponse = classifyCorsPreflight({
+    status: 502,
+    body: null,
+    allowOrigin: expectedOrigin,
+    expectedOrigin,
+    proxy: exemptProxy,
+  });
+  assert.equal(exemptResponse.failureMode, 'upstream_status', 'NO_PROXY exempts the host, so the gateway response is upstream_status');
+
+  const upstreamResponse = classifyCorsPreflight({
+    status: 500,
+    body: 'application failure',
+    allowOrigin: expectedOrigin,
+    expectedOrigin,
+    proxy: { envVars: [], noProxyApplies: false },
+  });
+  assert.equal(upstreamResponse.ok, false, 'an upstream non-2xx response must fail the CORS preflight');
+  assert.equal(upstreamResponse.failureMode, 'upstream_status', 'an upstream non-2xx response is upstream_status');
+
+  const successfulResponse = classifyCorsPreflight({
+    status: 204,
+    body: null,
+    allowOrigin: expectedOrigin,
+    expectedOrigin,
+    proxy: configuredProxy,
+  });
+  assert.equal(successfulResponse.ok, true, 'a 2xx response with the expected ACAO header must pass');
+  assert.equal(successfulResponse.failureMode, 'none', 'a successful CORS response has no failure mode');
+});
+
+test('response excerpt redaction removes URI userinfo and Basic/Proxy-Authorization credentials', () => {
+  const body = [
+    'proxy request failed for http://proxy-user:proxy-password@proxy.internal:8443/path',
+    'Proxy-Authorization: Basic cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA==',
+    'Authorization: Basic dXNlcjpwYXNzd29yZA==',
+  ].join('\n');
+  const redacted = redactMessage(body);
+
+  assert.ok(!redacted.includes('proxy-user'), `URI userinfo username leaked: ${redacted}`);
+  assert.ok(!redacted.includes('proxy-password'), `URI userinfo password leaked: ${redacted}`);
+  assert.ok(!redacted.includes('cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA=='), `Proxy-Authorization value leaked: ${redacted}`);
+  assert.ok(!redacted.includes('dXNlcjpwYXNzd29yZA=='), `Authorization value leaked: ${redacted}`);
+  assert.match(redacted, /http:\/\/\[REDACTED\]@proxy\.internal/, `URI userinfo was not replaced: ${redacted}`);
+  assert.match(redacted, /Proxy-Authorization:\s*\[REDACTED\]/i, `Proxy-Authorization was not replaced: ${redacted}`);
+});
+
+test('a persisted response-body excerpt is bounded and credential-redacted', async () => {
+  const credentialBody = [
+    'proxy request failed for http://proxy-user:proxy-password@proxy.internal:8443/path',
+    'Proxy-Authorization: Basic cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA==',
+    'x'.repeat(400),
+  ].join('\n');
+  const excerpt = await readBodyExcerpt({ text: async () => credentialBody }, 200);
+
+  assert.ok(excerpt.length <= 200, `the response excerpt must be bounded, got ${excerpt.length} characters`);
+  assert.ok(!excerpt.includes('proxy-user'), `URI userinfo username leaked: ${excerpt}`);
+  assert.ok(!excerpt.includes('proxy-password'), `URI userinfo password leaked: ${excerpt}`);
+  assert.ok(!excerpt.includes('cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA=='), `Basic credential leaked: ${excerpt}`);
 });
 
 test('a request that never got a response classifies as transport_error or timeout', () => {

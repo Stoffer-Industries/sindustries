@@ -165,12 +165,23 @@ function nowIso() {
 }
 
 function redactMessage(msg) {
-  // Defensive: stable-hostname-verification does not handle bearer tokens,
-  // but the harness redaction rule from staging-workflows.mjs is reused so
-  // future expansions do not accidentally log secret-shaped values.
+  // Failed response bodies can contain credentials that were not designed
+  // for this harness: a proxy error page may echo the proxy URL (including
+  // URI userinfo), and gateway errors may include an Authorization or
+  // Proxy-Authorization header. Redact those forms before the excerpt is
+  // persisted in result JSON or included in row evidence.
   return String(msg ?? '')
     .replace(/[A-Fa-f0-9]{32,}/g, REDACTED)
-    .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/g, `Bearer ${REDACTED}`);
+    .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/g, `Bearer ${REDACTED}`)
+    .replace(
+      /(\bProxy-Authorization\s*[:=]\s*)(?:Basic\s+)?[A-Za-z0-9+/=._~-]+/gi,
+      `$1${REDACTED}`,
+    )
+    .replace(/\bBasic\s+[A-Za-z0-9+/=]+/gi, `Basic ${REDACTED}`)
+    .replace(
+      /(\b[a-z][a-z0-9+.-]*:\/\/)[^\/\s@]+@/gi,
+      `$1${REDACTED}@`,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -274,10 +285,33 @@ function classifyHttpsFailure({ status = null, body = null, error = null, proxy 
 async function readBodyExcerpt(response, maxChars = 200) {
   try {
     const text = await response.text();
-    return redactMessage(text.slice(0, maxChars));
+    // Redact the complete body before truncating it. Slicing first could
+    // split a credential across the boundary and persist an unredacted
+    // prefix of it.
+    return redactMessage(text).slice(0, maxChars);
   } catch {
     return null;
   }
+}
+
+// Evaluate a CORS preflight response. The HTTP status and the CORS header
+// are separate contracts: a 2xx response without the expected allow-origin
+// header is still a failed preflight, and a non-2xx response is failed even
+// if a proxy or origin happened to include the expected header.
+function classifyCorsPreflight({
+  status,
+  body = null,
+  allowOrigin = null,
+  expectedOrigin,
+  proxy = null,
+} = {}) {
+  const statusOk = Number.isInteger(status) && status >= 200 && status < 300;
+  const allowOriginOk = allowOrigin === expectedOrigin || allowOrigin === '*';
+  const ok = statusOk && allowOriginOk;
+  const failureMode = ok
+    ? 'none'
+    : classifyHttpsFailure({ status, body, error: null, proxy }).failureMode;
+  return { ok, statusOk, allowOriginOk, failureMode };
 }
 
 // ---------------------------------------------------------------------------
@@ -600,13 +634,44 @@ async function checkCorsPreflight(surface, environment, args) {
     };
   }
   const allowOrigin = response.headers.get('access-control-allow-origin');
-  const ok = allowOrigin === origin || allowOrigin === '*';
+  const status = response.status;
+  const statusOk = status >= 200 && status < 300;
+  const allowOriginOk = allowOrigin === origin || allowOrigin === '*';
+  // Read the body for every failed preflight, not only for a non-2xx
+  // response: the status and ACAO header are separate contracts, and the
+  // body is what distinguishes an observer-side proxy block from an
+  // upstream CORS failure.
+  const bodyExcerpt = statusOk && allowOriginOk ? null : await readBodyExcerpt(response);
+  const { ok, failureMode } = classifyCorsPreflight({
+    status,
+    body: bodyExcerpt,
+    allowOrigin,
+    expectedOrigin: origin,
+    proxy,
+  });
+  let evidence;
+  if (ok) {
+    evidence = `preflight ${url} allow-origin=${allowOrigin}`;
+  } else if (failureMode === 'proxy_blocked') {
+    evidence =
+      `preflight ${url} returned ${status} — blocked by a proxy in the request path` +
+      `${bodyExcerpt ? ` (body: ${bodyExcerpt})` : ''}; the harness could not reach the deployment`;
+  } else {
+    evidence = statusOk
+      ? `preflight ${url} allow-origin=${allowOrigin ?? 'absent'} (expected ${origin})`
+      : `preflight ${url} returned ${status} (upstream status)`;
+  }
   return {
     ok,
-    evidence: ok
-      ? `preflight ${url} allow-origin=${allowOrigin}`
-      : `preflight ${url} allow-origin=${allowOrigin ?? 'absent'} (expected ${origin})`,
-    details: { allowOrigin, expected: origin, status: response.status, failureMode: 'none', proxyInPath: proxy },
+    evidence,
+    details: {
+      allowOrigin,
+      expected: origin,
+      status,
+      failureMode,
+      bodyExcerpt,
+      proxyInPath: proxy,
+    },
   };
 }
 
@@ -835,8 +900,11 @@ export {
   healthPathsForSurface,
   HEALTH_PATHS_BY_SURFACE,
   classifyHttpsFailure,
+  classifyCorsPreflight,
   looksLikeProxyError,
   proxyEnvFacts,
+  readBodyExcerpt,
+  redactMessage,
 };
 
 // `main()` only runs when the file is invoked directly; importing the
