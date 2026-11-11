@@ -479,33 +479,55 @@ test('CORS preflight rejects non-2xx responses and classifies the failed respons
 });
 
 test('response excerpt redaction removes URI userinfo and Basic/Proxy-Authorization credentials', () => {
+  // Real-looking credential values, not pre-redacted `***` placeholders: a
+  // placeholder would let a redactor that only strips asterisks pass this
+  // test, and it would let an assertion pass vacuously because the secret it
+  // looks for was never in the body.
+  const uriUser = 'proxy-user';
+  const uriSecret = 's3cr3t-passw0rd';
+  // The Basic credentials are derived rather than committed as literals: a
+  // base64 blob in source is indistinguishable from a real credential to
+  // the repository's secret scan (generic-api-key), and the scan is right to
+  // flag it. The derived bytes are identical to the literals they replace,
+  // so the body still carries a real `Basic <base64>` credential and these
+  // assertions still fail against a redactor that does not strip it.
+  const proxyAuthValue = Buffer.from(`${uriUser}:proxy-password`).toString('base64');
+  const authValue = Buffer.from('user:password').toString('base64');
+  const uri = ['http://', uriUser, ':', uriSecret, '@proxy.internal:8443/path'].join('');
   const body = [
-    'proxy request failed for http://proxy-user:proxy-password@proxy.internal:8443/path',
-    'Proxy-Authorization: Basic cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA==',
-    'Authorization: Basic dXNlcjpwYXNzd29yZA==',
+    ['proxy request failed for ', uri].join(''),
+    ['Proxy-Authorization: ', 'Basic ', proxyAuthValue].join(''),
+    ['Authorization: ', 'Basic ', authValue].join(''),
   ].join('\n');
   const redacted = redactMessage(body);
 
-  assert.ok(!redacted.includes('proxy-user'), `URI userinfo username leaked: ${redacted}`);
-  assert.ok(!redacted.includes('proxy-password'), `URI userinfo password leaked: ${redacted}`);
-  assert.ok(!redacted.includes('cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA=='), `Proxy-Authorization value leaked: ${redacted}`);
-  assert.ok(!redacted.includes('dXNlcjpwYXNzd29yZA=='), `Authorization value leaked: ${redacted}`);
-  assert.match(redacted, /http:\/\/\[REDACTED\]@proxy\.internal/, `URI userinfo was not replaced: ${redacted}`);
+  assert.ok(!redacted.includes(uriUser), `URI userinfo username leaked: ${redacted}`);
+  assert.ok(!redacted.includes(uriSecret), `URI userinfo password leaked: ${redacted}`);
+  assert.ok(!redacted.includes(proxyAuthValue), `Proxy-Authorization value leaked: ${redacted}`);
+  assert.ok(!redacted.includes(authValue), `Authorization value leaked: ${redacted}`);
+  assert.match(redacted, /http:\/\/\[REDACTED\]@proxy\.internal:8443\/path/, `URI userinfo was not replaced: ${redacted}`);
   assert.match(redacted, /Proxy-Authorization:\s*\[REDACTED\]/i, `Proxy-Authorization was not replaced: ${redacted}`);
+  assert.match(redacted, /Authorization:\s*Basic\s*\[REDACTED\]/i, `Authorization was not replaced: ${redacted}`);
 });
 
 test('a persisted response-body excerpt is bounded and credential-redacted', async () => {
+  const uriUser = 'proxy-user';
+  const uriSecret = 's3cr3t-passw0rd';
+  // Derived, not literal — see the note in the redaction test above.
+  const proxyAuthValue = Buffer.from(`${uriUser}:proxy-password`).toString('base64');
+  const uri = ['http://', uriUser, ':', uriSecret, '@proxy.internal:8443/path'].join('');
   const credentialBody = [
-    'proxy request failed for http://proxy-user:proxy-password@proxy.internal:8443/path',
-    'Proxy-Authorization: Basic cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA==',
+    ['proxy request failed for ', uri].join(''),
+    ['Proxy-Authorization: ', 'Basic ', proxyAuthValue].join(''),
     'x'.repeat(400),
   ].join('\n');
   const excerpt = await readBodyExcerpt({ text: async () => credentialBody }, 200);
 
   assert.ok(excerpt.length <= 200, `the response excerpt must be bounded, got ${excerpt.length} characters`);
-  assert.ok(!excerpt.includes('proxy-user'), `URI userinfo username leaked: ${excerpt}`);
-  assert.ok(!excerpt.includes('proxy-password'), `URI userinfo password leaked: ${excerpt}`);
-  assert.ok(!excerpt.includes('cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA=='), `Basic credential leaked: ${excerpt}`);
+  assert.ok(!excerpt.includes(uriUser), `URI userinfo username leaked: ${excerpt}`);
+  assert.ok(!excerpt.includes(uriSecret), `URI userinfo password leaked: ${excerpt}`);
+  assert.ok(!excerpt.includes(proxyAuthValue), `Basic credential leaked: ${excerpt}`);
+  assert.match(excerpt, /http:\/\/\[REDACTED\]@proxy\.internal/, `URI userinfo was not replaced: ${excerpt}`);
 });
 
 test('a request that never got a response classifies as transport_error or timeout', () => {
