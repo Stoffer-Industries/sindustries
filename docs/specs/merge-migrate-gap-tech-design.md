@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 20195ce7-6510-4b94-811d-8aefc66fda3f
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 966
+shipped_date: 2026-11-12
 ---
 
 # Close the Merge→Migrate Gap Tech Design
@@ -44,7 +44,7 @@ Three independent facts made this invisible longer than it should have been:
 
 1. **Where the migrate step lives — two layers, not one:**
    - **Layer A (fast self-heal, push time):** `services/openclaw-edge/server.mjs`, in the same push handler that already calls `refreshMainCheckout()`. This runs seconds after a merge, before any agent would notice.
-   - **Layer B (fail-closed backstop, every service start):** `services/tasks-api/predev`/`prestart` (AC1) plus a startup preflight in `server.ts` (AC2). This is what protects dev (Rowan's own iteration DB, out of Edge's remit) and covers the case where Layer A is disabled, fails, or the service is started by hand.
+   - **Layer B (fail-closed backstop, every service start):** `services/tasks-api/predev` (AC1) plus a startup preflight in `server.ts` (AC2). This is what protects dev (Rowan's own iteration DB, out of Edge's remit) and covers the case where Layer A is disabled, fails, or the service is started by hand.
    - Rejected: a third, separate periodic drift-guard script (option c from Lox's list). It would duplicate Layer A's detection with a polling delay and no extra safety the push-time hook doesn't already give for the one DB that matters most (prodlike). Not worth the added moving part.
 2. **Which databases:** Layer A (Edge, AC3) targets **prodlike only** — it's the shared DB "every agent reads," and dev is explicitly Rowan's own remit per Lox's 2026-10-24 note. Layer B (AC1 predev, AC2 preflight) is generic per-service and protects **both** dev and prodlike identically, since it runs inside whichever Tilt mode is currently up.
 3. **Failure policy:** Edge's `refreshMainCheckout()` **never blocks the fast-forward** — that would break Edge's core invariant that the canonical checkout always tracks `origin/main`, and a merge already landed on GitHub regardless of what the local Mac does. Instead: Edge best-effort runs the migrate step after a successful ff-merge and **alerts via `wakeMainSession()`** (the same channel already used for agent-definition sync failures) if it fails, without retrying in a loop. The authoritative guarantee against serving broken reads is Layer B's AC2 preflight, which refuses to `listen()` at all if the DB doesn't match the generated client — regardless of whether Layer A succeeded.
@@ -53,18 +53,20 @@ Three independent facts made this invisible longer than it should have been:
 
 ## Implementation Plan
 
-### AC1 — `predev`/`prestart` run `prisma migrate deploy`
+### AC1 — `predev` runs `prisma migrate deploy`
 
 `services/tasks-api/package.json`:
 
 ```json
 "predev": "prisma migrate deploy && prisma generate",
-"prestart": "prisma migrate deploy && prisma generate",
+"prestart": "prisma generate",
 ```
 
-This covers the Tilt-managed `dev` and `prodlike` local stacks (both run `npm run dev` via `infra/tilt/Tiltfile`'s `tasks-api` `local_resource`, which already restarts on `services/tasks-api/prisma` changes) and the `npm start` path used by Fly (where `release_command` already runs `prisma:migrate` separately — this makes `prestart` consistent with that, and harmless to run twice since `migrate deploy` is idempotent against an already-current DB).
+This covers the Tilt-managed `dev` and `prodlike` local stacks (both run `npm run dev` via `infra/tilt/Tiltfile`'s `tasks-api` `local_resource`, which already restarts on `services/tasks-api/prisma` changes).
 
-If `prisma migrate deploy` fails (e.g. DB unreachable, a genuinely broken migration), `predev`/`prestart` fails and `npm run dev`/`npm start` never starts the server — the previous process has already been killed by Tilt before the new one is spawned, so the service goes **down** rather than serving 500s. This is an accepted, explicit tradeoff (see Risks).
+`prestart` is deliberately **narrowed to `prisma generate` only**. The Fly image's CMD is `npm run start --workspace services/tasks-api`, so a `prestart` that migrated would make every machine start, restart and scale-up apply migrations from inside the app container — a new boot-time dependency on database write access that the hosted path does not need. Fly's `release_command` (`infra/cloud/fly/tasks-api.fly.toml`) already owns migration for deploys, and the AC2 preflight fails closed if the schema and the generated client have drifted. Migration therefore stays in `predev` (local dev/prodlike stacks) and `release_command` (hosted deploys); `prestart` only regenerates the client.
+
+If `prisma migrate deploy` fails (e.g. DB unreachable, a genuinely broken migration), `predev` fails and `npm run dev` never starts the server — the previous process has already been killed by Tilt before the new one is spawned, so the service goes **down** rather than serving 500s. This is an accepted, explicit tradeoff (see Risks).
 
 ### AC2 — Startup preflight on `TaskApproval` columns
 
@@ -81,7 +83,7 @@ Scope is intentionally limited to `TaskApproval` per the AC text (it's the model
 
 ### AC3 — Edge push-time drift self-heal
 
-`services/openclaw-edge/server.mjs` (workspace repo): add a `migratePronodlikeDb()` step (naming TBD in review) called from the existing push-handler `action()` right after `await refreshMainCheckout();` succeeds and before `await removeMergedWorktrees();`:
+`services/openclaw-edge/server.mjs` (workspace repo): add a `migrateProdlikeDb()` step called from the existing push-handler `action()` right after `await refreshMainCheckout();` succeeds and before `await removeMergedWorktrees();`:
 
 ```js
 async function migrateProdlikeDb() {
@@ -137,7 +139,7 @@ None beyond the Edge push-handler change (AC3), which is infrastructure code, no
 
 ## Open Questions and Risks
 
-1. **Brief tasks-api downtime on a predev failure (AC1):** if `prisma migrate deploy` fails for any reason (bad migration, DB unreachable), Tilt's respawned `tasks-api` process won't start, so the service is fully down until fixed — rather than serving stale-but-working reads. This is intentional (same fail-closed philosophy as AC2) but is a behavior change worth flagging to Quinn: previously a bad migration left the *old* process running (serving a stale-but-correct schema) until someone noticed; now it goes down immediately. Recommend accepting this, since "down and loud" is strictly more debuggable than "500ing silently," but it's Quinn's call as the design approver.
+1. **Brief tasks-api downtime on a predev failure (AC1):** if `prisma migrate deploy` fails for any reason (bad migration, DB unreachable), Tilt's respawned `tasks-api` process won't start, so the service is fully down until fixed — rather than serving stale-but-working reads. This is intentional (same fail-closed philosophy as AC2) but is a behavior change worth flagging to Quinn: previously a bad migration left the *old* process running (serving a stale-but-correct schema) until someone noticed; now it goes down immediately. Recommend accepting this, since "down and loud" is strictly more debuggable than "500ing silently," but it's Quinn's call as the design approver. The hosted path is unaffected by this risk: `prestart` does not migrate, so Fly machine restarts never depend on database write access.
 2. **Edge auto-applying migrations against prodlike unattended (AC3)** is the biggest blast-radius item in this design — it turns "someone runs `migrate-db.sh` by hand after noticing drift" into "every push to `main` can mutate the shared prodlike DB automatically." Mitigations already in the reused script (pre-migrate `pg_dump` backup, Prisma's per-migration transactional apply, existing auto-recovery for the one known partial-apply case) carry over unchanged, and `migrate deploy` is the same command a human would run. Flagging explicitly for Quinn's review rather than treating it as self-evidently safe.
 3. **`information_schema.columns` check is `TaskApproval`-only (AC2),** matching the AC text and the actual incident. If a future incident hits a different model, the same helper trivially generalizes, but it does not currently guard the whole schema — intentional scope limit, not an oversight.
 4. **Dev DB is not covered by Layer A.** If Rowan's own dev Postgres drifts, only Layer B (AC1/AC2) protects it — consistent with Lox's 2026-10-24 note that dev is Rowan's remit, but worth stating plainly so it isn't assumed to be covered by the Edge change.
