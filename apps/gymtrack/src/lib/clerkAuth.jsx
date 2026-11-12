@@ -17,7 +17,9 @@ const AUTH_REQUEST_TIMEOUT_MS = 15_000;
  * the SDK surfaces one. We never send the raw message to telemetry
  * (the user-facing longMessage can leak internal context); the safe
  * code is the smallest signal that still tells Quinn which code path
- * failed.
+ * failed. The envelope itself never reaches the telemetry serializer —
+ * it is reduced to the code + status here and only that context is
+ * reported (see the context-only contract on `reportAuthError`).
  */
 function clerkSafeErrorCode(error) {
   return error?.errors?.[0]?.code ?? error?.code ?? null;
@@ -28,7 +30,11 @@ function clerkSafeStatus(error) {
 }
 
 function reportClerkError(error, operation) {
-  reportAuthError(error, {
+  // Context-only by contract: the Clerk envelope is reduced to the
+  // safe code + status here, and only that context is reported. The
+  // envelope never reaches the telemetry serializer, so no message,
+  // stack, email or session token can be derived from it.
+  reportAuthError({
     provider: 'clerk',
     operation,
     errorCode: clerkSafeErrorCode(error),
@@ -127,6 +133,14 @@ export function ClerkAuthProvider({ children }) {
       try {
         const { error: identifyError } = await clerkSignIn.create({ identifier: email });
         if (identifyError) {
+          // An unknown or malformed identifier is an explicitly handled
+          // authentication failure, so it belongs in the browser telemetry
+          // surface like every other sign-in failure. It used to return
+          // early without a report, which meant the most common sign-in
+          // failure (a typo'd or unregistered address) produced no
+          // telemetry at all and AC1 could not be evidenced from a real
+          // sign-in attempt.
+          reportClerkError(identifyError, 'signin_identify');
           return { data: null, error: new Error(clerkErrorMessage(identifyError, 'Sign-in failed.')) };
         }
 

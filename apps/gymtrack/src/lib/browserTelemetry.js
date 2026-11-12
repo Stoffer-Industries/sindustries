@@ -25,9 +25,11 @@
  *
  * The module exports three symbols:
  *   - `installBrowserTelemetry()` — registers global listeners once.
- *   - `reportAuthError(error, context)` — explicitly called from
- *     every `{ data: null, error: ... }` return in
- *     `clerkAuth.jsx` and `supabaseAuth.jsx`.
+ *   - `reportAuthError(context)` — explicitly called from every
+ *     `{ data: null, error: ... }` return in `clerkAuth.jsx` and
+ *     `supabaseAuth.jsx`. The auth surface is CONTEXT-ONLY: the error
+ *     envelope is never handed to the serializer, so no message and no
+ *     stack can be derived from it.
  *   - `_resetBrowserTelemetryForTests()` — clears module-level state
  *     between vitest cases (the dedupe / volume counters are
  *     module-level, so a per-test reset is required).
@@ -122,12 +124,20 @@ function resolveRelease() {
 }
 
 function buildPayload({ error, context, source }) {
-  const safeMessage =
-    redactMessage(context?.safeMessage) ??
-    redactMessage(safeErrorMessage(error)) ??
-    null;
-  const safeStack =
-    context?.safeStack !== undefined
+  // `contextOnly` is the auth-surface contract: the caller passed a
+  // context object and no error envelope, so nothing may be derived
+  // from an error — not a message, not a stack. The flag is checked
+  // explicitly rather than inferred from `error === null`, so the
+  // guarantee survives a future change to the generic path.
+  const contextOnly = context?.contextOnly === true;
+  const safeMessage = contextOnly
+    ? null
+    : (redactMessage(context?.safeMessage) ??
+      redactMessage(safeErrorMessage(error)) ??
+      null);
+  const safeStack = contextOnly
+    ? null
+    : context?.safeStack !== undefined
       ? redactStack(context.safeStack)
       : redactStack(safeErrorStack(error));
 
@@ -293,15 +303,30 @@ export function installBrowserTelemetry() {
 /**
  * Explicit auth-error reporting. Called from every
  * `{ data: null, error: ... }` return in clerkAuth.jsx and
- * supabaseAuth.jsx. The `context` argument carries the operation name,
- * the provider ('clerk' | 'supabase'), and a safe Clerk error code /
- * status extracted from the error envelope (no message, no stack).
+ * supabaseAuth.jsx.
+ *
+ * CONTRACT — the auth surface is context-only. This function does not
+ * accept an error envelope: the caller extracts the safe fields
+ * (operation, provider, errorCode, status) and passes only those. The
+ * envelope therefore never reaches the serializer, so no `message` and
+ * no `stack` can be derived from it.
+ *
+ * The guarantee is structural, not a redaction promise. A Clerk
+ * envelope can carry an email address, a session token or a stack
+ * frame that the browser-side pattern redaction does not cover, so
+ * relying on redaction to strip it would leave the contract dependent
+ * on a best-effort layer. Making the envelope un-passable removes the
+ * dependency.
  *
  * The function never throws. Caller code is unchanged — failures here
  * cannot break the auth flow.
  */
-export function reportAuthError(error, context) {
-  dispatch({ error, context, source: 'auth' });
+export function reportAuthError(context) {
+  dispatch({
+    error: null,
+    context: { ...(context ?? {}), contextOnly: true },
+    source: 'auth'
+  });
 }
 
 /**
