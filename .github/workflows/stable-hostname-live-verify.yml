@@ -23,10 +23,22 @@
 #   * No credentials. The harness performs DNS resolution, an HTTPS GET on a
 #     health endpoint and a CORS preflight; it never reads a token, so this
 #     job needs no `environment:` and no secret reference of any kind. The
-#     contract test asserts that no such reference is ever added.
+#     contract test asserts that no such reference is ever added. The checkout
+#     itself also runs with `persist-credentials: false`, so the implicit
+#     GITHUB_TOKEN is never written into `.git/config` for a later step to
+#     pick up.
 #   * The proxy environment variables are cleared explicitly and NO_PROXY is
 #     pinned, so the request path is provably direct even if a runner image
-#     or an org-level runner configuration sets one.
+#     or an org-level runner configuration sets one. The cleared list is the
+#     repository's own direct-egress policy (the six standard HTTP proxy
+#     variables, the CA-bundle variables `agents/lib/github-cli.sh` and
+#     `infra/cloud/bin/status` drop, and the host-specific egress variables
+#     `HUMAN_PROXY` / `SECRET_EGRESS_PROXY`) and the contract test pins the
+#     complete list.
+#   * The evidence is bound to the commit the run actually executed: the
+#     checkout is pinned to the dispatched commit, the resolved commit is
+#     asserted against the requested one, and the harness records that
+#     commit in the result JSON the artifact carries.
 #   * The redacted result JSON is uploaded as a run artifact, including when
 #     the harness reports a failure, because a failing run is the evidence.
 #
@@ -65,38 +77,66 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Never persist the implicit GITHUB_TOKEN: this job needs no
+          # credential, and a token left in .git/config is a credential the
+          # workflow does not know it holds.
+          persist-credentials: false
+          # Verify exactly the commit this run claims to verify. An empty
+          # intent_commit falls back to the dispatched commit (github.sha).
+          ref: ${{ github.event.inputs.intent_commit || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Resolve the commit under test
+        id: commit
+        env:
+          REQUESTED_COMMIT: ${{ github.event.inputs.intent_commit }}
+        run: |
+          set -euo pipefail
+          resolved="$(git rev-parse HEAD)"
+          requested="${REQUESTED_COMMIT}"
+          if [[ -n "${requested}" ]]; then
+            if [[ ! "${requested}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::intent_commit must be a 40-character lowercase commit SHA"
+              exit 1
+            fi
+            if [[ "${requested}" != "${resolved}" ]]; then
+              echo "::error::checked out commit ${resolved} does not match intent_commit ${requested}"
+              exit 1
+            fi
+          fi
+          echo "commit=${resolved}" >> "$GITHUB_OUTPUT"
+          echo "verifying commit ${resolved}"
+
       - name: Run the live hostname harness with a direct request path
         id: harness
         env:
-          INPUT_COMMIT: ${{ github.event.inputs.intent_commit }}
+          VERIFY_COMMIT: ${{ steps.commit.outputs.commit }}
           RESULT_PATH: ${{ runner.temp }}/stable-hostname-verification.json
         run: |
           set -o pipefail
           # Nothing may sit between this runner and the deployment: a proxy
           # in the path answers before the request leaves the runner and
           # turns a deployment verdict into failureMode=proxy_blocked.
-          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          # The cleared set is the complete direct-egress list: the six
+          # standard HTTP proxy variables, the CA-bundle variables the
+          # repository's own direct-egress wrappers drop, and the
+          # host-specific egress variables.
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy \
+                HUMAN_PROXY SECRET_EGRESS_PROXY human_proxy secret_egress_proxy \
+                SSL_CERT_FILE SSL_CERT_DIR
           export NO_PROXY='*' no_proxy='*'
           echo "proxy env after clear: HTTP_PROXY=${HTTP_PROXY:-unset} HTTPS_PROXY=${HTTPS_PROXY:-unset} ALL_PROXY=${ALL_PROXY:-unset}"
-
-          intent_arg=''
-          if [[ "${INPUT_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
-            intent_arg="--intent-commit ${INPUT_COMMIT}"
-          else
-            echo "no valid intent_commit supplied; verifying the dispatched commit"
-          fi
 
           status=0
           node tests/cloud/scripts/stable-hostname-verification.mjs \
             --mode live \
             --run-id "stable-hostname-live-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            ${intent_arg} \
+            --intent-commit "${VERIFY_COMMIT}" \
             --output "${RESULT_PATH}" > /dev/null || status=$?
           echo "harness_exit=${status}" >> "$GITHUB_OUTPUT"
 
@@ -104,7 +144,12 @@ jobs:
             node -e '
               const fs = require("node:fs");
               const r = JSON.parse(fs.readFileSync(process.env.RESULT_PATH, "utf8"));
-              console.log("verdict=" + r.verdict + " mode=" + r.mode + " runId=" + r.runId);
+              const expected = process.env.VERIFY_COMMIT;
+              if (expected && r.intentCommit !== expected) {
+                console.error("::error::result intentCommit " + r.intentCommit + " does not match the executed commit " + expected);
+                process.exit(3);
+              }
+              console.log("verdict=" + r.verdict + " mode=" + r.mode + " runId=" + r.runId + " commit=" + r.intentCommit);
               for (const s of (r.surfaces || [])) {
                 const why = (s.details && (s.details.failureMode || s.details.reason)) || "";
                 console.log("- " + s.id + ": " + s.status + (why ? " (" + why + ")" : ""));
