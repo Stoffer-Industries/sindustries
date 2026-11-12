@@ -47,9 +47,10 @@
       document
         .querySelector('[data-testid="harness-auth-failure"]')
         .addEventListener('click', () => {
-          // Mirrors the `{ data: null, error }` call sites in
-          // `clerkAuth.jsx` / `supabaseAuth.jsx`.
-          reportAuthError(new Error('gymtrack-browser-error-telemetry-evidence-e2e'), {
+          // Mirrors the context-only call sites in `clerkAuth.jsx` /
+          // `supabaseAuth.jsx`: the auth envelope is reduced to safe
+          // context before it reaches the telemetry serializer.
+          reportAuthError({
             provider: 'clerk',
             operation: 'signin',
             errorCode: 'form_password_incorrect'

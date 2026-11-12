@@ -299,10 +299,28 @@ So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix a
 **Querying the hosted tenant from a shell (operator path).** The selector above is the *contract*; this is the *transport*. The hosted Grafana instance is queried through its datasource proxy, using the provisioning credential that `bootstrap-observability.sh` already uses for `/api/datasources`:
 
 ```bash
-# 1. the Loki datasource uid on the hosted tenant (do not hardcode it)
+# 1. the Loki datasource uid on the hosted tenant (do not hardcode it).
+#    This mirrors `resolve_datasource_uid()` in
+#    infra/cloud/observability/bootstrap-observability.sh: select every
+#    Loki datasource, prefer the default one, otherwise take the first.
+#    Selecting on `isDefault == true` alone yields an empty uid on a
+#    valid tenant whose default datasource is Prometheus and whose Loki
+#    datasource is not default — which degenerates the query URL below to
+#    /proxy/uid//... . The uid is not hardcoded because it is tenant state.
 loki_uid=$(curl -sS -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
   "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/datasources" \
-  | jq -r '.[] | select(.type=="loki" and .isDefault==true) | .uid' | head -1)
+  | jq -r '
+      map(select(.type == "loki"))
+      | (map(select(.isDefault == true))[0] // .[0] // {})
+      | .uid // empty
+    ' | head -1)
+
+# fail explicitly when the tenant has no Loki datasource at all, rather
+# than building a /proxy/uid//... URL that answers 404 for a confusing reason
+if [ -z "${loki_uid}" ]; then
+  echo "no Loki datasource on the hosted Grafana tenant" >&2
+  exit 1
+fi
 
 # 2. run the selector over the window you care about
 now=$(date +%s); start=$((now-3600))
@@ -315,6 +333,8 @@ curl -sS -G -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
 `GRAFANA_CLOUD_INSTANCE_URL` is the stack base URL and `GRAFANA_CLOUD_PROVISIONING_AUTH` is the quoted `Bearer <service-account-token>` value; both live in `infra/cloud/observability/.env.local` (gitignored) and in the operator environment. **A `401` from this path is a credential-scope problem, not an empty result** — the same "probe answered 401, so the telemetry is broken" confusion that the health-probe section describes above applies to the query path: a `401` means the provisioning credential was not applied, and an empty `data.result` with a `200` means the selector matched no rows in that window. Check for rows, not for a status code.
 
 **Authentication-failure coverage.** Every explicitly handled authentication failure is exported, including the branch that Clerk reaches first: an unknown or unregistered identifier. That branch used to return before the telemetry report, so the most common sign-in failure (a typo'd or unregistered address) produced **no** telemetry at all and no operator could distinguish "the user mistyped their email" from "the auth provider is broken". It is now exported as `operation=signin_identify` with the safe Clerk error code and status (`errorCode=identifier_not_found`, `status=404`), alongside the existing `operation=signin` (password step) and `operation=signin_finalize` rows. `apps/gymtrack/src/lib/clerkAuth.test.jsx` § "browser telemetry contract" pins both branches.
+
+The auth reporting surface is **context-only**. Callers reduce the provider envelope to the provider, operation, safe error code, and status before calling `reportAuthError(context)`; the envelope has no parameter through which it could reach the serializer. Auth events therefore always have `message=null` and `stack=null`, regardless of what the provider envelope contains. `apps/gymtrack/src/lib/browserTelemetry.test.js` § "never lets a Clerk envelope reach the POST body" serializes a representative envelope with email, token, session, and stack sentinels and asserts that none of them reach the POST body.
 
 **Resolved assumption (live production evidence, 2026-11-10).** The earlier version of this section flagged an open question: the tests could assert only that *we emit* `app` and `source` as resource attributes, not that the Grafana Cloud tenant indexes those attributes on ingestion. AC4's live verification answered it on the real tenant: events pushed without a service name landed under `service_name="unknown_service"`, and the documented `{app="gymtrack", source="browser"}` selector returned nothing — the tenant indexes `service_name`, and the compound selector's failure is fully explained by `source` (the event source is never the literal `browser`). `app` was not separately probed as an indexed selector, so the operator contract uses `service_name` alone. The fix was two-sided: the relay now emits the service identity (the `service.name` resource attribute, and a `service_name` stream label on the Loki push path, where `service_name` is the literal label name the push API accepts), and the dashboard selects on `{service_name="gymtrack"}` and reads the remaining fields with a selective `| json` extraction. **Verification path: run the query after provisioning and check for rows, not for a 200.** If rows are absent but the events are visible in the tenant's raw log view, the cause is label promotion on the tenant side, not the relay payload. `GRAFANA_CLOUD_OTLP_HEADERS` is parsed by `parseOtlpHeaderString()` rather than used as a raw header value: it arrives in the OTLP **exporter header string** form (`Authorization=Basic <base64>`, optionally comma-separated across several headers such as `X-Scope-OrgID`), which is the same format the OTel SDKs and `bootstrap-observability.sh` already consume. Splitting on the first `=` keeps base64 padding intact, values are URL-decoded, and a segment whose leading chunk is not a valid header name is treated as a bare header value so `Basic <b64>` keeps working. The relay's own unit tests live in `apps/gymtrack/api/telemetry.test.js` and assert this resolution, this header parsing, the token check, the rate limit, the redaction pass, and the size caps.
 7. The hosted Loki tenant absorbs the new event source. The new `gymtrack-browser-errors` dashboard (JSON in `apps/gymtrack/grafana/dashboards/gymtrack-browser-errors.json`) is provisioned by the existing `bootstrap-observability.sh`; the script's `step_dashboards` function now also walks `apps/gymtrack/grafana/dashboards/*.json` in addition to its canonical tree.
