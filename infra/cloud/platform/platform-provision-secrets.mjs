@@ -105,8 +105,16 @@ import { spawnSync } from 'node:child_process';
 
 import { looksLikeRedisUrl } from './platform-services.mjs';
 import { redactOutput } from './redact-output.mjs';
+import {
+  DEFAULT_ENVIRONMENT_ID,
+  PLATFORM_ENVIRONMENTS,
+  assertEnvironmentManifest,
+  assertEnvironmentValues,
+  getPlatformEnvironment,
+  requiredDatabaseSourceNames,
+} from './platform-environments.mjs';
 
-export const PLATFORM_APP = 'sindustries-platform-staging';
+export const PLATFORM_APP = PLATFORM_ENVIRONMENTS.staging.platformApp;
 export const DEFAULT_ORG = 'personal';
 
 /**
@@ -117,14 +125,7 @@ export const DEFAULT_ORG = 'personal';
  * content-scheduler schema is derived from the tasks-api DSN (one Neon
  * database, three schemas).
  */
-export const SOURCE_NAMES = {
-  tasksDatabaseUrl: 'STAGING_TASKS_API_DATABASE_URL',
-  budgetDatabaseUrl: 'STAGING_BUDGET_API_DATABASE_URL',
-  contentSchedulerDatabaseUrl: 'STAGING_CONTENT_SCHEDULER_API_DATABASE_URL',
-  redisUrl: 'HEALTH_PROBE_REDIS',
-  tasksApprovalToken: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
-  schedulerApprovalToken: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
-};
+export const SOURCE_NAMES = { ...PLATFORM_ENVIRONMENTS.staging.sourceNames };
 
 /**
  * The database sources that must be present and write-capable.
@@ -133,10 +134,9 @@ export const SOURCE_NAMES = {
  * read-only fallback, because a read-only role cannot run the platform's
  * migrations and would be discovered only on the first live deploy.
  */
-export const REQUIRED_DATABASE_SOURCES = [
-  SOURCE_NAMES.tasksDatabaseUrl,
-  SOURCE_NAMES.budgetDatabaseUrl,
-];
+export const REQUIRED_DATABASE_SOURCES = requiredDatabaseSourceNames(
+  PLATFORM_ENVIRONMENTS.staging,
+);
 
 /**
  * The public base URL tasks-api and the auto-post worker use to reach
@@ -145,11 +145,32 @@ export const REQUIRED_DATABASE_SOURCES = [
  * from a secret.
  */
 export const DEFAULT_CONTENT_SCHEDULER_API_BASE_URL =
-  'https://content-scheduler-api.staging.sindustries.co.nz/api/v1';
+  PLATFORM_ENVIRONMENTS.staging.apiBaseUrls.contentSchedulerApi;
 
 /** The actors the staging service credentials act as. */
-export const TASKS_APPROVAL_ACTOR = 'staging-cloud-validate';
-export const SCHEDULER_APPROVAL_ACTOR = 'staging-cloud-validate';
+export const TASKS_APPROVAL_ACTOR = PLATFORM_ENVIRONMENTS.staging.approvalActors.tasks;
+export const SCHEDULER_APPROVAL_ACTOR =
+  PLATFORM_ENVIRONMENTS.staging.approvalActors.contentScheduler;
+
+/**
+ * Resolve the environment a payload is built for.
+ *
+ * Accepts an environment id (the CLI's `--environment` value) or an
+ * already-resolved manifest object (a caller that has one in hand).
+ *
+ * @param {string|object} [environment]
+ * @returns {object} the manifest entry
+ */
+export function resolveEnvironment(environment) {
+  if (environment === undefined || environment === null) {
+    return getPlatformEnvironment(DEFAULT_ENVIRONMENT_ID);
+  }
+  if (typeof environment === 'string') {
+    return getPlatformEnvironment(environment);
+  }
+  assertEnvironmentManifest(environment);
+  return environment;
+}
 
 /**
  * Build the IO seam: the process spawner and the log sinks.
@@ -309,77 +330,80 @@ export { redactOutput };
  * @returns {{secrets: {name: string, value: string, source: string}[], missing: string[], notes: string[]}}
  */
 export function buildPlatformSecretPayload(env = {}, options = {}) {
+  const environment = resolveEnvironment(options.environment);
+  const sourceNames = environment.sourceNames;
+  const schemas = environment.schemas;
   const {
-    contentSchedulerApiBaseUrl = DEFAULT_CONTENT_SCHEDULER_API_BASE_URL,
-    tasksApprovalActor = TASKS_APPROVAL_ACTOR,
-    schedulerApprovalActor = SCHEDULER_APPROVAL_ACTOR,
+    contentSchedulerApiBaseUrl = environment.apiBaseUrls.contentSchedulerApi,
+    tasksApprovalActor = environment.approvalActors.tasks,
+    schedulerApprovalActor = environment.approvalActors.contentScheduler,
   } = options;
 
   const secrets = [];
   const missing = [];
   const notes = [];
 
-  const tasksDsn = env[SOURCE_NAMES.tasksDatabaseUrl];
-  const budgetDsn = env[SOURCE_NAMES.budgetDatabaseUrl];
-  const schedulerDsn = env[SOURCE_NAMES.contentSchedulerDatabaseUrl];
-  const redisRaw = env[SOURCE_NAMES.redisUrl];
-  const tasksToken = env[SOURCE_NAMES.tasksApprovalToken];
-  const schedulerToken = env[SOURCE_NAMES.schedulerApprovalToken];
+  const tasksDsn = env[sourceNames.tasksDatabaseUrl];
+  const budgetDsn = env[sourceNames.budgetDatabaseUrl];
+  const schedulerDsn = env[sourceNames.contentSchedulerDatabaseUrl];
+  const redisRaw = env[sourceNames.redisUrl];
+  const tasksToken = env[sourceNames.tasksApprovalToken];
+  const schedulerToken = env[sourceNames.schedulerApprovalToken];
 
   // --- database URLs -------------------------------------------------
   // Write-capable sources only. A missing source is a hard stop: there is
   // deliberately no read-only fallback, because a read-only role cannot
   // run the platform's migrations or a normal service write.
-  if (!tasksDsn) missing.push(SOURCE_NAMES.tasksDatabaseUrl);
-  if (!budgetDsn) missing.push(SOURCE_NAMES.budgetDatabaseUrl);
-  // The content-scheduler database has no dedicated staging DSN today; it
+  if (!tasksDsn) missing.push(sourceNames.tasksDatabaseUrl);
+  if (!budgetDsn) missing.push(sourceNames.budgetDatabaseUrl);
+  // The content-scheduler database has no dedicated DSN today; it
   // is derived from the tasks-api DSN (one database, three schemas). It
   // is only missing when the tasks-api source itself is missing.
-  if (!schedulerDsn && !tasksDsn) missing.push(SOURCE_NAMES.contentSchedulerDatabaseUrl);
+  if (!schedulerDsn && !tasksDsn) missing.push(sourceNames.contentSchedulerDatabaseUrl);
 
   if (tasksDsn) {
     secrets.push({
       name: 'PLATFORM_TASKS_API_DATABASE_URL',
-      value: deriveDatabaseUrl(tasksDsn, 'tasks_api'),
-      source: SOURCE_NAMES.tasksDatabaseUrl,
+      value: deriveDatabaseUrl(tasksDsn, schemas.tasks),
+      source: sourceNames.tasksDatabaseUrl,
     });
   }
   if (budgetDsn) {
     secrets.push({
       name: 'PLATFORM_BUDGET_API_DATABASE_URL',
-      value: deriveDatabaseUrl(budgetDsn, 'budget_api'),
-      source: SOURCE_NAMES.budgetDatabaseUrl,
+      value: deriveDatabaseUrl(budgetDsn, schemas.budget),
+      source: sourceNames.budgetDatabaseUrl,
     });
   }
   if (schedulerDsn) {
     secrets.push({
       name: 'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
-      value: deriveDatabaseUrl(schedulerDsn, 'content_scheduler'),
-      source: SOURCE_NAMES.contentSchedulerDatabaseUrl,
+      value: deriveDatabaseUrl(schedulerDsn, schemas.contentScheduler),
+      source: sourceNames.contentSchedulerDatabaseUrl,
     });
   } else if (tasksDsn) {
     // One Neon database, three schemas (Quinn, task 219fb673): the
     // content-scheduler schema lives in the same database as tasks_api.
     secrets.push({
       name: 'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
-      value: deriveDatabaseUrl(tasksDsn, 'content_scheduler'),
-      source: `${SOURCE_NAMES.tasksDatabaseUrl} (schema=content_scheduler)`,
+      value: deriveDatabaseUrl(tasksDsn, schemas.contentScheduler),
+      source: `${sourceNames.tasksDatabaseUrl} (schema=${schemas.contentScheduler})`,
     });
     notes.push(
       'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL is derived from the tasks-api DSN with schema=content_scheduler; ' +
-        `register the staging environment secret ${SOURCE_NAMES.contentSchedulerDatabaseUrl} to set it explicitly.`
+        `register the ${environment.label} environment secret ${sourceNames.contentSchedulerDatabaseUrl} to set it explicitly.`
     );
   }
 
   // --- redis --------------------------------------------------------
   let redisUrl = null;
   if (!redisRaw) {
-    missing.push(SOURCE_NAMES.redisUrl);
+    missing.push(sourceNames.redisUrl);
   } else {
     try {
       redisUrl = pickRedisUrl(redisRaw);
     } catch (error) {
-      throw new Error(`${SOURCE_NAMES.redisUrl}: ${error.message}`);
+      throw new Error(`${sourceNames.redisUrl}: ${error.message}`);
     }
   }
   if (redisUrl) {
@@ -394,25 +418,25 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
       'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
       'PLATFORM_AUTO_POST_WORKER_CONTENT_SCHEDULER_REDIS_URL',
     ]) {
-      secrets.push({ name, value: redisUrl, source: SOURCE_NAMES.redisUrl });
+      secrets.push({ name, value: redisUrl, source: sourceNames.redisUrl });
     }
   }
 
   // --- approval credentials (inherited names, unchanged) -------------
-  if (!tasksToken) missing.push(SOURCE_NAMES.tasksApprovalToken);
-  if (!schedulerToken) missing.push(SOURCE_NAMES.schedulerApprovalToken);
+  if (!tasksToken) missing.push(sourceNames.tasksApprovalToken);
+  if (!schedulerToken) missing.push(sourceNames.schedulerApprovalToken);
   if (tasksToken) {
     secrets.push({
       name: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
       value: buildServiceCredentials(tasksToken, tasksApprovalActor, []),
-      source: SOURCE_NAMES.tasksApprovalToken,
+      source: sourceNames.tasksApprovalToken,
     });
   }
   if (schedulerToken) {
     secrets.push({
       name: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
       value: buildServiceCredentials(schedulerToken, schedulerApprovalActor, ['any']),
-      source: SOURCE_NAMES.schedulerApprovalToken,
+      source: sourceNames.schedulerApprovalToken,
     });
   }
 
@@ -424,6 +448,11 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
       source: 'workflow default (public URL, not a secret value)',
     });
   }
+
+  // Fail closed BEFORE anything is registered: a production payload that
+  // carries a staging/dev hostname, a placeholder or a localhost address
+  // must never reach Fly (task fb1240c0).
+  assertEnvironmentValues(environment, secrets);
 
   return { secrets, missing: [...new Set(missing)], notes };
 }
@@ -634,18 +663,21 @@ export function verifySecretsRegistered(app, secrets, io = createIo()) {
 export function main(argv = process.argv.slice(2), overrides = {}) {
   const io = createIo(overrides);
 
-  let app = PLATFORM_APP;
+  let environmentId = DEFAULT_ENVIRONMENT_ID;
+  let app = null;
   let org = DEFAULT_ORG;
   let dryRun = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--app') app = argv[++index];
+    else if (arg === '--environment') environmentId = argv[++index];
     else if (arg === '--org') org = argv[++index];
     else if (arg === '--dry-run') dryRun = true;
     else if (arg === '--help' || arg === '-h') {
       io.log(
-        'Usage: node infra/cloud/platform/platform-provision-secrets.mjs [--app NAME] [--org ORG] [--dry-run]'
+        'Usage: node infra/cloud/platform/platform-provision-secrets.mjs ' +
+          '[--environment staging|production] [--app NAME] [--org ORG] [--dry-run]'
       );
       return 0;
     } else {
@@ -654,9 +686,30 @@ export function main(argv = process.argv.slice(2), overrides = {}) {
     }
   }
 
+  let environment;
+  try {
+    environment = getPlatformEnvironment(environmentId);
+    assertEnvironmentManifest(environment);
+  } catch (error) {
+    io.errorLog(`::error::${error.message}`);
+    return 2;
+  }
+
+  // The app name is environment-owned. An explicit `--app` that names a
+  // different app would register a production payload on a staging app (or
+  // the reverse), so it is refused rather than honoured.
+  if (app && app !== environment.platformApp) {
+    io.errorLog(
+      `::error::--app ${app} does not match the ${environment.label} environment's platform app ` +
+        `(${environment.platformApp}). Refusing to provision a different app under this environment.`
+    );
+    return 2;
+  }
+  app = app ?? environment.platformApp;
+
   let payload;
   try {
-    payload = buildPlatformSecretPayload(io.env);
+    payload = buildPlatformSecretPayload(io.env, { environment });
   } catch (error) {
     io.errorLog(`::error::${error.message}`);
     return 1;
@@ -664,9 +717,10 @@ export function main(argv = process.argv.slice(2), overrides = {}) {
 
   if (payload.missing.length > 0) {
     io.errorLog(
-      `::error::Missing staging environment secret(s): ${payload.missing.join(', ')}. ` +
-        'Register them on the staging GitHub environment (Settings > Environments > staging > Environment secrets). ' +
-        `The database sources (${REQUIRED_DATABASE_SOURCES.join(', ')}) must be WRITE-CAPABLE: the platform runs ` +
+      `::error::Missing ${environment.label} environment secret(s): ${payload.missing.join(', ')}. ` +
+        `Register them on the ${environment.githubEnvironment} GitHub environment ` +
+        `(Settings > Environments > ${environment.githubEnvironment} > Environment secrets). ` +
+        `The database sources (${requiredDatabaseSourceNames(environment).join(', ')}) must be WRITE-CAPABLE: the platform runs ` +
         'prisma migrate deploy in its release command and the services write normally. The database drill\'s ' +
         'read-only source DSNs (TASKS_API_SOURCE_DSN, BUDGET_API_SOURCE_DSN) are not valid sources for this app.'
     );
