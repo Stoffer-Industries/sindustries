@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createApp } from './app';
-import { config, ConfigValidationError } from './config/index.ts';
+import { config } from './config/index.ts';
+import { writeFatalToStderr } from './lib/fatalStderr.ts';
 import { assertTaskApprovalSchema } from './lib/schemaPreflight.ts';
 
 // `config` is parsed and frozen at module load. If any required value is
@@ -55,9 +56,10 @@ async function start() {
   try {
     await assertTaskApprovalSchema();
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(
-      JSON.stringify(
+    // Synchronous write: `console.error` + `process.exit` can truncate the
+    // payload on a piped stderr (Node's pipe writes are async on macOS).
+    writeFatalToStderr(
+      `${JSON.stringify(
         {
           level: 'fatal',
           event: 'schema_preflight_failed',
@@ -66,7 +68,7 @@ async function start() {
         },
         null,
         2
-      )
+      )}\n`
     );
     process.exit(1);
   }
@@ -84,12 +86,9 @@ start();
 // it as a non-zero exit. The common case (config validation failure) is
 // already handled by the ConfigValidationError from the static import.
 process.on('unhandledRejection', (err) => {
-  if (err instanceof ConfigValidationError) {
-    // eslint-disable-next-line no-console
-    console.error(err);
-    process.exit(1);
-  }
-  // eslint-disable-next-line no-console
-  console.error(err);
+  // Synchronous write for the same reason as the preflight failure above:
+  // a piped stderr can truncate an async `console.error` on exit.
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  writeFatalToStderr(`${detail}\n`);
   process.exit(1);
 });

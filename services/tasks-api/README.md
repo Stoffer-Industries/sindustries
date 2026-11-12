@@ -133,7 +133,9 @@ The service also applies pending migrations before it starts serving:
 
 - `predev` runs `prisma migrate deploy && prisma generate` before the local
   development server starts.
-- `prestart` runs the same pair before the production/prodlike server starts.
+- `prestart` runs `prisma generate` only. On the hosted path, migrations are
+  applied by the app's Fly `release_command`, so a machine start, restart or
+  scale-up does not need database write access from inside the container.
 - A startup preflight then compares the `TaskApproval` columns selected by the
   generated Prisma client with the columns present in the connected schema.
   A missing table or column stops startup with an actionable migration error

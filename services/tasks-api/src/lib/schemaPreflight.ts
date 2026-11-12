@@ -208,7 +208,9 @@ export function extractAddedColumns(migrationSql: string): string[] {
 
   // `ALTER TABLE "t" ADD [IF NOT EXISTS] "col" <type>` — the COLUMN keyword
   // is optional in Postgres. Constraint-ish keywords are excluded so
-  // `ADD CONSTRAINT ...` is never mistaken for a column.
+  // `ADD CONSTRAINT ...` is never mistaken for a column. `GENERATED` is
+  // excluded for the same reason: `ADD GENERATED ...` is a generated-column
+  // clause, not a column name.
   const withoutColumnKeyword =
     /\bADD\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))\s+[A-Za-z]/gi;
   const excluded = new Set([
@@ -218,7 +220,8 @@ export function extractAddedColumns(migrationSql: string): string[] {
     'foreign',
     'check',
     'exclude',
-    'column'
+    'column',
+    'generated'
   ]);
   for (const match of migrationSql.matchAll(withoutColumnKeyword)) {
     const candidate = match[1] ?? match[2];

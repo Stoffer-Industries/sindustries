@@ -267,4 +267,18 @@ describe('schema preflight — migration attribution', () => {
     expect(added).not.toContain('CONSTRAINT');
     expect(added).not.toContain('PRIMARY');
   });
+
+  it('does not read a generated-column clause as an added column', () => {
+    // `ADD GENERATED ...` is a generated-column clause, not a column name.
+    const sql = `
+      ALTER TABLE "TaskApproval" ADD COLUMN "verifiedPrNumber" INTEGER;
+      ALTER TABLE "TaskApproval" ADD GENERATED ALWAYS AS IDENTITY;
+    `;
+
+    const added = extractAddedColumns(sql);
+
+    expect(added).toContain('verifiedPrNumber');
+    expect(added).not.toContain('GENERATED');
+    expect(added).not.toContain('generated');
+  });
 });
