@@ -470,6 +470,10 @@ The full production-blockers list — DNS records, TLS certs, Vercel custom doma
 
 The static checks above are the cross-environment safety net: a staging URL accidentally pasted into a production Vercel environment or production fly.toml fails the cross-env drift check at compile time, not at runtime. Quinn does not need to remember "don't paste staging credentials into production"; the contract makes it impossible to ship without the matching matrix value.
 
+`tests/cloud/scripts/check-production-blockers-register.mjs` closes the last gap in that net: the register and the matrix are two files, and a rename in the matrix that did not reach the register would leave the operator-facing document pointing at a project that does not exist. The check asserts every surface with a production hostname has a row in the register and that the row carries the matrix's exact project/app identifier.
+
+The register's §9 records the live state of the DNS, TLS and Vercel control planes as observed on 2026-11-11, including the two places where they disagree with the contract: the matrix names Vercel projects (`sindustries-mission-control`, `sindustries-tasks`) that are not in the Vercel team, while the staging deployments that do exist sit under `sindustries-mission-control-staging` / `sindustries-tasks-app-staging` and hold the verified custom-domain bindings. The project-model decision that reconciles the two is Quinn's, and it gates the two frontend rows of the register.
+
 ---
 
 ## Credential boundary
