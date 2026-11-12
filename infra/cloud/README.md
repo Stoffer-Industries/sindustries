@@ -20,6 +20,7 @@ infra/cloud/
 │   ├── auto-post-worker.Dockerfile
 │   └── platform.Dockerfile     # combined image for all four processes
 ├── platform/                   # Consolidated platform code (task 219fb673)
+│   ├── platform-environments.mjs # environment manifest (staging/production) + separation guards
 │   ├── platform-services.mjs   # service registry + env mapping (single source of truth)
 │   ├── platform-supervisor.mjs # entrypoint: spawns the children + the router
 │   ├── platform-migrate.mjs    # release_command: the three per-service migrations
@@ -106,6 +107,15 @@ Staging is one app, so there is one deploy:
 #    that mapping — use it rather than writing secrets by hand:
 node infra/cloud/platform/platform-provision-secrets.mjs \
   --app sindustries-platform-staging --org personal
+
+# The provisioner is parameterised by environment (task fb1240c0). The
+# default is staging, so the command above is unchanged. For production,
+# pass the environment id: it selects the app name, the GitHub Environment
+# source names, the schemas, the base URLs and the approval actors, and it
+# turns on the fail-closed guards that refuse a value carrying a
+# staging/dev hostname, a placeholder or a localhost address:
+node infra/cloud/platform/platform-provision-secrets.mjs \
+  --environment production --org personal
 
 # 2. Deploy (CI does this on push to main; manual override via workflow_dispatch)
 fly deploy --config infra/cloud/fly/platform.fly.toml --strategy canary

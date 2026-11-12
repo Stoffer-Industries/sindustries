@@ -1035,6 +1035,16 @@ jobs:
       - name: Run consolidated platform provisioning CLI tests
         run: node --test infra/cloud/platform/tests/platform-provision-secrets-cli.test.mjs
 
+      # Task fb1240c0 — the platform is provisioned per ENVIRONMENT, so
+      # the environment manifest and the production separation guards are
+      # contracts in their own right: production must never read a staging
+      # source name, reuse a staging app or base URL, or register a value
+      # that carries a staging/dev hostname, a placeholder or a localhost
+      # address. The default environment stays staging, so every existing
+      # call site is unchanged.
+      - name: Run platform environment manifest and production separation tests
+        run: node --test infra/cloud/platform/tests/platform-environments.test.mjs
+
       - name: Run platform cutover order and deploy gate tests
         run: node --test infra/cloud/platform/tests/platform-cutover-order.test.mjs
 
