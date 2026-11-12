@@ -129,6 +129,22 @@ and must be unique across the `prisma/migrations/` tree. Sharing a prefix
 between two directories leaves the apply order at the mercy of the suffix
 sort and the filesystem, which can silently swap between dev and CI.
 
+The service also applies pending migrations before it starts serving:
+
+- `predev` runs `prisma migrate deploy && prisma generate` before the local
+  development server starts.
+- `prestart` runs `prisma generate` only. On the hosted path, migrations are
+  applied by the app's Fly `release_command`, so a machine start, restart or
+  scale-up does not need database write access from inside the container.
+- A startup preflight then compares the `TaskApproval` columns selected by the
+  generated Prisma client with the columns present in the connected schema.
+  A missing table or column stops startup with an actionable migration error
+  instead of allowing the API to serve P2022/500 responses for every read.
+
+The preflight resolves the database schema from the configured Prisma
+`DATABASE_URL` (`?schema=`), falling back to the connection's
+`current_schema()`; it does not assume a schema name.
+
 **Convention:** new migrations get a unique 14-digit prefix. If you need to
 extend the same minute as a recent migration, increment the last 2 digits
 (e.g. `20260627000000` → `20260627000100`).
