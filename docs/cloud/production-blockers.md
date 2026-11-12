@@ -22,28 +22,53 @@ on every CI run).
 
 For the **per-service deploy procedure** see [Cloud Platform](../systems/cloud-platform.md).
 
+**Last live verification:** 2026-11-11 — see
+[§9 — Observed state](#9-observed-state-live-verification-2026-11-11) for
+what the DNS, TLS and Vercel control planes actually looked like on that
+date, including the places where they disagree with the contract recorded
+in sections 1–4.
+
 ---
 
 ## Blockers (must close before production cutover)
 
 ### 1. DNS — apex + per-hostname records
 
-| Surface | Production hostname | Required DNS record | Owner | Status |
-| --- | --- | --- | --- | --- |
-| Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | Quinn | Pending |
-| Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | Quinn | Pending |
-| Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | Quinn | Pending |
-| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → Fly app `sindustries-tasks-api` | Quinn | Pending |
-| Budget API | `budget-api.sindustries.co.nz` | CNAME → Fly app `sindustries-budget-api` | Quinn | Pending |
-| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → Fly app `sindustries-content-scheduler-api` | Quinn | Pending |
-| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe` | Quinn | Pending |
+| Surface | Production hostname | Required DNS record | CNAME target (matrix contract) | Owner | Status |
+| --- | --- | --- | --- | --- | --- |
+| Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | — | Quinn | Pending |
+| Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | `cname.vercel-dns.com` | Quinn | Pending |
+| Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | `cname.vercel-dns.com` | Quinn | Pending |
+| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → Fly app `sindustries-tasks-api` | `sindustries-tasks-api.fly.dev` | Quinn | Pending |
+| Budget API | `budget-api.sindustries.co.nz` | CNAME → Fly app `sindustries-budget-api` | `sindustries-budget-api.fly.dev` | Quinn | Pending |
+| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → Fly app `sindustries-content-scheduler-api` | `sindustries-content-scheduler-api.fly.dev` | Quinn | Pending |
+| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe` | `sindustries-health-probe.fly.dev` | Quinn | Pending |
+| Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | — | Not applicable |
 
 **Notes:**
 - The DNS provider is the open question (tech design OQ2). Once chosen, the
   apex record strategy is provider-specific: Vercel wants `A 76.76.21.21` or
-  ALIAS; Fly wants CNAME to `<app>.flycast.net` for the per-app entries.
+  ALIAS; Fly wants a CNAME to the app's provider host for the per-app
+  entries.
+- The **CNAME target** column is the matrix's `cnameTargets.production`
+  contract value, not an observed live value: `cname.vercel-dns.com` for the
+  two Vercel frontends, and the `<app>.fly.dev` host for each Fly app. The
+  static check enforces the column against the matrix, so it cannot drift
+  into a provider host the matrix does not name (an earlier revision of
+  this table pointed at `<app>.flycast.net`, which the matrix does not
+  record). §9 records what the live control planes actually look like.
 - The auto-post worker has no production hostname (matrix records
-  `production: null`, `publicUrl: false`); no DNS work needed.
+  `production: null`, `publicUrl: false`); no DNS work needed. Its health is
+  observed on the content-scheduler-api surface, not on a host of its own.
+- **The two Vercel project names in this table do not exist yet.** The Vercel
+  team contains `sindustries-mission-control-staging` and
+  `sindustries-tasks-app-staging`; the `sindustries-mission-control` and
+  `sindustries-tasks` projects named here (and in
+  `infra/cloud/hostname-matrix.json`) are not in the team. See
+  [§9 — Observed state](#9-observed-state-live-verification-2026-11-11) for the
+  live evidence and the open project-model decision. Until that decision
+  lands, the two frontend rows above are a target contract, not a
+  "point DNS here" instruction.
 
 ### 2. TLS certificates
 
@@ -51,6 +76,17 @@ For the **per-service deploy procedure** see [Cloud Platform](../systems/cloud-p
 | --- | --- | --- | --- | --- |
 | Frontends (Vercel) | mission-control, tasks | Vercel auto-provisions via Let's Encrypt once the custom domain is added to the project | Quinn (trigger) | Pending |
 | APIs (Fly) | tasks-api, budget-api, content-scheduler-api, health-probe | `fly certs add <hostname>` per Fly app (Let's Encrypt via Fly) | Quinn | Pending |
+
+**Staging TLS state (live, verified 2026-11-11):** the four Fly staging
+hostnames already present valid Let's Encrypt certificates whose CN and SAN
+are exactly the stable hostname (`tasks-api`, `budget-api`,
+`content-scheduler-api`, `health-probe` — valid 2026-11-10 → 2027-02-08), and
+each of their health endpoints answers HTTP 200. The **two Vercel staging
+hostnames present no certificate at all** — the handshake reads 0 bytes and
+the peer closes, because no deployment has been created since the custom
+domain was bound, so the alias is attached to no deployment and Vercel
+provisions no certificate for it. The remedy is a redeploy of each staging
+project, not a DNS change. See [§9](#9-observed-state-live-verification-2026-11-11).
 
 **Notes:**
 - Vercel auto-provisions TLS when the custom domain is added. The 1-minute
@@ -70,15 +106,24 @@ dashboard or API. The contract is recorded in
 [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json);
 the static check enforces the customDomain value matches the matrix.
 
-| Vercel project | Custom domain (production) | Custom domain (preview → staging) | Owner | Status |
-| --- | --- | --- | --- | --- |
-| `sindustries-mission-control` | `mission-control.sindustries.co.nz` | `mission-control.staging.sindustries.co.nz` | Quinn | Pending |
-| `sindustries-tasks` | `tasks.sindustries.co.nz` | `tasks.staging.sindustries.co.nz` | Quinn | Pending |
+| Matrix contract project | Custom domain (production) | Custom domain (preview → staging) | Actually bound in Vercel (2026-11-11) | Owner | Status |
+| --- | --- | --- | --- | --- | --- |
+| `sindustries-mission-control` | `mission-control.sindustries.co.nz` | `mission-control.staging.sindustries.co.nz` | `sindustries-mission-control-staging` (bound + verified 2026-10-23) | Quinn | Staging bound; production project not created |
+| `sindustries-tasks` | `tasks.sindustries.co.nz` | `tasks.staging.sindustries.co.nz` | `sindustries-tasks-app-staging` (bound + verified 2026-10-23) | Quinn | Staging bound; production project not created |
 
 **Notes:**
+- The two **contract** project names in the first column are the names the
+  matrix records; they do not exist in the Vercel team. The **bound** column
+  names the projects that actually hold the staging custom domains today.
+  Reconciling the two is Quinn's open project-model decision — see
+  [§9](#9-observed-state-live-verification-2026-11-11).
 - Vercel Preview deployments are mapped to staging via a branch deployment
   restriction (`staging` branch only). The `staging` Vercel URL is then
-  the preview deployment behind the staging custom domain above.
+  the preview deployment behind the staging custom domain above. In the
+  live staging projects there is no `preview` target and `branches` is
+  empty: the staging custom domains are bound to those projects'
+  **production** deployment target, which is why the matrix's
+  `vercelEnvironments.staging = preview` does not describe reality.
 - The `gymtrack` and `website` Vercel projects are out of scope for this
   task (matrix `outOfScope[]`); GymTrack is owned by the Clerk cutover
   (task `bb09eaed`), website is a separate task.
@@ -180,9 +225,60 @@ manual procedure. Specifically:
   hostname and vice versa.
 - `tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs` (slice
   3) — the deploy workflow smoke URLs are derived from the matrix.
+- `tests/cloud/scripts/check-production-blockers-register.mjs` — this
+  register (the AC6 evidence artifact) stays in lockstep with the matrix:
+  every surface with a production hostname has a row here, and the row
+  carries the matrix's exact project/app identifier. Without it, a rename
+  in the matrix could leave this file pointing an operator at a project
+  that does not exist — which is exactly what happened, see §9.
 
 Quinn does not need to remember "don't paste staging credentials into
 production"; the static checks make it a CI failure, not a runtime one.
+
+### 9. Observed state (live verification, 2026-11-11)
+
+Everything below was read from the live control planes on 2026-11-11 (the
+Vercel team, DNS, and direct TLS to each staging hostname). It is recorded
+here because it contradicts parts of the contract above, and an operator
+acting on the contract alone would hit a wall.
+
+| Surface | Matrix contract | Observed 2026-11-11 | Consequence |
+| --- | --- | --- | --- |
+| Mission Control | Vercel project `sindustries-mission-control`, staging env `preview` | Project `sindustries-mission-control-staging` exists and holds the verified binding for `mission-control.staging.sindustries.co.nz` (bound + verified 2026-10-23T16:44Z). Its promoted deployment is from 2026-09-08 — **45 days before** the binding — and carries only `.vercel.app` aliases, so no deployment has the custom-domain alias | No TLS certificate is served for the staging hostname (the edge refuses the handshake). HTTP to the same edge IP with the custom `Host:` header returns 200, so routing works and only the certificate is missing |
+| Tasks app | Vercel project `sindustries-tasks`, staging env `preview` | Project `sindustries-tasks-app-staging` exists and holds the verified binding for `tasks.staging.sindustries.co.nz` (bound + verified 2026-10-23T16:44Z). Same shape as Mission Control | Same: no certificate until a deployment carries the alias |
+| Mission Control / Tasks app (production) | Vercel projects `sindustries-mission-control` / `sindustries-tasks` | **Neither project exists** in the Vercel team, and there is no production Vercel project for either frontend | The production frontend hostnames have nothing to bind to yet |
+| Tasks API / Budget API / Content Scheduler API / Health probe | Fly apps `sindustries-tasks-api` / `sindustries-budget-api` / `sindustries-content-scheduler-api` / `sindustries-health-probe` | All four staging hostnames resolve, present valid Let's Encrypt certificates whose CN/SAN is the stable hostname (valid 2026-11-10 → 2027-02-08), and answer HTTP 200 on their health endpoints — including `content-scheduler-api/api/v1/content-scheduler/auto-post/health` | The API half of AC2's certificate clause and AC5's API clauses are satisfied on the staging hostnames |
+| Mission Control / Tasks app (build inputs) | Vercel env matrix supplies `VITE_*` base URLs per environment | Both live staging projects have **zero** project-level env vars (`envs: []`), and their built bundles reference `https://sindustries-tasks-api-staging.fly.dev/api/v1` and the `*.vercel.app` siblings — not the stable hostnames | Even once the certificate lands, the frontends serve provider-fallback API URLs, so AC3's Vercel half and AC5's frontend clauses stay open until they are rebuilt against the matrix-derived values |
+
+**Open decision — project model (owner: Quinn).** The matrix and this
+register name two Vercel projects that do not exist; the live staging
+deployments sit under different project names. Two mutually exclusive
+remediations:
+
+- **(a) Make Vercel match the contract** — create or rename projects to
+  `sindustries-mission-control` / `sindustries-tasks` and re-point the two
+  verified custom-domain bindings to them.
+- **(b) Make the contract match Vercel** — update
+  `infra/cloud/hostname-matrix.json` and `infra/cloud/vercel-env-matrix.json`
+  to name `sindustries-mission-control-staging` / `sindustries-tasks-app-staging`,
+  model the environment separation per-project (each project carries one
+  environment) rather than per-`vercelEnvironments`, and provision the
+  production projects.
+
+(b) matches the control plane as it stands and needs no migration of live
+domain bindings; (a) preserves the current contract but moves working
+domains and still leaves the `preview` environment modelling unmatched.
+Either way the matrix and this register must be updated together — the
+static check
+`tests/cloud/scripts/check-production-blockers-register.mjs` fails the PR
+that updates one without the other.
+
+**Operator action once the model is settled.** A new deployment in each
+staging project (from the `mission-control-vercel` branch, per
+`docs/specs/mission-control-vercel-deployment-tech-design.md`) is what
+attaches the custom-domain alias and provisions the certificate. No DNS
+record for the staging hostnames changes: they already CNAME to
+`cname.vercel-dns.com` and resolve.
 
 ---
 
@@ -200,6 +296,10 @@ production deploy, the task is `[implementer-prs]`-eligible and Tom's
 structured `qa_agent` review can proceed. Blockers 6 and 7 are out of
 scope for this task and tracked separately.
 
+Blocker 9 is the one that gates the two frontend rows of blockers 1–3:
+until the project model is decided, the frontend hostnames cannot be
+bound to a project that the matrix names, so those rows cannot close.
+
 ---
 
 ## Related documents
@@ -207,5 +307,6 @@ scope for this task and tracked separately.
 - [`infra/cloud/hostname-matrix.json`](../../infra/cloud/hostname-matrix.json) — source-of-truth matrix.
 - [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json) — Vercel env var contract.
 - [`tests/cloud/scripts/check-vercel-env-matrix.mjs`](../../tests/cloud/scripts/check-vercel-env-matrix.mjs) — Vercel env matrix static check.
+- [`tests/cloud/scripts/check-production-blockers-register.mjs`](../../tests/cloud/scripts/check-production-blockers-register.mjs) — keeps this register in lockstep with the matrix.
 - [`docs/specs/add-stable-app-name-hostnames-tech-design.md`](../specs/add-stable-app-name-hostnames-tech-design.md) — design.
 - [`docs/systems/cloud-platform.md`](../systems/cloud-platform.md) — Cloud Platform handover doc.
