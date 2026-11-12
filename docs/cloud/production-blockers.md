@@ -34,21 +34,29 @@ in sections 1–4.
 
 ### 1. DNS — apex + per-hostname records
 
-| Surface | Production hostname | Required DNS record | Owner | Status |
-| --- | --- | --- | --- | --- |
-| Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | Quinn | Pending |
-| Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | Quinn | Pending |
-| Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | Quinn | Pending |
-| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → Fly app `sindustries-tasks-api` | Quinn | Pending |
-| Budget API | `budget-api.sindustries.co.nz` | CNAME → Fly app `sindustries-budget-api` | Quinn | Pending |
-| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → Fly app `sindustries-content-scheduler-api` | Quinn | Pending |
-| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe` | Quinn | Pending |
-| Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | Not applicable |
+| Surface | Production hostname | Required DNS record | CNAME target (matrix contract) | Owner | Status |
+| --- | --- | --- | --- | --- | --- |
+| Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | — | Quinn | Pending |
+| Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | `cname.vercel-dns.com` | Quinn | Pending |
+| Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | `cname.vercel-dns.com` | Quinn | Pending |
+| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → Fly app `sindustries-tasks-api` | `sindustries-tasks-api.fly.dev` | Quinn | Pending |
+| Budget API | `budget-api.sindustries.co.nz` | CNAME → Fly app `sindustries-budget-api` | `sindustries-budget-api.fly.dev` | Quinn | Pending |
+| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → Fly app `sindustries-content-scheduler-api` | `sindustries-content-scheduler-api.fly.dev` | Quinn | Pending |
+| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe` | `sindustries-health-probe.fly.dev` | Quinn | Pending |
+| Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | — | Not applicable |
 
 **Notes:**
 - The DNS provider is the open question (tech design OQ2). Once chosen, the
   apex record strategy is provider-specific: Vercel wants `A 76.76.21.21` or
-  ALIAS; Fly wants CNAME to `<app>.flycast.net` for the per-app entries.
+  ALIAS; Fly wants a CNAME to the app's provider host for the per-app
+  entries.
+- The **CNAME target** column is the matrix's `cnameTargets.production`
+  contract value, not an observed live value: `cname.vercel-dns.com` for the
+  two Vercel frontends, and the `<app>.fly.dev` host for each Fly app. The
+  static check enforces the column against the matrix, so it cannot drift
+  into a provider host the matrix does not name (an earlier revision of
+  this table pointed at `<app>.flycast.net`, which the matrix does not
+  record). §9 records what the live control planes actually look like.
 - The auto-post worker has no production hostname (matrix records
   `production: null`, `publicUrl: false`); no DNS work needed. Its health is
   observed on the content-scheduler-api surface, not on a host of its own.
@@ -229,10 +237,10 @@ production"; the static checks make it a CI failure, not a runtime one.
 
 ### 9. Observed state (live verification, 2026-11-11)
 
-Everything below was read from the live control planes on 2026-11-11 (Vercel
-team `toms-projects-7a48f06e`, DNS, and direct TLS to each staging
-hostname). It is recorded here because it contradicts parts of the contract
-above, and an operator acting on the contract alone would hit a wall.
+Everything below was read from the live control planes on 2026-11-11 (the
+Vercel team, DNS, and direct TLS to each staging hostname). It is recorded
+here because it contradicts parts of the contract above, and an operator
+acting on the contract alone would hit a wall.
 
 | Surface | Matrix contract | Observed 2026-11-11 | Consequence |
 | --- | --- | --- | --- |
