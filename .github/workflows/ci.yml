@@ -1069,6 +1069,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # This job runs node --test suites (the stable-hostname harness
+      # contract tests among them), so it pins the same Node major the rest
+      # of the workflow declares instead of inheriting the runner image's
+      # ambient Node.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Run gh-with-agent-token shim tests
         run: bash agents/lib/tests/test_gh_with_agent_token.sh
 
