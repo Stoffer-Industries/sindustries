@@ -339,13 +339,19 @@ invariants against the config file so neither can regress silently.
 **The deploy stays opt-in.** Provisioning the app and its secrets is safe
 at any time — no Machine runs until a deploy. The deploy itself is gated
 on the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED=true`,
-because the platform's auto-post worker starts consuming the BullMQ queue
-as soon as the platform is deployed, while the old
-`sindustries-auto-post-worker-staging` app is still running. The operator
-path (`infra/cloud/bin/deploy platform`) is gated by the same variable, so
-the opt-in cannot be bypassed. The cutover order is in
-`docs/runbooks/platform-consolidation-rollback.md` §3: the old auto-post
-worker is scaled to zero BEFORE the platform is deployed.
+and the gate is a blanket opt-in on every staging deploy: after the
+2026-11-07 cutover every service name resolves to the platform app, so
+there is no service name that reaches it without passing the gate. The
+operator path (`infra/cloud/bin/deploy platform`) is gated by the same
+variable, so the opt-in cannot be bypassed. The gate's original purpose
+— keeping a merged platform deploy from cutting staging over while the old
+`sindustries-auto-post-worker-staging` app was still consuming the same
+BullMQ queue — was discharged by that cutover: the four per-service
+staging apps were destroyed ahead of it, so the platform's auto-post worker
+is the only consumer of the queue. The cutover order was
+`docs/runbooks/platform-consolidation-rollback.md` §3, which records the
+sequence as it was executed on 2026-11-07 (steps 3, 4 and 7 did not run and
+remain blocked on task `5cb4a8fe`).
 
 ## Account / ownership / billing
 
