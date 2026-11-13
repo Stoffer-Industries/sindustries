@@ -107,22 +107,47 @@ function main() {
   for (const project of vercel.vercelProjects ?? []) {
     projectCount += 1;
     const pid = project.vercelProjectId;
-    for (const [envName, envDef] of Object.entries(project.environments ?? {})) {
+    const envEntries = Object.entries(project.environments ?? {});
+    // One project, one environment. The project-model decision (task
+    // 5cb4a8fe, Quinn 2026-11-13) makes the PROJECT the environment
+    // separator: the staging project has no `preview` target, so a
+    // project that carried two environments would be a project whose
+    // environment identity is ambiguous again.
+    if (envEntries.length !== 1) {
+      errors.push(
+        `${pid}: must carry exactly one Vercel environment (found ${envEntries.length}) — ` +
+          `the project is the environment separator, not the Vercel environment`,
+      );
+      continue;
+    }
+    for (const [envName, envDef] of envEntries) {
       envCount += 1;
-      // The committed customDomain must match the staging or production
-      // hostname for the matching surface in the matrix.
+      // The datasource fetch below uses the matrix, not the Vercel
+      // environment name: the staging project's single environment is its
+      // production deployment target, so `envName` carries no
+      // environment identity at all.
       const cdHost = hostOf(envDef.customDomain);
       if (!cdHost) {
         errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(envDef.customDomain)} is not a valid hostname`);
         continue;
       }
-      if (envName === 'production' && !productionByHost.has(cdHost)) {
-        errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(cdHost)} is not a production hostname in ${MATRIX_PATH}`);
-      } else if (envName === 'preview' && !stagingByHost.has(cdHost)) {
-        errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(cdHost)} is not a staging hostname in ${MATRIX_PATH}`);
+      // The committed customDomain must match the staging or production
+      // hostname for the matching surface in the matrix.
+      const isProductionHost = productionByHost.has(cdHost);
+      const isStagingHost = stagingByHost.has(cdHost);
+      if (!isProductionHost && !isStagingHost) {
+        errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(cdHost)} is not a hostname in ${MATRIX_PATH}`);
+        continue;
       }
-
-      const isProduction = envName === 'production';
+      const servesEnvironment = isProductionHost ? 'production' : 'staging';
+      if (envDef.servesEnvironment !== servesEnvironment) {
+        errors.push(
+          `${pid}/${envName}: servesEnvironment ${JSON.stringify(envDef.servesEnvironment ?? null)} does not match ` +
+            `the customDomain (${cdHost} is the ${servesEnvironment} hostname in ${MATRIX_PATH})`,
+        );
+        continue;
+      }
+      const isProduction = servesEnvironment === 'production';
       for (const [envVarName, envVarValue] of Object.entries(envDef.env ?? {})) {
         envVarCount += 1;
         const actualHost = hostOf(envVarValue);
@@ -150,9 +175,9 @@ function main() {
         // wrong (mixed up environments) instead of the generic
         // "does not match" error.
         const otherEnvHost = isProduction ? staging.get(surface) : production.get(surface);
-        const otherEnvName = isProduction ? 'preview/staging' : 'production';
+        const otherEnvName = isProduction ? 'staging' : 'production';
         if (otherEnvHost && actualHost === otherEnvHost) {
-          errors.push(`${pid}/${envName}/${envVarName}: value references a ${otherEnvName} hostname (${actualHost}) but the Vercel environment is ${envName}`);
+          errors.push(`${pid}/${envName}/${envVarName}: value references a ${otherEnvName} hostname (${actualHost}) but this project serves ${servesEnvironment}`);
           continue;
         }
         if (actualHost !== expected) {

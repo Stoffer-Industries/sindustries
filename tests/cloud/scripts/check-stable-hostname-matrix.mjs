@@ -281,7 +281,7 @@ function main() {
   }
 
   // ------------------------------------------------------------------
-  // Vercel environment binding (the AC2 half for the two frontends).
+  // Vercel PROJECT binding (the AC2 half for the two frontends).
   //
   // A Vercel custom domain CNAMEs to Vercel's shared managed target
   // (`cname.vercel-dns.com`) in EVERY project, so the DNS shape carries
@@ -289,15 +289,23 @@ function main() {
   // production hostname of one project resolve to byte-identical DNS,
   // and the HTTPS check cannot tell a staging deployment from a
   // production one. The environment separation therefore lives in WHICH
-  // Vercel environment the custom domain is bound to.
+  // Vercel PROJECT owns each stable hostname.
   //
-  // What this block asserts (repo-verified): the staging stable
-  // hostname is bound to the project's staging Vercel environment, the
-  // production stable hostname to a DIFFERENT one, and both bindings
-  // match the contract in infra/cloud/vercel-env-matrix.json.
+  // Project model (Quinn, 2026-11-13, task 5cb4a8fe): the staging and
+  // production stable hostnames of one surface live in DIFFERENT
+  // projects — `vercelStagingProject` and `vercelProject`. Neither
+  // project has a `preview` target; each carries exactly one
+  // environment, its own production deployment target, so the earlier
+  // `vercelEnvironments.staging = preview` assumption did not describe
+  // reality.
+  //
+  // What this block asserts (repo-verified): the staging and production
+  // projects differ, both exist in infra/cloud/vercel-env-matrix.json,
+  // each carries exactly one environment, and each project's environment
+  // binds the matching stable hostname as its custom domain.
   //
   // What it does NOT assert (operator-verified in Vercel): that the
-  // bound environment is actually serving a deployment built from the
+  // bound project is actually serving a deployment built from the
   // expected branch. That half stays a manual Vercel gate — see
   // docs/systems/cloud-platform.md.
   // ------------------------------------------------------------------
@@ -312,34 +320,42 @@ function main() {
   for (const [idx, surface] of matrix.surfaces.entries()) {
     const path = `surfaces[${idx}] (${surface.id})`;
     if (surface.kind !== 'frontend') continue;
-    expect(typeof surface.vercelProject === 'string' && surface.vercelProject.length > 0, `${path}.vercelProject must be a non-empty string for a frontend surface`);
-    const envs = surface.vercelEnvironments;
-    expect(envs && typeof envs === 'object', `${path}.vercelEnvironments must be an object with the Vercel environment bound to each environment`);
-    if (!envs || typeof envs !== 'object') continue;
-    expect(typeof envs.staging === 'string' && envs.staging.length > 0, `${path}.vercelEnvironments.staging must be a non-empty string`);
-    expect(typeof envs.production === 'string' && envs.production.length > 0, `${path}.vercelEnvironments.production must be a non-empty string`);
-    if (typeof envs.staging !== 'string' || typeof envs.production !== 'string') continue;
+    const productionProject = surface.vercelProject;
+    const stagingProject = surface.vercelStagingProject;
+    expect(typeof productionProject === 'string' && productionProject.length > 0, `${path}.vercelProject must be a non-empty string for a frontend surface`);
+    expect(typeof stagingProject === 'string' && stagingProject.length > 0, `${path}.vercelStagingProject must be a non-empty string for a frontend surface`);
     expect(
-      envs.staging !== envs.production,
-      `${path}.vercelEnvironments.staging ("${envs.staging}") and .production ("${envs.production}") must be different Vercel environments — the two stable hostnames must not be served by the same environment (AC2)`,
+      !('vercelEnvironments' in surface),
+      `${path}.vercelEnvironments must not be recorded — the environment separation is per Vercel project (vercelProject / vercelStagingProject), and neither project has a preview target`,
     );
-    const project = vercelProjectsById.get(surface.vercelProject);
-    expect(project, `${path}.vercelProject ("${surface.vercelProject}") must exist in ${vercelEnvMatrixPath}`);
-    if (!project) continue;
-    const stagingEnv = project.environments?.[envs.staging];
-    const productionEnv = project.environments?.[envs.production];
-    expect(stagingEnv, `${path}.vercelEnvironments.staging ("${envs.staging}") must be an environment of Vercel project "${surface.vercelProject}"`);
-    expect(productionEnv, `${path}.vercelEnvironments.production ("${envs.production}") must be an environment of Vercel project "${surface.vercelProject}"`);
-    if (stagingEnv) {
+    if (typeof productionProject !== 'string' || typeof stagingProject !== 'string') continue;
+    expect(
+      productionProject !== stagingProject,
+      `${path}.vercelProject ("${productionProject}") and .vercelStagingProject ("${stagingProject}") must be different Vercel projects — the two stable hostnames must not be served by the same project (AC2)`,
+    );
+    const productionDef = vercelProjectsById.get(productionProject);
+    const stagingDef = vercelProjectsById.get(stagingProject);
+    expect(productionDef, `${path}.vercelProject ("${productionProject}") must exist in ${vercelEnvMatrixPath}`);
+    expect(stagingDef, `${path}.vercelStagingProject ("${stagingProject}") must exist in ${vercelEnvMatrixPath}`);
+    if (!productionDef || !stagingDef) continue;
+    for (const [label, projectDef, projectName, hostname] of [
+      ['production', productionDef, productionProject, surface.production],
+      ['staging', stagingDef, stagingProject, surface.staging],
+    ]) {
+      const envEntries = Object.entries(projectDef.environments ?? {});
       expect(
-        normalizeHost(stagingEnv.customDomain) === normalizeHost(surface.staging),
-        `${path}.staging ("${surface.staging}") must be the customDomain of Vercel project "${surface.vercelProject}" environment "${envs.staging}" (recorded: "${stagingEnv.customDomain}")`,
+        envEntries.length === 1,
+        `${path}: Vercel project "${projectName}" must carry exactly one environment (recorded ${envEntries.length}) — each project serves one environment through its own production deployment target`,
       );
-    }
-    if (productionEnv) {
+      if (envEntries.length !== 1) continue;
+      const [envName, envDef] = envEntries[0];
       expect(
-        normalizeHost(productionEnv.customDomain) === normalizeHost(surface.production),
-        `${path}.production ("${surface.production}") must be the customDomain of Vercel project "${surface.vercelProject}" environment "${envs.production}" (recorded: "${productionEnv.customDomain}")`,
+        envName === 'production',
+        `${path}: Vercel project "${projectName}" environment "${envName}" must be "production" — the staging project has no preview target; its production deployment target serves the staging hostname`,
+      );
+      expect(
+        normalizeHost(envDef.customDomain) === normalizeHost(hostname),
+        `${path}.${label} ("${hostname}") must be the customDomain of Vercel project "${projectName}" environment "${envName}" (recorded: "${envDef.customDomain}")`,
       );
     }
   }

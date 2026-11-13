@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Stable hostname matrix for the six public surfaces and the auto-post worker (task 5cb4a8fe). Authoritative source of truth: tests/cloud/scripts/check-stable-hostname-matrix.mjs validates the shape; tests/cloud/scripts/check-stable-url-fallbacks.mjs reads the providerFallback entries to assert every *.fly.dev / *.vercel.app reference in scope is annotated. Each public surface also records `cnameTargets`: the DNS target that surface's stable hostname CNAME must resolve to, per environment. `cnameTargets` is environment-specific and is NOT the same thing as `providerFallback`: providerFallback is the production provider host (the migration path), while the staging CNAME points at the staging deployment topology — the three consolidated API surfaces CNAME to the one platform Fly app, health-probe CNAMEs to its own staging Fly app, and the two Vercel frontends CNAME to Vercel's shared managed custom-domain target (the domain-to-project binding lives in the Vercel project, not in DNS). Each consolidated API surface also records `stagingRoutes`: the (host, pathPrefix) pairs that surface may be reached at in staging — the stable hostname at the root, and the consolidated platform host at that surface's path prefix. The staging-target preflight (tests/cloud/scripts/check-staging-target-preflight.mjs) validates a configured target against exactly its own surface's routes, so a target pointing at another surface fails as a configuration error instead of validating the wrong service. The two Vercel frontends also record `vercelEnvironments`: the Vercel environment each stable hostname's custom domain is bound to. A Vercel custom domain CNAMEs to the same shared managed target in every project, so DNS carries no environment identity for those surfaces — the binding is the separation, and the static check asserts the staging hostname is bound to a different Vercel environment than the production hostname and that both match infra/cloud/vercel-env-matrix.json. That the bound environment is actually serving a deployment built from the expected branch stays an operator gate in Vercel. Do not edit the surface rows without updating docs/systems/cloud-platform.md and the comment blocks at the top of each infra/cloud/fly/<service>.fly.toml; the static checks will fail otherwise.",
+  "description": "Stable hostname matrix for the six public surfaces and the auto-post worker (task 5cb4a8fe). Authoritative source of truth: tests/cloud/scripts/check-stable-hostname-matrix.mjs validates the shape; tests/cloud/scripts/check-stable-url-fallbacks.mjs reads the providerFallback entries to assert every *.fly.dev / *.vercel.app reference in scope is annotated. Each public surface also records `cnameTargets`: the DNS target that surface's stable hostname CNAME must resolve to, per environment. `cnameTargets` is environment-specific and is NOT the same thing as `providerFallback`: providerFallback is the production provider host (the migration path), while the staging CNAME points at the staging deployment topology — the three consolidated API surfaces CNAME to the one platform Fly app, health-probe CNAMEs to its own staging Fly app, and the two Vercel frontends CNAME to Vercel's shared managed custom-domain target (the domain-to-project binding lives in the Vercel project, not in DNS). Each consolidated API surface also records `stagingRoutes`: the (host, pathPrefix) pairs that surface may be reached at in staging — the stable hostname at the root, and the consolidated platform host at that surface's path prefix. The staging-target preflight (tests/cloud/scripts/check-staging-target-preflight.mjs) validates a configured target against exactly its own surface's routes, so a target pointing at another surface fails as a configuration error instead of validating the wrong service. The two Vercel frontends also record `vercelStagingProject`: the Vercel project that owns the staging stable hostname, alongside `vercelProject`, the project that owns the production stable hostname. A Vercel custom domain CNAMEs to the same shared managed target in every project, so DNS carries no environment identity for those surfaces — the PROJECT is the separation. Neither project has a `preview` target: each carries exactly one environment, its own production deployment target, which is why the earlier `vercelEnvironments.staging = preview` assumption did not describe reality (Quinn's project-model decision, 2026-11-13, task 5cb4a8fe). The static check asserts the staging and production projects differ, that each exists in infra/cloud/vercel-env-matrix.json with exactly one environment, and that each project's environment binds the matching stable hostname. That the bound project is actually serving a deployment built from the expected branch stays an operator gate in Vercel. Do not edit the surface rows without updating docs/systems/cloud-platform.md and the comment blocks at the top of each infra/cloud/fly/<service>.fly.toml; the static checks will fail otherwise.",
   "taskId": "5cb4a8fe-6069-4b3c-b2ef-0b8dc61cdb3c",
   "designDoc": "docs/specs/add-stable-app-name-hostnames-tech-design.md",
   "apexDomain": "sindustries.co.nz",
@@ -15,10 +15,7 @@
       "id": "mission-control",
       "kind": "frontend",
       "vercelProject": "sindustries-mission-control",
-      "vercelEnvironments": {
-        "staging": "preview",
-        "production": "production"
-      },
+      "vercelStagingProject": "sindustries-mission-control-staging",
       "staging": "mission-control.staging.sindustries.co.nz",
       "production": "mission-control.sindustries.co.nz",
       "providerFallback": "sindustries-mission-control.vercel.app",
@@ -31,10 +28,7 @@
       "id": "tasks-app",
       "kind": "frontend",
       "vercelProject": "sindustries-tasks",
-      "vercelEnvironments": {
-        "staging": "preview",
-        "production": "production"
-      },
+      "vercelStagingProject": "sindustries-tasks-app-staging",
       "staging": "tasks.staging.sindustries.co.nz",
       "production": "tasks.sindustries.co.nz",
       "providerFallback": "sindustries-tasks.vercel.app",

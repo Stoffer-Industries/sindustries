@@ -59,6 +59,7 @@ const GOOD_VERCEL = JSON.stringify({
       appPath: 'apps/mission-control',
       environments: {
         production: {
+          servesEnvironment: 'production',
           branch: 'main',
           customDomain: 'mission-control.sindustries.co.nz',
           env: {
@@ -66,8 +67,15 @@ const GOOD_VERCEL = JSON.stringify({
             VITE_CONTENT_SCHEDULER_API_BASE_URL: 'https://content-scheduler-api.sindustries.co.nz/api/v1',
           },
         },
-        preview: {
-          branch: 'staging',
+      },
+    },
+    {
+      vercelProjectId: 'sindustries-mission-control-staging',
+      appPath: 'apps/mission-control',
+      environments: {
+        production: {
+          servesEnvironment: 'staging',
+          branch: 'mission-control-vercel',
           customDomain: 'mission-control.staging.sindustries.co.nz',
           env: {
             VITE_TASKS_API_BASE_URL: 'https://tasks-api.staging.sindustries.co.nz/api/v1',
@@ -124,7 +132,52 @@ test('synthetic tree: production env referencing a staging hostname fails', asyn
     try { await exec('node', [SCRIPT, dir]); } catch (e) { err = e; }
     assert.ok(err, 'expected the script to fail on cross-environment drift');
     const out = (err.stderr || '') + (err.stdout || '');
-    assert.match(out, /references a preview\/staging hostname .* but the Vercel environment is production/, `expected cross-env drift error, got: ${out}`);
+    assert.match(out, /references a staging hostname .* but this project serves production/, `expected cross-env drift error, got: ${out}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('synthetic tree: a project carrying two environments fails the check', async () => {
+  // Project-model contract (task 5cb4a8fe): one project, one
+  // environment. A project with two environments would make the
+  // environment identity ambiguous again — which is exactly what the
+  // per-project separation replaced.
+  const bad = JSON.parse(GOOD_VERCEL);
+  bad.vercelProjects[1].environments.preview = {
+    servesEnvironment: 'staging',
+    branch: 'staging',
+    customDomain: 'mission-control.staging.sindustries.co.nz',
+    env: {},
+  };
+  const dir = makeTree([
+    ['infra/cloud/hostname-matrix.json', MATRIX],
+    ['infra/cloud/vercel-env-matrix.json', JSON.stringify(bad)],
+  ]);
+  try {
+    let err;
+    try { await exec('node', [SCRIPT, dir]); } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail when a project carries two environments');
+    const out = (err.stderr || '') + (err.stdout || '');
+    assert.match(out, /must carry exactly one Vercel environment/, `expected the one-environment error, got: ${out}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('synthetic tree: servesEnvironment that contradicts the customDomain fails the check', async () => {
+  const bad = JSON.parse(GOOD_VERCEL);
+  bad.vercelProjects[1].environments.production.servesEnvironment = 'production';
+  const dir = makeTree([
+    ['infra/cloud/hostname-matrix.json', MATRIX],
+    ['infra/cloud/vercel-env-matrix.json', JSON.stringify(bad)],
+  ]);
+  try {
+    let err;
+    try { await exec('node', [SCRIPT, dir]); } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail when servesEnvironment contradicts the customDomain');
+    const out = (err.stderr || '') + (err.stdout || '');
+    assert.match(out, /servesEnvironment .* does not match the customDomain/, `expected the servesEnvironment error, got: ${out}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -143,7 +196,7 @@ test('synthetic tree: customDomain not in matrix fails the check', async () => {
     assert.ok(err, 'expected the script to fail on a non-matrix customDomain');
     const out = (err.stderr || '') + (err.stdout || '');
     assert.match(out, /not-in-matrix\.example\.com/, `expected the customDomain error, got: ${out}`);
-    assert.match(out, /is not a production hostname/, `expected the matrix-miss note, got: ${out}`);
+    assert.match(out, /is not a hostname in infra\/cloud\/hostname-matrix\.json/, `expected the matrix-miss note, got: ${out}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
