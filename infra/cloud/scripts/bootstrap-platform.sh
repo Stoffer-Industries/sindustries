@@ -324,16 +324,25 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   printf '%s=%s\n' "$file_key" "$file_value" >>"$ENV_FILE_VALUES"
 done <"$ENV_LOCAL"
 
-# Only the source keys and the Fly org are taken from the file.
+# Only the source keys, the Fly org and the values of the manifest-selected
+# local mutation gates are taken from the file. The file cannot select a
+# different gate name.
 ENV_FILE_ALLOWED_KEYS=()
 for pair in "${LOCAL_SOURCE_MAP[@]}"; do
   ENV_FILE_ALLOWED_KEYS+=("${pair%%:*}")
 done
-ENV_FILE_ALLOWED_KEYS+=("FLY_APP_ORG" "$FLY_ORG_VARIABLE")
+ENV_FILE_ALLOWED_KEYS+=(
+  "FLY_APP_ORG"
+  "$FLY_ORG_VARIABLE"
+  "$DEPLOY_GATE_VARIABLE"
+  "$MIGRATIONS_GATE_VARIABLE"
+)
 
 ENV_FILE_FLY_APP_PLATFORM=""
 ENV_FILE_FLY_APP_ORG=""
-while IFS='=' read -r file_key file_value; do
+while IFS= read -r env_file_pair || [[ -n "$env_file_pair" ]]; do
+  file_key="${env_file_pair%%=*}"
+  file_value="${env_file_pair#*=}"
   [[ -n "$file_key" ]] || continue
   case "$file_key" in
     FLY_APP_PLATFORM)
@@ -351,7 +360,7 @@ while IFS='=' read -r file_key file_value; do
   esac
 done <"$ENV_FILE_VALUES"
 
-ok "env file parsed (allow-listed source keys only; the file cannot choose the environment, the app or the gates)"
+ok "env file parsed (allow-listed sources and manifest-selected gate values only; the file cannot choose the environment, app or gate names)"
 
 # The Fly org may be named by the env file or by the environment variable
 # the manifest names; the APP NAME may not.

@@ -89,12 +89,12 @@ Production has **three** gates, and each one guards a different mutation. The ga
 | Deploy (serve traffic) | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` **and** the provisioning gate | The deploy also requires the provisioning gate: an app deployed without its secrets registered cannot reach its database. |
 | Migrations (change the schema) | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` | Migrations change the DATABASE, not the app, so `--migrate` alone is not consent to run them. |
 
-The local operator path takes the same gates: `--deploy` **and** `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true`, `--migrate` **and** `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true`.
+The local operator path takes the same gates: `--deploy` **and** `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true`, `--migrate` **and** `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true`. Those values may be exported in the operator's shell or placed in the local env file.
 
 The production Fly org is **required**, not defaulted: `PRODUCTION_FLY_ORG` expands to the empty string when it is unset, and an empty `--org` makes flyctl act on its CLI's default org — which may not own the production app. The CI workflow fails before any Fly call when it is unset.
 
 ### The local env file cannot choose the environment
 
-The local env file is **parsed with an allow-list**, never sourced into the bootstrap's shell. It contributes the source keys and the Fly org and nothing else. The environment, the target app, the gates and the environment facts are the manifest's, and they are `readonly` in the script. A copy of the staging env file therefore cannot point the production bootstrap at staging.
+The local env file is **parsed with an allow-list**, never sourced into the bootstrap's shell. It contributes the source keys, the Fly org and values for the exact deploy and migration gate names selected by the manifest. The environment, target app, gate names and environment facts are the manifest's, and those control variables are `readonly` in the script. A copy of the staging env file therefore cannot point the production bootstrap at staging or satisfy a production gate with a staging gate variable.
 
 The live provisioning order (create the Neon branch, create the app, populate the Environment, register the secrets, set the spend limit, then publish DNS) is in the approved tech design: [`docs/specs/production-environment-provisioning-tech-design.md`](../specs/production-environment-provisioning-tech-design.md), Slice D.
