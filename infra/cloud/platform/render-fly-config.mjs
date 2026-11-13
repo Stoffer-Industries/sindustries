@@ -62,6 +62,7 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { getPlatformEnvironment } from './platform-environments.mjs';
+import { expectedAppForSharedConfig } from './platform-environment-facts.mjs';
 
 /** Tables an overlay may contribute to. */
 const ALLOWED_OVERLAY_TABLES = new Set(['env']);
@@ -305,12 +306,19 @@ export function renderHeader({ sharedPath, overlayPath = null, environment = nul
  * The overlay's `app` is what Fly deploys to. An overlay edited to name
  * another environment's app renders successfully and then deploys
  * production to staging, so the renderer refuses an app name that is not
- * one of the environment's own apps.
+ * the one the shared config renders.
+ *
+ * The expected app is derived from the SHARED CONFIG: the platform shared
+ * config renders the platform app, and the probe's shared config renders
+ * the probe app. Accepting "any app of this environment" would leave a
+ * hole — a probe overlay naming the platform app renders cleanly, and the
+ * rendered config then says the probe deploys to the platform app.
  *
  * @param {string|null} app
  * @param {string} environmentId
+ * @param {string} sharedPath
  */
-export function assertOverlayAppMatchesEnvironment(app, environmentId) {
+export function assertOverlayAppMatchesEnvironment(app, environmentId, sharedPath) {
   if (app === null) return;
   let environment;
   try {
@@ -318,11 +326,18 @@ export function assertOverlayAppMatchesEnvironment(app, environmentId) {
   } catch (error) {
     throw new Error(`unknown environment "${environmentId}" (${error.message})`);
   }
-  const owned = [environment.platformApp, environment.healthProbeApp];
-  if (!owned.includes(app)) {
+  const expected = expectedAppForSharedConfig(environmentId, sharedPath);
+  if (expected === null) {
     throw new Error(
-      `overlay names app "${app}", which is not an app of the ${environmentId} environment — ` +
-        `expected one of ${owned.map((name) => `"${name}"`).join(' or ')}`,
+      `cannot tell which app the shared config "${sharedPath}" renders — it is not a known ` +
+        `${environmentId} artefact, so the overlay's app cannot be bound to the manifest`,
+    );
+  }
+  if (app !== expected) {
+    const role = expected === environment.platformApp ? 'platform' : 'health-probe';
+    throw new Error(
+      `overlay names app "${app}", but the shared config it merges onto renders the ` +
+        `${environmentId} ${role} app "${expected}" — the two must be the same app`,
     );
   }
 }
@@ -346,7 +361,7 @@ export function renderFlyConfig({
     ? parseOverlay(readFileSync(resolve(overlayPath), 'utf8'))
     : { app: null, env: {} };
 
-  if (environment) assertOverlayAppMatchesEnvironment(overlay.app, environment);
+  if (environment) assertOverlayAppMatchesEnvironment(overlay.app, environment, sharedPath);
 
   const merged = mergeFlyConfig(sharedText, overlay);
   const rendered = stampHeader

@@ -60,7 +60,8 @@
  */
 
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   DEFAULT_ENVIRONMENT_ID,
@@ -114,6 +115,48 @@ const ARTEFACTS = {
     },
   },
 };
+
+/**
+ * The repository root, derived from this module's own location.
+ *
+ * The artefact layout below is expressed as repository-relative paths, and
+ * a caller may hand the same file over as an absolute path. Resolving both
+ * sides against this root makes the two comparable.
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+
+/**
+ * The app that a shared Fly config renders.
+ *
+ * The renderer binds an overlay's app to the app that the shared config it
+ * merges onto actually configures: the platform shared config renders the
+ * platform app, and the probe's shared config renders the probe app.
+ *
+ * The binding comes from the artefact layout rather than from a value the
+ * caller passes in. A caller-supplied app name is a second copy of a fact
+ * the manifest owns, and the drift this slice exists to prevent is exactly
+ * a caller and the manifest disagreeing.
+ *
+ * @param {string} environmentId
+ * @param {string} sharedPath
+ * @returns {string|null} the app name, or null when the shared config is
+ *   not one of this environment's known artefacts
+ */
+export function expectedAppForSharedConfig(environmentId, sharedPath) {
+  if (!sharedPath) return null;
+  const environment = getPlatformEnvironment(environmentId);
+  const artefacts = ARTEFACTS[environmentId];
+  if (!artefacts) return null;
+  const target = resolve(REPO_ROOT, sharedPath);
+  const candidates = [
+    [artefacts.flyConfig.shared, environment.platformApp],
+    [artefacts.healthProbeFlyConfig.shared, environment.healthProbeApp],
+  ];
+  for (const [path, app] of candidates) {
+    if (path && resolve(REPO_ROOT, path) === target) return app;
+  }
+  return null;
+}
 
 /**
  * Build the facts projection for one environment.
