@@ -64,7 +64,7 @@ export const PLATFORM_ENVIRONMENTS = {
     /** The consolidated platform app: ONE app, ONE Machine, FOUR children. */
     platformApp: 'sindustries-platform-staging',
     /** The health-probe app that watches this environment. */
-    healthProbeApp: 'sindustries-health-probe',
+    healthProbeApp: 'sindustries-health-probe-staging',
     /** The GitHub Environment whose secrets carry the live values. */
     githubEnvironment: 'staging',
     /** The repository variable that names the Fly org for this environment. */
@@ -193,6 +193,12 @@ export const PLATFORM_ENVIRONMENTS = {
       'localhost',
       '127.0.0.1',
     ],
+    forbiddenValuePatterns: [
+      {
+        label: 'staging hostname segment',
+        pattern: /(?:^|[.-])staging(?:[.-]|$)/i,
+      },
+    ],
     requiredSourceNames: [
       'tasksDatabaseUrl',
       'budgetDatabaseUrl',
@@ -268,6 +274,21 @@ export function assertEnvironmentManifest(environment) {
       throw new Error(`platform environment "${environment.id}" has no source name for ${key}`);
     }
   }
+  for (const key of environment.requiredSourceNames ?? []) {
+    if (!environment.sourceNames?.[key]) {
+      throw new Error(
+        `platform environment "${environment.id}" requires unknown source key ${key}`,
+      );
+    }
+  }
+  for (const key of ['tasksApi', 'budgetApi', 'contentSchedulerApi']) {
+    const origins = environment.corsAllowedOrigins?.[key];
+    if (!Array.isArray(origins) || origins.length === 0) {
+      throw new Error(
+        `platform environment "${environment.id}" has no CORS origins for ${key}`,
+      );
+    }
+  }
   if (environment.id === 'production') {
     const staging = PLATFORM_ENVIRONMENTS.staging;
     const stagingSources = new Set(Object.values(staging.sourceNames));
@@ -304,13 +325,23 @@ export function assertEnvironmentManifest(environment) {
  */
 export function findForbiddenValues(environment, values) {
   const markers = environment.forbiddenValueMarkers ?? [];
-  if (markers.length === 0) return [];
+  const patterns = environment.forbiddenValuePatterns ?? [];
+  if (markers.length === 0 && patterns.length === 0) return [];
   const found = [];
   for (const [label, value] of Object.entries(values ?? {})) {
     if (typeof value !== 'string' || value === '') continue;
+    let matched = false;
     for (const marker of markers) {
       if (value.includes(marker)) {
         found.push({ label, marker });
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    for (const entry of patterns) {
+      if (entry.pattern.test(value)) {
+        found.push({ label, marker: entry.label });
         break;
       }
     }

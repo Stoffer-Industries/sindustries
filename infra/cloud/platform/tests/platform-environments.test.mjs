@@ -21,6 +21,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
@@ -36,6 +37,17 @@ import { buildPlatformSecretPayload, main } from '../platform-provision-secrets.
 
 const STAGING = PLATFORM_ENVIRONMENTS.staging;
 const PRODUCTION = PLATFORM_ENVIRONMENTS.production;
+const HOSTNAME_MATRIX = JSON.parse(
+  readFileSync(new URL('../../hostname-matrix.json', import.meta.url), 'utf8'),
+);
+const STAGING_PLATFORM_FLY_TOML = readFileSync(
+  new URL('../../fly/platform.fly.toml', import.meta.url),
+  'utf8',
+);
+const STAGING_HEALTH_PROBE_FLY_TOML = readFileSync(
+  new URL('../../observability/health-probe/fly.toml', import.meta.url),
+  'utf8',
+);
 
 const PRODUCTION_TASKS_DSN =
   'postgresql://prod_user:***@ep-production.example.test/neondb?sslmode=require';
@@ -159,6 +171,38 @@ describe('platform environment manifest', () => {
     }
   });
 
+  it('matches the deployed staging health-probe app and hostname matrix', () => {
+    assert.equal(STAGING.healthProbeApp, 'sindustries-health-probe-staging');
+    assert.match(
+      STAGING_HEALTH_PROBE_FLY_TOML,
+      /^app = 'sindustries-health-probe-staging'$/m,
+    );
+    const healthProbe = HOSTNAME_MATRIX.surfaces.find((surface) => surface.id === 'health-probe');
+    assert.equal(
+      healthProbe.cnameTargets.staging,
+      `${STAGING.healthProbeApp}.fly.dev`,
+    );
+  });
+
+  it('maps every production API hostname to the consolidated production app', () => {
+    for (const id of ['tasks-api', 'budget-api', 'content-scheduler-api']) {
+      const surface = HOSTNAME_MATRIX.surfaces.find((entry) => entry.id === id);
+      assert.equal(surface.flyApp, PRODUCTION.platformApp, `${id} Fly app drifted`);
+      assert.equal(
+        surface.cnameTargets.production,
+        `${PRODUCTION.platformApp}.fly.dev`,
+        `${id} production CNAME drifted`,
+      );
+    }
+    const scheduler = HOSTNAME_MATRIX.surfaces.find(
+      (surface) => surface.id === 'content-scheduler-api',
+    );
+    assert.equal(
+      new URL(PRODUCTION.apiBaseUrls.contentSchedulerApi).hostname,
+      scheduler.production,
+    );
+  });
+
   it('reads production sources from the production GitHub environment', () => {
     assert.equal(PRODUCTION.githubEnvironment, 'production');
     for (const name of Object.values(PRODUCTION.sourceNames)) {
@@ -229,6 +273,14 @@ describe('assertEnvironmentManifest', () => {
     };
     assert.throws(() => assertEnvironmentManifest(broken), /must carry the PRODUCTION_ label/);
   });
+
+  it('refuses a manifest without a required CORS allow-list', () => {
+    const broken = {
+      ...PRODUCTION,
+      corsAllowedOrigins: { ...PRODUCTION.corsAllowedOrigins, budgetApi: [] },
+    };
+    assert.throws(() => assertEnvironmentManifest(broken), /has no CORS origins for budgetApi/);
+  });
 });
 
 describe('findForbiddenValues', () => {
@@ -252,6 +304,18 @@ describe('findForbiddenValues', () => {
 
   it('accepts a clean production value', () => {
     assert.deepEqual(findForbiddenValues(PRODUCTION, { A: PRODUCTION_TASKS_DSN }), []);
+  });
+
+  it('rejects provider-style staging Neon and Upstash hostnames', () => {
+    const found = findForbiddenValues(PRODUCTION, {
+      DATABASE_URL: 'postgresql://u:***@ep-staging-blue-123.neon.tech/neondb',
+      REDIS_URL: 'rediss://default:***@broad-staging-fox.upstash.io:6379',
+    });
+    assert.deepEqual(
+      found.map((entry) => entry.label).sort(),
+      ['DATABASE_URL', 'REDIS_URL'],
+    );
+    assert.ok(found.every((entry) => entry.marker === 'staging hostname segment'));
   });
 
   it('imposes no markers on staging, whose values carry staging hostnames', () => {
@@ -280,7 +344,7 @@ describe('assertEnvironmentValues', () => {
 });
 
 describe('buildPlatformSecretPayload for production', () => {
-  it('maps the production source names onto the same twelve platform secret names', () => {
+  it('maps the production source names onto the same fifteen platform value names', () => {
     const { secrets, missing } = buildPlatformSecretPayload(productionEnv(), {
       environment: 'production',
     });
@@ -291,12 +355,15 @@ describe('buildPlatformSecretPayload for production', () => {
         'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
         'PLATFORM_AUTO_POST_WORKER_CONTENT_SCHEDULER_REDIS_URL',
         'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
+        'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_BUDGET_API_DATABASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_BASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_CONTENT_SCHEDULER_REDIS_URL',
+        'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL',
         'PLATFORM_TASKS_API_CONTENT_SCHEDULER_REDIS_URL',
+        'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_TASKS_API_DATABASE_URL',
         'PLATFORM_TASKS_API_REDIS_URL',
         'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
@@ -315,6 +382,53 @@ describe('buildPlatformSecretPayload for production', () => {
       byName.PLATFORM_CONTENT_SCHEDULER_API_BASE_URL,
       'https://content-scheduler-api.sindustries.co.nz/api/v1',
     );
+  });
+
+  it('registers production CORS origins from the production manifest', () => {
+    const { secrets } = buildPlatformSecretPayload(productionEnv(), { environment: 'production' });
+    const byName = Object.fromEntries(secrets.map((secret) => [secret.name, secret.value]));
+    assert.equal(
+      byName.PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS,
+      PRODUCTION.corsAllowedOrigins.tasksApi.join(','),
+    );
+    assert.equal(
+      byName.PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS,
+      PRODUCTION.corsAllowedOrigins.budgetApi.join(','),
+    );
+    assert.equal(
+      byName.PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS,
+      PRODUCTION.corsAllowedOrigins.contentSchedulerApi.join(','),
+    );
+    assert.ok(!byName.PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS.includes('.staging.'));
+  });
+
+  it('keeps the staging Fly TOML CORS defaults in parity with the manifest', () => {
+    for (const [name, origins] of [
+      ['PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS', STAGING.corsAllowedOrigins.tasksApi],
+      ['PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS', STAGING.corsAllowedOrigins.budgetApi],
+      [
+        'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+        STAGING.corsAllowedOrigins.contentSchedulerApi,
+      ],
+    ]) {
+      const match = STAGING_PLATFORM_FLY_TOML.match(
+        new RegExp(`^\\s*${name} = '([^']+)'$`, 'm'),
+      );
+      assert.ok(match, `${name} missing from staging Fly config`);
+      assert.equal(match[1], origins.join(','), `${name} drifted from the manifest`);
+    }
+  });
+
+  it('enforces requiredSourceNames added to a manifest', () => {
+    const stricter = {
+      ...PRODUCTION,
+      requiredSourceNames: [
+        ...PRODUCTION.requiredSourceNames,
+        'contentSchedulerDatabaseUrl',
+      ],
+    };
+    const { missing } = buildPlatformSecretPayload(productionEnv(), { environment: stricter });
+    assert.deepEqual(missing, [PRODUCTION.sourceNames.contentSchedulerDatabaseUrl]);
   });
 
   it('acts as the production approval actor, not the staging one', () => {
@@ -404,6 +518,25 @@ describe('the provisioning CLI with an environment', () => {
     const { code, output, calls } = runCli(['--environment', 'prod'], productionEnv());
     assert.equal(code, 2);
     assert.match(output, /unknown platform environment/);
+    assert.deepEqual(calls, []);
+  });
+
+  for (const option of ['--environment', '--app', '--org']) {
+    it(`refuses ${option} without a value before Fly`, () => {
+      const { code, output, calls } = runCli([option], productionEnv());
+      assert.equal(code, 2);
+      assert.match(output, new RegExp(`${option} requires a value`));
+      assert.deepEqual(calls, []);
+    });
+  }
+
+  it('does not consume the next flag as an environment value', () => {
+    const { code, output, calls } = runCli(
+      ['--environment', '--dry-run'],
+      productionEnv(),
+    );
+    assert.equal(code, 2);
+    assert.match(output, /--environment requires a value/);
     assert.deepEqual(calls, []);
   });
 

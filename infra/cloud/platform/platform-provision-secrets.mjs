@@ -6,8 +6,9 @@
  * WHY THIS EXISTS
  * ---------------
  * The consolidated platform app (`sindustries-platform-staging`) needs
- * twelve app-level secrets before it can boot: three database URLs, six
- * Redis URLs and two approval-service credentials. Until now those values
+ * fifteen app-level values before it can boot: three database URLs, six
+ * Redis URLs, two approval-service credentials, the content-scheduler base
+ * URL, and three CORS allow-lists. Until now those values
  * were registered out of band by hand, and the CI guard only checked that
  * the app EXISTS:
  *
@@ -31,8 +32,8 @@
  * workflow, mapped here, and handed to `flyctl secrets set` WITHOUT ever
  * being printed, logged, committed or passed through a shell.
  *
- * THE TWELVE NAMES
- * -----------------
+ * THE FIFTEEN NAMES
+ * ------------------
  * The names are settled by the live Fly secret inventory (task 219fb673,
  * 2026-11-06): every live per-service app's secret names, plus the
  * `PLATFORM_*` indirection the supervisor maps onto each child
@@ -49,6 +50,9 @@
  *   PLATFORM_CONTENT_SCHEDULER_API_CONTENT_SCHEDULER_REDIS_URL (same live value)
  *   PLATFORM_AUTO_POST_WORKER_CONTENT_SCHEDULER_REDIS_URL     (same live value)
  *   PLATFORM_CONTENT_SCHEDULER_API_BASE_URL             (public URL, no secret value)
+ *   PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS             (environment manifest)
+ *   PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS            (environment manifest)
+ *   PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS (environment manifest)
  *   TASKS_API_APPROVAL_SERVICE_CREDENTIALS              <- approval credential (inherited)
  *   CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS   <- approval credential (inherited)
  *
@@ -112,6 +116,7 @@ import {
   assertEnvironmentValues,
   getPlatformEnvironment,
   requiredDatabaseSourceNames,
+  requiredSourceNames,
 } from './platform-environments.mjs';
 
 export const PLATFORM_APP = PLATFORM_ENVIRONMENTS.staging.platformApp;
@@ -192,6 +197,22 @@ export function createIo(overrides = {}) {
     log: overrides.log ?? ((message) => console.log(message)),
     errorLog: overrides.errorLog ?? ((message) => console.error(message)),
   };
+}
+
+/**
+ * Read one required value-taking CLI option without consuming another flag.
+ *
+ * @param {string[]} argv
+ * @param {number} index
+ * @param {string} option
+ * @returns {string}
+ */
+export function requireOptionValue(argv, index, option) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith('-')) {
+    throw new Error(`${option} requires a value`);
+  }
+  return value;
 }
 
 /**
@@ -350,16 +371,18 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
   const tasksToken = env[sourceNames.tasksApprovalToken];
   const schedulerToken = env[sourceNames.schedulerApprovalToken];
 
+  // Requiredness belongs to the manifest. Enforce the list generically so
+  // adding a required source cannot become documentation-only metadata.
+  for (const name of requiredSourceNames(environment)) {
+    if (!env[name]) missing.push(name);
+  }
+
   // --- database URLs -------------------------------------------------
   // Write-capable sources only. A missing source is a hard stop: there is
   // deliberately no read-only fallback, because a read-only role cannot
   // run the platform's migrations or a normal service write.
-  if (!tasksDsn) missing.push(sourceNames.tasksDatabaseUrl);
-  if (!budgetDsn) missing.push(sourceNames.budgetDatabaseUrl);
-  // The content-scheduler database has no dedicated DSN today; it
-  // is derived from the tasks-api DSN (one database, three schemas). It
-  // is only missing when the tasks-api source itself is missing.
-  if (!schedulerDsn && !tasksDsn) missing.push(sourceNames.contentSchedulerDatabaseUrl);
+  // The optional content-scheduler source is derived from tasks-api when it
+  // is absent. Requiredness comes only from `requiredSourceNames` above.
 
   if (tasksDsn) {
     secrets.push({
@@ -397,9 +420,7 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
 
   // --- redis --------------------------------------------------------
   let redisUrl = null;
-  if (!redisRaw) {
-    missing.push(sourceNames.redisUrl);
-  } else {
+  if (redisRaw) {
     try {
       redisUrl = pickRedisUrl(redisRaw);
     } catch (error) {
@@ -423,8 +444,6 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
   }
 
   // --- approval credentials (inherited names, unchanged) -------------
-  if (!tasksToken) missing.push(sourceNames.tasksApprovalToken);
-  if (!schedulerToken) missing.push(sourceNames.schedulerApprovalToken);
   if (tasksToken) {
     secrets.push({
       name: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
@@ -446,6 +465,23 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
       name: 'PLATFORM_CONTENT_SCHEDULER_API_BASE_URL',
       value: contentSchedulerApiBaseUrl,
       source: 'workflow default (public URL, not a secret value)',
+    });
+  }
+
+  // The supervisor requires these three values. Register them from the
+  // selected manifest so production cannot inherit the staging TOML values.
+  for (const [name, origins] of [
+    ['PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS', environment.corsAllowedOrigins.tasksApi],
+    ['PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS', environment.corsAllowedOrigins.budgetApi],
+    [
+      'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+      environment.corsAllowedOrigins.contentSchedulerApi,
+    ],
+  ]) {
+    secrets.push({
+      name,
+      value: origins.join(','),
+      source: `${environment.label} environment manifest (CORS origins)`,
     });
   }
 
@@ -670,9 +706,19 @@ export function main(argv = process.argv.slice(2), overrides = {}) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--app') app = argv[++index];
-    else if (arg === '--environment') environmentId = argv[++index];
-    else if (arg === '--org') org = argv[++index];
+    if (arg === '--app' || arg === '--environment' || arg === '--org') {
+      let value;
+      try {
+        value = requireOptionValue(argv, index, arg);
+      } catch (error) {
+        io.errorLog(`::error::${error.message}`);
+        return 2;
+      }
+      index += 1;
+      if (arg === '--app') app = value;
+      else if (arg === '--environment') environmentId = value;
+      else org = value;
+    }
     else if (arg === '--dry-run') dryRun = true;
     else if (arg === '--help' || arg === '-h') {
       io.log(
