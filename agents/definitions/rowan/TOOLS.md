@@ -49,10 +49,10 @@ Rowan has different names in different systems — use the right one per system,
 
 - **Account:** rowanstoffer
 - **GH_CONFIG_DIR:** `~/.config/gh-rowan`
-- **Token:** stored in `~/.openclaw/.env` as `ROWAN_GITHUB_TOKEN` (fine-grained PAT)
+- **Token:** there is NO `ROWAN_GITHUB_TOKEN` in `~/.openclaw/.env` (verified 2026-11-14 — the only `*GITHUB_TOKEN` key in that file is `GITHUB_WEBHOOK_SECRET`). The working credential is the one the `gh` profile `~/.config/gh-rowan` holds (host keyring; `gh auth status` shows the active account `rowanstoffer`). Run `gh auth status` before concluding a credential is missing or revoked.
 - Repo access: Stoffer-Industries/sindustries (Contents R/W, Pull requests R/W)
 - **Usage:** the shared bash/zsh-compatible shim `agents/lib/gh-with-agent-token.sh` wraps `gh` to drop the ambient `GITHUB_TOKEN` and route every invocation through Rowan's own token + `GH_CONFIG_DIR`. The shim is materialised into the workspace at `~/.openclaw/workspace/agents/lib/gh-with-agent-token.sh`; `~/.openclaw/workspace/agents/rowan/.gh-shim.sh` sources it without exporting a global agent identity (both emitted by `scripts/ops/sync-agent-definitions.sh`). The wrapper resolves Rowan from session-scoped runtime context such as `CODEX_HOME`. Once that snippet is sourced from shell init, just call `gh ...` — do **not** prefix with `GH_CONFIG_DIR=...` or `env -u GITHUB_TOKEN ...` yourself, and do **not** invoke `command gh` directly (that bypasses the shim and re-introduces the ambient-token override). The legacy `GH_CONFIG_DIR=~/.config/gh-rowan gh ...` pattern still works for one-off scripts that have not yet been updated, but new code should rely on the shim.
-- **For write operations:** no prefix needed once the shim is sourced — the shim sets `GH_TOKEN=$ROWAN_GITHUB_TOKEN` and unsets the bare `GITHUB_TOKEN` automatically.
+- **For write operations:** no prefix needed once the shim is sourced — the shim unsets any ambient `GITHUB_TOKEN`/`GH_TOKEN` and scopes `GH_CONFIG_DIR=~/.config/gh-rowan`. It re-exports a token only when the per-agent `*_GITHUB_TOKEN` variable exists; today it does not, so the shim falls back to the profile's own keyring credential.
 
 ### Git commits and pushes (sindustries repo)
 
@@ -65,13 +65,21 @@ override the author when committing, and push using an explicit URL with your
 PAT so you never touch the stored remote:
 
 ```bash
-source ~/.openclaw/.env
 # From your worktree (e.g. /Volumes/WD1/worktrees/rowan/<name>):
 # Commit as Rowan (override local config inline)
 git -c user.name="rowanstoffer" -c user.email="rowanstoffer@gmail.com" commit -m "..."
-# Push as Rowan (explicit URL, does not change stored origin)
-git push "https://rowanstoffer:${ROWAN_GITHUB_TOKEN}@github.com/Stoffer-Industries/sindustries.git" <branch>
+# Push as Rowan — through gh's credential helper, NOT a hand-built token URL.
+# `git push "https://rowanstoffer:${ROWAN_GITHUB_TOKEN}@github.com/..."` sends an EMPTY
+# password (the variable does not exist) and fails with "Invalid username or token",
+# which reads like a revoked credential rather than a missing variable.
+env -u GITHUB_TOKEN git -c credential.helper= \
+  -c 'credential.https://github.com.helper=!gh auth git-credential' \
+  push origin <branch>
 ```
+
+If `gh auth status` shows no active `rowanstoffer` account, re-authenticate through
+`gh auth login --hostname github.com` rather than hunting for a PAT in an `.env` file.
+Never print a token value into a log, a task comment or a PR.
 
 ## Why Separate?
 
