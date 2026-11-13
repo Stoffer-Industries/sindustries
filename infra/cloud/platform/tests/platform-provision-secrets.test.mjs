@@ -161,7 +161,7 @@ describe('buildServiceCredentials', () => {
 });
 
 describe('buildPlatformSecretPayload', () => {
-  it('maps the staging environment onto the twelve platform secret names', () => {
+  it('maps the staging environment onto the fifteen platform value names', () => {
     const { secrets, missing } = buildPlatformSecretPayload(stagingEnv());
     assert.deepEqual(missing, []);
     assert.deepEqual(
@@ -170,12 +170,15 @@ describe('buildPlatformSecretPayload', () => {
         'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
         'PLATFORM_AUTO_POST_WORKER_CONTENT_SCHEDULER_REDIS_URL',
         'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
+        'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_BUDGET_API_DATABASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_BASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_CONTENT_SCHEDULER_REDIS_URL',
+        'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL',
         'PLATFORM_TASKS_API_CONTENT_SCHEDULER_REDIS_URL',
+        'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_TASKS_API_DATABASE_URL',
         'PLATFORM_TASKS_API_REDIS_URL',
         'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',

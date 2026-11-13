@@ -174,7 +174,7 @@ describe('platform provisioning CLI', () => {
       '--stage holds the values for the next release; on the live deploy the canary Machine still ran with the placeholder that had been registered out of band',
     );
     const names = secrets.slice(4).filter((entry) => entry.includes('=')).map((entry) => entry.split('=')[0]);
-    assert.equal(names.length, 12);
+    assert.equal(names.length, 15);
     for (const name of [
       'PLATFORM_TASKS_API_DATABASE_URL',
       'PLATFORM_BUDGET_API_DATABASE_URL',
@@ -183,6 +183,9 @@ describe('platform provisioning CLI', () => {
       'PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL',
       'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
       'PLATFORM_CONTENT_SCHEDULER_API_BASE_URL',
+      'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
+      'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
+      'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
       'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
       'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
     ]) {

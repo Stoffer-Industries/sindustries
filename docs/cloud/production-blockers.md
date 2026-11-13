@@ -39,9 +39,9 @@ in sections 1–4.
 | Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | — | Quinn | Pending |
 | Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | `cname.vercel-dns.com` | Quinn | Pending |
 | Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | `cname.vercel-dns.com` | Quinn | Pending |
-| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → Fly app `sindustries-tasks-api` | `sindustries-tasks-api.fly.dev` | Quinn | Pending |
-| Budget API | `budget-api.sindustries.co.nz` | CNAME → Fly app `sindustries-budget-api` | `sindustries-budget-api.fly.dev` | Quinn | Pending |
-| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → Fly app `sindustries-content-scheduler-api` | `sindustries-content-scheduler-api.fly.dev` | Quinn | Pending |
+| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
+| Budget API | `budget-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
+| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
 | Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe` | `sindustries-health-probe.fly.dev` | Quinn | Pending |
 | Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | — | Not applicable |
 

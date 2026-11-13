@@ -1014,7 +1014,8 @@ jobs:
       - name: Run consolidated platform supervisor unit tests
         run: node --test infra/cloud/platform/tests/platform-supervisor.test.mjs
 
-      # Task 219fb673 — the platform's twelve app-level secrets are mapped
+      # Task 219fb673 / fb1240c0 — the platform's fifteen app-level values
+      # (including environment-owned CORS origins) are mapped
       # from the staging GitHub environment secrets, and a wrong mapping
       # would point a child at the wrong database or the wrong Redis
       # instance. The mapping is covered here against fake values; no
