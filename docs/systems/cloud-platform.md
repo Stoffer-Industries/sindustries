@@ -395,13 +395,17 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 | tasks-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.staging.sindustries.co.nz --> | `sindustries-platform-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.sindustries.co.nz --> |
 | budget-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.staging.sindustries.co.nz --> | `sindustries-platform-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.sindustries.co.nz --> |
 | content-scheduler-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.staging.sindustries.co.nz --> | `sindustries-platform-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.sindustries.co.nz --> |
-| health-probe | `sindustries-health-probe-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.staging.sindustries.co.nz --> | `sindustries-health-probe.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.sindustries.co.nz --> |
+| health-probe | `sindustries-health-probe-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.staging.sindustries.co.nz --> | `sindustries-health-probe-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.sindustries.co.nz --> |
 
 The three API surfaces use one consolidated platform Fly app per environment
 (staging: task `219fb673`; production: task `fb1240c0`). Health-probe keeps its
 own Fly app per environment. The matrix retains each API's legacy per-service
 `providerFallback` for migration and rollback evidence, but those hosts are not
-the target topology.
+the target topology. Health-probe likewise retains
+`sindustries-health-probe.fly.dev` <!-- stable-fallback: legacy production provider host retained for migration evidence --> only as its legacy `providerFallback`; its
+production app and production CNAME target are
+`sindustries-health-probe-production` and
+`sindustries-health-probe-production.fly.dev`. <!-- stable-fallback: production provider CNAME target; the stable hostname is health-probe.sindustries.co.nz -->
 
 The Vercel frontends CNAME to Vercel's shared managed custom-domain target in both environments. That target is the same for **every** Vercel project, so the DNS shape carries no environment identity at all for those two surfaces: the staging hostname and the production hostname of one project resolve to byte-identical DNS. The environment separation therefore lives in the Vercel environment each custom domain is bound to, which the matrix records as `vercelEnvironments`:
 

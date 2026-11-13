@@ -42,7 +42,7 @@ in sections 1–4.
 | Tasks API | `tasks-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
 | Budget API | `budget-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
 | Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
-| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe` | `sindustries-health-probe.fly.dev` | Quinn | Pending |
+| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe-production` | `sindustries-health-probe-production.fly.dev` | Quinn | Pending |
 | Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | — | Not applicable |
 
 **Notes:**
@@ -152,28 +152,26 @@ matrix; Quinn sets the actual values in the Vercel dashboard.
 - A future task may move the values into a Vercel `vercel-cli` import
   script that Quinn runs; this task only ships the contract.
 
-### 5. Fly secrets + production env vars (per service)
+### 5. Fly secrets + production env vars (current topology)
 
-The per-service fly.toml `[env]` blocks already declare the production
-hostnames for the CORS half (slices 1+2) and the smoke URL (slice 3). The
-**secret** env vars (DATABASE_URL, REDIS_URL, OTEL_*, etc.) are
-operator-owned and set via `fly secrets set` per the credential boundary.
+Production follows the same consolidated topology as staging: tasks-api,
+budget-api, content-scheduler-api, and auto-post-worker are children of one
+platform app, while health-probe keeps its own environment-specific app. The
+app-level values are operator-owned and set via `fly secrets set` per the
+credential boundary.
 
 | Fly app | Required secret env vars | Owner | Status |
 | --- | --- | --- | --- |
-| `sindustries-tasks-api` | DATABASE_URL, REDIS_URL, OTEL_*, tasks-api service-token | Quinn | Pending (staging done) |
-| `sindustries-budget-api` | DATABASE_URL, REDIS_URL, AKAHU_*, OTEL_* | Quinn | Pending (staging done) |
-| `sindustries-content-scheduler-api` | DATABASE_URL, CONTENT_SCHEDULER_REDIS_URL, OTEL_* | Quinn | Pending (staging done) |
-| `sindustries-health-probe` | OTEL_* | Quinn | Pending (staging done) |
-| `sindustries-auto-post-worker` | DATABASE_URL, CONTENT_SCHEDULER_REDIS_URL, OTEL_* | Quinn | Pending (staging done) |
+| `sindustries-platform-production` | The 15 app-level values defined by `platform-provision-secrets.mjs`: three database URLs, six Redis URLs, two approval credentials, content-scheduler base URL, and three CORS allow-lists; plus pass-through AKAHU_* and OTEL_* values where enabled | Quinn | Pending |
+| `sindustries-health-probe-production` | HEALTH_PROBE_DATABASES, HEALTH_PROBE_FLY_APPS, HEALTH_PROBE_REDIS, OTEL_* | Quinn | Pending |
 
 **Notes:**
-- The credential boundary in cloud-platform.md applies unchanged: Quinn
-  owns the live values via `fly secrets set`; Rowan ships only env-var
-  names in the committed fly.toml `[env]` blocks.
-- The bootstrap script `infra/cloud/scripts/bootstrap-staging.sh` will
-  be cloned to `bootstrap-production.sh` for production rollout; that
-  is a separate task.
+- The credential boundary in cloud-platform.md applies unchanged: Quinn owns
+  the live values; Rowan ships the environment manifest and provisioning
+  contract.
+- `platform-create-apps.mjs --environment production` and
+  `platform-provision-secrets.mjs --environment production` derive these app
+  names from the same manifest used by the validation workflow.
 
 ### 6. Production deploy workflows (separate task)
 

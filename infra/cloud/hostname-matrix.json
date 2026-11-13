@@ -94,13 +94,13 @@
     {
       "id": "health-probe",
       "kind": "api",
-      "flyApp": "sindustries-health-probe",
+      "flyApp": "sindustries-health-probe-production",
       "staging": "health-probe.staging.sindustries.co.nz",
       "production": "health-probe.sindustries.co.nz",
       "providerFallback": "sindustries-health-probe.fly.dev",
       "cnameTargets": {
         "staging": "sindustries-health-probe-staging.fly.dev",
-        "production": "sindustries-health-probe.fly.dev"
+        "production": "sindustries-health-probe-production.fly.dev"
       }
     },
     {
