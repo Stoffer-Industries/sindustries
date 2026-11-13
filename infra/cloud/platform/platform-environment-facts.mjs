@@ -131,6 +131,21 @@ export function buildEnvironmentFacts(id = DEFAULT_ENVIRONMENT_ID) {
      * environment's platform may run. Derived from the environment id.
      */
     deployGateVariable: `${environment.id.toUpperCase()}_PLATFORM_DEPLOY_ENABLED`,
+    /**
+     * The variable that must be `true` before a deploy of this
+     * environment's HEALTH PROBE may run. Derived from the environment id
+     * for the same reason as the platform gate: a stored constant could be
+     * edited in one place and left stale in another.
+     *
+     * The health probe carries its own gate because the operator order
+     * (tech design Slice D) deploys the platform FIRST and the probe
+     * LAST: the probe is pointed at live production targets, and a probe
+     * that starts before the production spend limit and the production
+     * DNS records exist is a probe reporting on a half-provisioned
+     * environment.
+     */
+    healthProbeDeployGateVariable:
+      `${environment.id.toUpperCase()}_HEALTH_PROBE_DEPLOY_ENABLED`,
     defaultFlyOrg: DEFAULT_FLY_ORG,
     sourceNames: environment.sourceNames,
     requiredSourceKeys: environment.requiredSourceNames ?? [],
@@ -138,6 +153,19 @@ export function buildEnvironmentFacts(id = DEFAULT_ENVIRONMENT_ID) {
     schemas: environment.schemas,
     corsAllowedOrigins: environment.corsAllowedOrigins,
     apiBaseUrls: environment.apiBaseUrls,
+    /**
+     * The ORIGIN of each API base URL — scheme and host, no path.
+     *
+     * The base URLs carry the `/api/v1` path prefix, and the deploy
+     * smoke checks hit `/health` on the ORIGIN. Writing the production
+     * hostnames into a workflow would be a second copy of a fact the
+     * manifest already owns, and a copy is what drifts; the origin is
+     * derived from the base URL here so the workflow can ask for it
+     * instead of repeating it.
+     */
+    apiOrigins: Object.fromEntries(
+      Object.entries(environment.apiBaseUrls).map(([key, url]) => [key, new URL(url).origin]),
+    ),
     approvalActors: environment.approvalActors,
     artefacts,
   };

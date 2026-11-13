@@ -60,6 +60,10 @@ jobs:
               - 'package-lock.json'
               - 'infra/cloud/**'
               - '.github/workflows/deploy-staging-platform.yml'
+              # Task fb1240c0 (Slice C) — the production platform deploy
+              # path. It is workflow_call only (no independent trigger),
+              # but a change to it must re-run the platform surface.
+              - '.github/workflows/deploy-production-platform.yml'
             gymtrack:
               - 'apps/gymtrack/**'
               - 'package.json'
@@ -86,6 +90,9 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/deploy-staging-health-probe.yml'
+              # Task fb1240c0 (Slice C) — the production health-probe
+              # deploy path.
+              - '.github/workflows/deploy-production-health-probe.yml'
 
   python-workflow-tests:
     name: python workflow tests
@@ -1172,6 +1179,28 @@ jobs:
       # guard sees it as executed.
       - name: Run production hostname blockers register contract test
         run: node --test tests/cloud/tests/check-production-blockers-register.test.mjs
+
+      # Task fb1240c0 (Slice C) static check: the production deploy path
+      # is the first thing in this task that can touch real production,
+      # and every fact it depends on is owned elsewhere — the environment
+      # manifest (app names, secret source names), the hostname matrix
+      # (production hostnames), the Fly overlays (the app name and the
+      # environment-owned values). The checker proves those owners and the
+      # two production workflows still agree: a workflow that deploys the
+      # SHARED Fly config deploys the staging app name and the staging
+      # CORS origins to production and succeeds; a workflow that drops a
+      # source name registers fifteen secrets with one missing and the
+      # supervisor refuses to start. Both are invisible until production
+      # is already wrong, so they are checked statically, with no
+      # credentials and no network.
+      - name: Check production deploy contract
+        run: node tests/cloud/scripts/check-production-deploy-contract.mjs
+
+      # Run by explicit path so the repository-wide contract-test orphan
+      # guard sees it as executed. The sentinel cases prove the checker
+      # can actually go red — a checker that cannot fail asserts nothing.
+      - name: Run production deploy contract test
+        run: node --test tests/cloud/tests/check-production-deploy-contract.test.mjs
 
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
