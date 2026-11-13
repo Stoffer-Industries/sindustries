@@ -52,6 +52,10 @@ const TASKS_APPROVAL_AUTH_SOURCE = readFileSync(
   new URL('../../../../services/tasks-api/src/middleware/approvalAuth.ts', import.meta.url),
   'utf8',
 );
+const PRODUCTION_BLOCKERS = readFileSync(
+  new URL('../../../../docs/cloud/production-blockers.md', import.meta.url),
+  'utf8',
+);
 
 const PRODUCTION_TASKS_DSN =
   'postgresql://prod_user:***@ep-production.example.test/neondb?sslmode=require';
@@ -186,6 +190,38 @@ describe('platform environment manifest', () => {
       healthProbe.cnameTargets.staging,
       `${STAGING.healthProbeApp}.fly.dev`,
     );
+  });
+
+  it('maps the production health probe to the manifest app while retaining only the legacy fallback', () => {
+    const healthProbe = HOSTNAME_MATRIX.surfaces.find((surface) => surface.id === 'health-probe');
+    assert.equal(healthProbe.flyApp, PRODUCTION.healthProbeApp);
+    assert.equal(
+      healthProbe.cnameTargets.production,
+      `${PRODUCTION.healthProbeApp}.fly.dev`,
+    );
+    // stable-fallback: the legacy provider host remains migration evidence.
+    assert.equal(healthProbe.providerFallback, 'sindustries-health-probe.fly.dev');
+  });
+
+  it('keeps the forward-looking production register on the manifest app names', () => {
+    const sectionFive = PRODUCTION_BLOCKERS.split('### 5.')[1].split('### 6.')[0];
+    assert.ok(sectionFive.includes(`\`${PRODUCTION.platformApp}\``));
+    assert.ok(sectionFive.includes(`\`${PRODUCTION.healthProbeApp}\``));
+    for (const retiredApp of [
+      'sindustries-tasks-api',
+      'sindustries-budget-api',
+      'sindustries-content-scheduler-api',
+      'sindustries-health-probe',
+      'sindustries-auto-post-worker',
+    ]) {
+      assert.ok(!sectionFive.includes(`\`${retiredApp}\``));
+    }
+  });
+
+  it('preserves the observed legacy app names in section 9 as history', () => {
+    const sectionNine = PRODUCTION_BLOCKERS.split('### 9.')[1];
+    assert.match(sectionNine, /`sindustries-tasks-api`/);
+    assert.match(sectionNine, /`sindustries-health-probe`/);
   });
 
   it('maps every production API hostname to the consolidated production app', () => {
