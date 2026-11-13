@@ -48,6 +48,10 @@ const STAGING_HEALTH_PROBE_FLY_TOML = readFileSync(
   new URL('../../observability/health-probe/fly.toml', import.meta.url),
   'utf8',
 );
+const TASKS_APPROVAL_AUTH_SOURCE = readFileSync(
+  new URL('../../../../services/tasks-api/src/middleware/approvalAuth.ts', import.meta.url),
+  'utf8',
+);
 
 const PRODUCTION_TASKS_DSN =
   'postgresql://prod_user:***@ep-production.example.test/neondb?sslmode=require';
@@ -436,6 +440,18 @@ describe('buildPlatformSecretPayload for production', () => {
     const byName = Object.fromEntries(secrets.map((secret) => [secret.name, secret.value]));
     const tasks = JSON.parse(byName.TASKS_API_APPROVAL_SERVICE_CREDENTIALS);
     assert.equal(tasks[0].actor, 'production-cloud-validate');
+  });
+
+  it('keeps production approval-row authority fail-closed', () => {
+    const permissions = TASKS_APPROVAL_AUTH_SOURCE.match(
+      /const ACTOR_PERMISSIONS:[^{]+\{([\s\S]*?)\n\};/,
+    );
+    assert.ok(permissions, 'Tasks API ACTOR_PERMISSIONS map must remain discoverable');
+    assert.doesNotMatch(
+      permissions[1],
+      /production-cloud-validate\s*:/,
+      'production-cloud-validate must not gain approval-row authority implicitly',
+    );
   });
 
   it('fails closed when a production payload carries a staging value', () => {

@@ -170,6 +170,15 @@ export const PLATFORM_ENVIRONMENTS = {
       tasks: 'production-cloud-validate',
       contentScheduler: 'production-cloud-validate',
     },
+    // Security decision: `production-cloud-validate` is deliberately NOT in
+    // the Tasks API `ACTOR_PERMISSIONS` map. It can use the ordinary
+    // authenticated mutation routes, but every approval-row route fails
+    // closed with `403 APPROVAL_ACTOR_FORBIDDEN`.
+    //
+    // This matches the staging automation actor and keeps production
+    // deployment automation separate from human/agent approval authority.
+    // Adding approval-row authority requires a separate, security-reviewed
+    // change to `services/tasks-api/src/middleware/approvalAuth.ts`.
     /**
      * Markers that must never appear in a production secret value.
      *
