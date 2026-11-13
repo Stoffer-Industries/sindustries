@@ -87,16 +87,19 @@ SafeFetcher
 |---|---|
 | DNS/IP pinning (no rebinding) | Python resolves and validates the IP; curl is given `--resolve <host>:<port>:<validated-ip>` so it never performs its own resolution |
 | Host header + TLS SNI | `--resolve` keeps the hostname in the TLS handshake (SNI) and the `Host` header; curl is never told to talk to the raw IP as a hostname |
-| Redirect re-validation | curl runs with `--max-redirs 0`; **curl never follows a redirect**. Python sees the 3xx, re-resolves, re-validates and re-pins the next hop exactly as today |
+| Redirect re-validation | curl is invoked **without `-L`**, so it never follows a redirect, and with `--max-redirs 0` as a defence-in-depth assertion. The response status and headers are captured explicitly (`-D <header-file>`, `-o <body-file>`, `-w '%{http_code}'`), so Python sees the 3xx and the `Location` header, re-resolves, re-validates and re-pins the next hop exactly as today. If curl exits with its redirect-refusal code (47, "Maximum (0) redirects followed"), the transport **maps that to "a 3xx response"** — reading the status and `Location` from the captured headers — and never to a transport error; a 3xx with no `Location` is a protocol error, not a transport failure |
+| TLS verification | certificate verification **stays on** for both transports: `-k` / `--insecure` is never passed and no `--cacert` override is introduced. `--resolve <host>:443:<validated-ip>` keeps the hostname in the SNI extension and the `Host` header, so the certificate is validated against the hostname exactly as on the httpx path — pinning the IP does not weaken certificate checking |
 | Time bounds | `--connect-timeout` / `--max-time` derived from the existing per-fetch timeout |
-| Size cap | enforced in Python on the returned bytes, as today |
+| Size cap | `--max-filesize <cap>` is passed so an oversized response is cut off at the transport rather than fully buffered first. curl can only enforce `--max-filesize` when the response carries a `Content-Length`, so Python's byte cap stays authoritative for chunked responses (it truncates/rejects at the cap). Both layers enforce the same cap; neither is removed |
 | Content-type allow-list | enforced in Python, as today |
 | No cookies / credentials / custom auth headers | curl is invoked with an explicit header allow-list; no cookie jar (`--cookie` never used), no `-u`, no `-H Authorization` |
 | Transport availability | curl is present on macOS and on `ubuntu-latest`; the transport reports `TRANSPORT_UNAVAILABLE` if the binary is missing, and the fetcher falls back to the httpx transport rather than failing the run |
 
-**Transport selection.** Default to the httpx transport. On an HTTP 502 (or any 5xx) from the pinned-IP httpx attempt, immediately re-issue the same request through the curl transport, and record which transport produced the response. This keeps the change minimally invasive, keeps the pinned-IP/Host/SNI path identical on both transports, and produces live evidence of the fingerprint hypothesis on every run rather than relying on a pre-baked host list.
+**Transport selection (decided — this is not an implementer choice).** The default is **httpx first, curl fallback on any 5xx**: the pinned-IP httpx request is made first; if it returns a 5xx, the same request is immediately re-issued through the curl transport. Every outbound network request records the transport that carried it.
 
-Recommended alternative if the fallback proves noisy in practice: pin `www.techmanagerweekly.com` (and any other Ghost/Fastly-hosted source) to the curl transport by default, with httpx retained for every other host. Both are acceptable; the deciding criterion is that the *observable* result (a 200 from the pinned IP) is obtained without weakening the policy layer.
+- The curl fallback **consumes one of the three network requests in the budget** (§2). It is not an extra request on top of the budget.
+- There is **no per-host transport allow-list and no per-host default pinning**. Host-specific pinning was considered and rejected for now: it would make the attempt-list shape depend on a maintained host list, and the fallback already produces the live evidence needed to justify changing the default later. Changing the default is a separate, evidence-backed change to this design.
+- The deciding criterion for the default is unchanged: the *observable* result (a 200 from the pinned IP) is obtained without weakening the policy layer.
 
 **Explicitly rejected:** swapping in a browser-impersonation library (`curl_cffi`, `tls-client`). It adds a heavy, frequently-updated dependency with its own supply-chain surface to a pipeline whose SSRF posture is the reason it is safe. The curl transport achieves the same observable result using a binary already present on every runner.
 
@@ -104,19 +107,20 @@ Recommended alternative if the fallback proves noisy in practice: pin `www.techm
 
 Add a retry policy to the fetcher for the transient classes only: `TIMEOUT`, `TRANSPORT_ERROR`, and `HTTP_ERROR` with status `429` or `>= 500`.
 
-- **Budget:** at most 3 attempts per URL (initial + 2 retries), with exponential backoff and jitter (e.g. 1s, 4s, capped at 30s). The budget is a constant in settings, not scattered through call sites.
+- **Budget:** at most **3 network requests per URL**, with exponential backoff and jitter (e.g. 1s, 4s, capped at 30s) between requests. The budget is a constant in settings, not scattered through call sites. It is counted in **network requests, not logical attempts**: a transport fallback (§1) is a network request and consumes the budget exactly like a retry does. A URL therefore causes at most 3 outbound requests in total, whatever transport mix produced them.
+- **One record per network request.** Every outbound request produces exactly one attempt record — there is no attempt that did not hit the network, and no network request without a record.
 - **`Retry-After`:** honoured on `429` when the header is present and parseable, capped at the same maximum.
 - **No retry on:** `SSRF_BLOCKED`, `UNSAFE_SCHEME`, `UNSAFE_URL`, `TOO_MANY_REDIRECTS`, `HTTP_ERROR` 4xx other than 429 — these are policy decisions or client errors, and retrying them is wrong.
-- **Visible attempts:** every attempt is recorded with `attempt`, `transport`, `code`, `status`, `delay_ms`, and the attempt list is attached to the fetch result and surfaced in the workflow's `errors`/diagnostics output, e.g.
+- **Visible attempts:** every network request is recorded with `request`, `transport`, `code`, `status`, `delay_ms`, and the attempt list is attached to the fetch result and surfaced in the workflow's `errors`/diagnostics output, e.g.
 
   ```
   fetch_attempts: [
-    {attempt: 1, transport: httpx, code: HTTP_ERROR, status: 502, delay_ms: 1000},
-    {attempt: 2, transport: curl,  code: OK,         status: 200, delay_ms: 0}
+    {request: 1, transport: httpx, code: HTTP_ERROR, status: 502, delay_ms: 1000},
+    {request: 2, transport: curl,  code: OK,         status: 200, delay_ms: 0}
   ]
   ```
 
-  This is what makes the next run diagnosable instead of silent: a reader sees how many attempts were made, over which transports, with which statuses.
+  This is what makes the next run diagnosable instead of silent: a reader sees how many network requests were made, over which transports, with which statuses.
 
 ### 3. `noop` must mean "no new issue", never "could not reach the source" (AC3 and the durable guard)
 
@@ -140,19 +144,22 @@ and never a fetch-error `noop`. The run's JSON envelope is the evidence and is a
 
 | AC | Design element | What proves it |
 |---|---|---|
-| AC1 (bounded retries with backoff; attempts visible) | §2 | Unit test: a transport that fails twice with 502 then succeeds → 3 attempts recorded, backoff honoured, attempt list in the workflow output; a transport that always fails → bounded at 3 attempts, outcome `failed` |
-| AC2 (no 502 from the edge, without weakening SSRF protection) | §1 | Live/integration test: the pinned-IP request returns 200 through the curl transport; plus unit tests asserting `--resolve` carries the validated IP, `--max-redirs 0` is set, and a redirect is re-resolved and re-pinned by Python rather than followed by curl |
+| AC1 (bounded retries with backoff; attempts visible) | §2 | Unit test: a transport that fails twice with 502 then succeeds → **3 network requests** recorded, backoff honoured, attempt list in the workflow output; a transport that always fails → bounded at **3 network requests**, outcome `failed`. The test asserts the number of **network requests** (not logical attempts) and that the attempt list length equals the number of requests made, including the httpx→curl fallback request |
+| AC2 (no 502 from the edge, without weakening SSRF protection) | §1 | Live/integration test: the pinned-IP request returns 200 through the curl transport; plus unit tests asserting `--resolve` carries the validated IP, `-L` is absent and `--max-redirs 0` is set, certificate verification stays on (no `-k`/`--insecure`), `--max-filesize` is set to the cap, and a redirect is re-resolved and re-pinned by Python rather than followed by curl |
 | AC3 (a real run fetches the archive; not a fetch-error noop) | §3, §4 | The production run's JSON envelope, attached to the task |
 
 ## Test plan
 
-1. **Retry budget.** Stub the transport to fail N times; assert the attempt count stops at the budget and the recorded delays are non-decreasing and capped.
-2. **Attempts visible.** Assert the workflow's `errors`/diagnostics output contains the attempt list with per-attempt transport, code and status.
+1. **Request budget.** Stub the transport to fail N times; assert the number of **network requests** stops at 3 and the recorded delays are non-decreasing and capped. A variant asserts that an httpx 5xx followed by a curl success uses exactly **2** network requests — the fallback is inside the budget, not on top of it.
+2. **Attempts visible.** Assert the workflow's `errors`/diagnostics output contains the attempt list with per-request transport, code and status, and that the list length equals the number of network requests made.
 3. **Pinning preserved.** Assert the curl invocation includes `--resolve <host>:443:<validated-ip>` and that the IP passed is the validated one (never a second resolution).
-4. **Redirects not followed by curl.** Assert `--max-redirs 0` is present, and that a 302 response causes a fresh Python-side resolve + validation + pin for the next hop.
-5. **SSRF policy unchanged.** The existing policy tests for `SSRF_BLOCKED` (loopback / private / link-local / reserved), `UNSAFE_SCHEME` and embedded-credential rejection must still pass unchanged against both transports. A test must show the curl transport is never used for a host whose resolved IP failed validation.
-6. **Outcome semantics.** A fetch failure that exhausts retries yields `outcome: failed`, never `noop`. A successful fetch of an unchanged archive yields `noop` with the "no new issue" reason. These two tests are the regression guard for the silent-break class.
-7. **Production run.** A real run's envelope, attached to the task.
+4. **Redirects not followed by curl.** Assert `-L` is absent and `--max-redirs 0` is present, and that a 302 response causes a fresh Python-side resolve + validation + pin for the next hop.
+5. **Redirect refusal is not a transport error.** Simulate curl exiting 47 (redirect refusal) with a captured 302 + `Location` header; assert the transport classifies it as a 3xx response (not `TRANSPORT_ERROR`), surfaces the `Location` to the policy layer, and re-resolves and re-pins the next hop. A 3xx with no `Location` is classified as a protocol error, not a transport error.
+6. **TLS verification stays on.** Assert the curl invocation contains no `-k` / `--insecure`, and that the hostname (not the pinned IP) is what is presented for certificate validation.
+7. **Byte cap at the transport.** Assert `--max-filesize` is set to the cap, and that a response larger than the cap is rejected by Python even when the transport did not stop it (the chunked / no `Content-Length` case).
+8. **SSRF policy unchanged.** The existing policy tests for `SSRF_BLOCKED` (loopback / private / link-local / reserved), `UNSAFE_SCHEME` and embedded-credential rejection must still pass unchanged against both transports. A test must show the curl transport is never used for a host whose resolved IP failed validation.
+9. **Outcome semantics.** A fetch failure that exhausts retries yields `outcome: failed`, never `noop`. A successful fetch of an unchanged archive yields `noop` with the "no new issue" reason. These two tests are the regression guard for the silent-break class.
+10. **Production run.** A real run's envelope, attached to the task.
 
 ## Scope
 
@@ -181,5 +188,6 @@ Out of scope:
 1. **The fingerprint hypothesis could be wrong.** The reproduction is strong (same IP, same headers, different client, opposite verdict) but it is still an inference from 5/5 samples. Mitigation: the transport fallback runs automatically on a 5xx and records `transport` per attempt, so the first production run either succeeds (hypothesis confirmed) or produces a per-transport attempt list that refutes it. The design therefore does not depend on the hypothesis being correct to be useful.
 2. **Edge behaviour may change.** A future Fastly/Ghost change could block curl as well, or begin serving both. Mitigation: the attempt list makes the new behaviour immediately visible instead of silent.
 3. **`curl` absence on a runner.** Mitigated by the `TRANSPORT_UNAVAILABLE` fallback to httpx plus an explicit error in the attempt list rather than a silent degradation.
-4. **Retry budget vs cron wall-clock.** 3 attempts with 1s/4s backoff plus the per-fetch timeout must fit inside the cron slot. The implementer should assert the worst case against the existing per-fetch timeout setting before merging.
-5. **Open question (implementation-time, non-blocking):** whether other sources behind the same edge need the curl transport. Recommendation: keep the selection dynamic (5xx → curl fallback) until a second source is actually observed to be blocked, rather than maintaining a host allow-list speculatively.
+4. **Request budget vs cron wall-clock.** 3 network requests with 1s/4s backoff plus the per-fetch timeout must fit inside the cron slot. The implementer should assert the worst case against the existing per-fetch timeout setting before merging. The budget is counted in network requests precisely so this worst case is computable: 3 requests × (connect + response time) + 5s of backoff, bounded by the per-fetch timeout.
+5. **`--max-filesize` is not enforced for chunked responses.** curl can only apply `--max-filesize` when the response carries a `Content-Length`; a chunked oversized response is buffered by curl and then truncated/rejected by Python's cap. This is why Python's cap stays authoritative and the transport-level flag is defence in depth, not the enforcement point.
+6. **Open question (implementation-time, non-blocking):** whether other sources behind the same edge need the curl transport. Recommendation: keep the selection dynamic (5xx → curl fallback) — the design deliberately carries no host allow-list (§1) until a second source is actually observed to be blocked.
