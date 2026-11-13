@@ -564,10 +564,10 @@
     "visibility": "published"
   },
   {
-    "title": "Edge migration preflight gate",
+    "title": "Task-management migration preflight gate",
     "slug": "edge-migration-preflight-gate",
     "releasedAt": "2026-11-12",
-    "summary": "Edge services now apply pending database migrations and verify the expected schema before they begin serving requests.",
+    "summary": "The task-management service now applies pending database migrations and verifies the expected schema before it begins serving requests.",
     "type": "system",
     "links": [
       {
