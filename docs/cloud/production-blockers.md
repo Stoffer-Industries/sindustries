@@ -169,9 +169,15 @@ credential boundary.
 - The credential boundary in cloud-platform.md applies unchanged: Quinn owns
   the live values; Rowan ships the environment manifest and provisioning
   contract.
-- `platform-create-apps.mjs --environment production` and
-  `platform-provision-secrets.mjs --environment production` derive these app
-  names from the same manifest used by the validation workflow.
+- `platform-provision-secrets.mjs --environment production` derives the
+  production app name and the `PRODUCTION_*` secret source names from the
+  environment manifest
+  (`infra/cloud/platform/platform-environments.mjs`), which is the single
+  source of truth for the production topology.
+- App creation and the production validation workflow are NOT in this slice:
+  the validation workflow is still staging-specific, and the manifest-to-
+  workflow drift check that would bind them belongs to a later slice. This
+  register therefore describes only the command that exists.
 
 ### 6. Production deploy workflows (separate task)
 

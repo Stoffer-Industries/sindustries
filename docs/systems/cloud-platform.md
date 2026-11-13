@@ -183,13 +183,23 @@ Where an operator should look:
 
 ## Platform secret provisioning (task `219fb673`)
 
-The consolidated platform app (`sindustries-platform-staging`) needs twelve
-app-level secrets before it can boot: three database URLs, six Redis URLs
-and two approval-service credentials. They are provisioned from the
+The consolidated platform app (`sindustries-platform-staging`) needs fifteen
+app-level secrets before it can boot: three database URLs, six Redis URLs,
+two approval-service credentials, one public base URL and three CORS
+allow-lists. They are provisioned from the
 **staging GitHub environment** by
 `infra/cloud/platform/platform-provision-secrets.mjs`, which the
 `.github/workflows/deploy-staging-platform.yml` workflow runs before the
 deploy.
+
+The provisioner is parameterised by environment
+(`--environment staging|production`, default staging). Every
+environment-owned fact — the Fly app names, the GitHub Environment, the
+secret source names, the schema names, the public base URLs and the CORS
+allow-lists — lives in one place,
+`infra/cloud/platform/platform-environments.mjs`. The table below is the
+staging half of that manifest; the production half differs in the source
+names, the base URLs and the CORS allow-lists.
 
 | Platform secret | Staging environment secret | Note |
 | --- | --- | --- |
@@ -200,6 +210,17 @@ deploy.
 | `PLATFORM_CONTENT_SCHEDULER_API_BASE_URL` | — | public URL, registered as a plain value |
 | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, token wrapped in the `[{token, actor, approvalTypes}]` JSON the services parse |
 | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, same wrapping |
+| `PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.tasksApi`), not a GitHub environment secret |
+| `PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.budgetApi`) |
+| `PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.contentSchedulerApi`) |
+
+**This table is the operator contract, and it matches the supervisor.**
+The three CORS values are not optional: `infra/cloud/platform/platform-services.mjs`
+lists them in each child's `requiredSources`, so the supervisor refuses to
+boot without them. They are registered from the environment manifest
+rather than left to the Fly TOML, because the TOML holds the STAGING
+allow-lists — a production app that inherited them would answer every
+preflight from the wrong origin.
 
 **Every database source is write-capable, and the script fails closed
 without one.** The platform runs `prisma migrate deploy` in its
