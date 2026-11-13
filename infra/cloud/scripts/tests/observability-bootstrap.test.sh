@@ -364,6 +364,51 @@ else
   fail "GRAFANA_CLOUD_LOKI_DATASOURCE_UID did not override the Loki datasource selection"
 fi
 
+# A pin that matches no Loki datasource must fail the step CLOSED. A stale
+# or mistyped pin used to fall through to the naming-convention rule, which
+# bound the dashboards to a datasource that is known not to carry
+# application logs — the exact failure this selector exists to prevent.
+: > "${FAKE_CURL_LOG}"
+pin_exit=0
+FAKE_DATASOURCES='[
+  {"type":"prometheus","uid":"grafanacloud-prom","isDefault":true},
+  {"type":"loki","uid":"grafanacloud-logs","name":"grafanacloud-sindustries-logs","isDefault":false}
+]' \
+  GRAFANA_CLOUD_LOKI_DATASOURCE_UID="grafanacloud-pinned-missing" \
+  PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" dashboards >/dev/null 2>&1 || pin_exit=$?
+if [ "${pin_exit}" -ne 0 ] \
+    && ! awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/' "${FAKE_CURL_LOG}" | grep -q .; then
+  ok "a pin that matches no Loki datasource fails the step and provisions nothing"
+else
+  fail "a stale Loki datasource pin was silently ignored (exit ${pin_exit})"
+fi
+
+# The Loki selection rule must have ONE home. The script and the documented
+# operator path both run infra/cloud/observability/loki-datasource-selector.jq,
+# so they cannot drift; neither may keep an inline copy of the rule.
+SELECTOR_JQ="${OBS}/loki-datasource-selector.jq"
+DOC_OBSERVABILITY="${REPO_ROOT}/docs/systems/observability.md"
+if [ -f "${SELECTOR_JQ}" ]; then
+  ok "the Loki datasource selector exists as a shared file"
+else
+  fail "the Loki datasource selector is missing: ${SELECTOR_JQ}"
+fi
+if grep -q -- '-f "${LOKI_SELECTOR_JQ}"' "${BOOT}"; then
+  ok "bootstrap-observability.sh runs the shared Loki selector"
+else
+  fail "bootstrap-observability.sh does not run the shared Loki selector"
+fi
+if grep -q 'loki-datasource-selector.jq' "${DOC_OBSERVABILITY}"; then
+  ok "the operator procedure runs the shared Loki selector"
+else
+  fail "the operator procedure does not run the shared Loki selector"
+fi
+if grep -q 'map(select(.type == "loki"))' "${BOOT}" "${DOC_OBSERVABILITY}"; then
+  fail "an inline copy of the Loki selection rule survived next to the shared file"
+else
+  ok "the Loki selection rule has no inline copy in the script or the docs"
+fi
+
 : > "${FAKE_CURL_LOG}"
 PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" alerts >/dev/null
 alert_payload="$(awk -F '\t' '$1 == "POST" && $2 ~ /\/api\/v1\/provisioning\/alert-rules$/ {print $3; exit}' "${FAKE_CURL_LOG}")"

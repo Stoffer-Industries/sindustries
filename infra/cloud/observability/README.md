@@ -66,7 +66,7 @@ The probe is its own Fly app (`infra/cloud/observability/health-probe/`) that ru
 
 ### `bootstrap-observability.sh`
 
-Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Discovers the Grafana Cloud stack's pre-provisioned Prometheus datasource via `/api/datasources`, uploads wrapped dashboard models, translates the portable alert files into per-rule HTTP payloads, and creates or updates each alert by UID. Performs a smoke deploy and surfaces a final report.
+Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Discovers the Grafana Cloud stack's pre-provisioned Prometheus datasource via `/api/datasources`, and selects the Loki datasource with the shared rule in `infra/cloud/observability/loki-datasource-selector.jq` (the same file the operator procedure in `docs/systems/observability.md` runs) — an operator pin (`GRAFANA_CLOUD_LOKI_DATASOURCE_UID`) wins outright, otherwise the canonical `logs` datasource, then the tenant default, then the first Loki datasource. Uploads wrapped dashboard models, translates the portable alert files into per-rule HTTP payloads, and creates or updates each alert by UID. Performs a smoke deploy and surfaces a final report.
 
 ---
 

@@ -62,6 +62,7 @@ DASHBOARD_DIR="${SCRIPT_DIR}/grafana/dashboards"
 ALERT_DIR="${SCRIPT_DIR}/grafana/alerts"
 ENV_LOCAL="${SCRIPT_DIR}/.env.local"
 EVIDENCE_CAPTURE="${SCRIPT_DIR}/evidence-capture.sh"
+LOKI_SELECTOR_JQ="${SCRIPT_DIR}/loki-datasource-selector.jq"
 
 DRY_RUN=false
 SUBCOMMAND="all"
@@ -599,24 +600,28 @@ resolve_prometheus_datasource_uid() {
 #   2. The canonical logs datasource, matched on a `logs` uid/name suffix.
 #   3. The tenant's default datasource, when it is a Loki datasource.
 #   4. The first Loki datasource (the previous behaviour).
+#
+# The rule itself lives in `loki-datasource-selector.jq`, which the operator
+# procedure in docs/systems/observability.md runs too: one file, so the
+# documented path and this script cannot drift.
+#
+# The operator pin is AUTHORITATIVE. When a pin is set, it is the only
+# acceptable answer: a pin that matches no Loki datasource (a stale uid, a
+# typo, or the uid of a Prometheus datasource) must fail the step closed
+# rather than fall through to a naming-convention rule that is known not to
+# work on that tenant.
 resolve_loki_datasource_uid() {
-  local response uid
+  local response uid pin
+  pin="${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}"
   response="$(curl --fail --silent --show-error \
     -H "$(grafana_auth_header)" \
     "$(grafana_api_url '/api/datasources')")"
-  uid="$(jq -r --arg override "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" '
-    map(select(.type == "loki"))
-    | (
-        [ map(select($override != "" and .uid == $override))[0] ]
-        + [ map(select(((.uid // "") | test("(^|-)logs$")) or ((.name // "") | test("(^|[- ])logs$"))))[0] ]
-        + [ map(select(.isDefault == true))[0] ]
-        + [ .[0] ]
-        + [ {} ]
-      )
-    | map(select(. != null))
-    | .[0]
-    | .uid // empty
-  ' <<<"${response}")"
+  uid="$(jq -r --arg override "${pin}" \
+    -f "${LOKI_SELECTOR_JQ}" <<<"${response}")"
+  if [ -n "${pin}" ] && [ "${uid}" != "${pin}" ]; then
+    echo "::error::GRAFANA_CLOUD_LOKI_DATASOURCE_UID=${pin} matches no Loki datasource on the hosted Grafana tenant; refusing to provision against a different datasource" >&2
+    return 1
+  fi
   printf '%s' "${uid}"
 }
 
