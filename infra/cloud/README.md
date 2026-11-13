@@ -247,20 +247,31 @@ are thin wrappers over `bootstrap-platform.sh --environment staging|production`.
 | Platform app | `sindustries-platform-staging` | `sindustries-platform-production` |
 | Health-probe app | `sindustries-health-probe-staging` | `sindustries-health-probe-production` |
 | Deploy gate | `STAGING_PLATFORM_DEPLOY_ENABLED=true` | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` |
+| Provision gate (CI) | — | `PRODUCTION_PLATFORM_PROVISION_ENABLED=true` |
+| Migrations gate | `STAGING_PLATFORM_MIGRATIONS_ENABLED=true` | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` |
 | Fly config | the shared `infra/cloud/fly/platform.fly.toml` | the shared config + `platform.production.overlay.toml`, rendered to `platform.production.fly.toml` (gitignored) |
 
 Production-specific properties, all enforced before anything is written:
 
 - The app name is NOT overridable: the environment is one app, and the
   per-service apps are never created.
+- The local env file is PARSED with an allow-list, never sourced into the
+  script's shell. It contributes the source keys and the Fly org; the
+  environment, the app, the gates and the facts are the manifest's and
+  are `readonly` in the script, so a copy of the staging env file cannot
+  point the production bootstrap at staging.
 - A value that still carries a staging/dev hostname, a placeholder or a
   localhost address is REFUSED by the provisioner before any Fly mutation
   (the bootstrap runs the provisioner in `--dry-run` mode first).
 - The deploy is gated twice: `--deploy` AND the environment's deploy gate
-  variable.
+  variable. The migrations carry their own gate, because they change the
+  database.
 - The effective Fly config is the shared topology plus a small overlay
   (app name, CORS origins, probe cadence). An overlay may set `app` and
-  `[env]` values and nothing else, so it cannot fork the platform topology.
+  the five environment-owned `[env]` keys and nothing else, so it cannot
+  fork the platform topology; and the overlay's app name must be one of
+  the environment's own apps, so a stale overlay cannot deploy
+  production to staging.
 
 Production live provisioning (create the Neon branch, create the app, set
 the spend limit, publish DNS) is the operator sequence in

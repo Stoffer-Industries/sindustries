@@ -46,7 +46,9 @@
 #   4. Register the app-level `PLATFORM_*` secrets through the platform
 #      provisioner (which fails closed when a source is missing).
 #   5. Prisma migrations for the three schemas. Skipped by default; pass
-#      --migrate to enable.
+#      --migrate to enable AND set the environment's migrations gate
+#      variable to `true` — migrations change the database, so they carry
+#      their own gate.
 #   6. Deploy (canary). Skipped by default; pass --deploy to enable, and
 #      the environment's deploy gate variable must be `true`.
 #
@@ -62,6 +64,16 @@
 #   for production). Never committed; gitignored. The keys this script
 #   reads are listed under "THE EXACT SOURCE CONTRACT" in
 #   infra/cloud/env/bootstrap-<environment>.env.example.
+#
+#   THE ENV FILE IS PARSED, NEVER SOURCED
+#   -------------------------------------
+#   The env file contributes the SOURCE KEYS and the Fly org, and nothing
+#   else. It is read with an allow-list rather than `source`d into this
+#   script's shell, because a sourced file can rewrite the script's own
+#   control variables: the environment, the target app, the deploy gate
+#   and the environment facts are all resolved from the manifest BEFORE
+#   the file is read and are `readonly` afterwards. A copy of the staging
+#   env file therefore cannot point the production bootstrap at staging.
 #
 #   The .env.local keys are TRANSLATED into the source names the platform
 #   provisioner reads, and the provisioner owns the mapping from those
@@ -216,16 +228,39 @@ process.stdout.write(typeof value === "string" ? value : JSON.stringify(value));
 PLATFORM_APP="$(fact platformApp)"
 HEALTH_PROBE_APP="$(fact healthProbeApp)"
 DEPLOY_GATE_VARIABLE="$(fact deployGateVariable)"
+MIGRATIONS_GATE_VARIABLE="$(fact migrationsGateVariable)"
+FLY_ORG_VARIABLE="$(fact flyOrgVariable)"
 DEFAULT_FLY_ORG="$(fact defaultFlyOrg)"
 ENV_LOCAL_DEFAULT="$(fact artefacts.envFile)"
 FLY_CONFIG_SHARED="$(fact artefacts.flyConfig.shared)"
 FLY_CONFIG_OVERLAY="$(fact artefacts.flyConfig.overlay || true)"
 FLY_CONFIG_RENDERED="$(fact artefacts.flyConfig.rendered)"
+
 # The required source KEYS are a JSON array; re-read them one by one.
-mapfile -t REQUIRED_SOURCE_KEYS < <(node -e '
+# The node exit status is CHECKED: a failed read used to yield an EMPTY
+# list, and an empty required-source list reads as "nothing is required"
+# — the opposite of failing closed.
+REQUIRED_SOURCE_KEYS=()
+if ! REQUIRED_SOURCE_KEYS_TEXT="$(node -e '
 const facts = JSON.parse(process.env.PLATFORM_ENV_FACTS);
 for (const key of facts.requiredSourceKeys) process.stdout.write(`${key}\n`);
-')
+')"; then
+  fail "could not read the required source keys for '$ENVIRONMENT' from the environment manifest." 1
+fi
+while IFS= read -r required_source_key; do
+  [[ -n "$required_source_key" ]] || continue
+  REQUIRED_SOURCE_KEYS+=("$required_source_key")
+done <<<"$REQUIRED_SOURCE_KEYS_TEXT"
+if [[ ${#REQUIRED_SOURCE_KEYS[@]} -eq 0 ]]; then
+  fail "the environment manifest lists no required sources for '$ENVIRONMENT' — refusing to continue with an empty required-source list." 1
+fi
+
+# The control variables are resolved from the manifest and are READONLY
+# from here on. The operator's env file is parsed BELOW with an
+# allow-list, so nothing it says can change the environment, the app, the
+# gates or the facts.
+readonly ENVIRONMENT PLATFORM_APP HEALTH_PROBE_APP DEPLOY_GATE_VARIABLE \
+  MIGRATIONS_GATE_VARIABLE FLY_ORG_VARIABLE PLATFORM_ENV_FACTS
 
 ok "environment: $ENVIRONMENT"
 info "  platform app:      $PLATFORM_APP"
@@ -253,17 +288,87 @@ if [[ ! -f "$ENV_LOCAL" ]]; then
   Copy infra/cloud/env/bootstrap-${ENVIRONMENT}.env.example as a starting point,
   fill in the values, re-run." 1
 fi
-# shellcheck disable=SC1090
-source "$ENV_LOCAL"
-ok "env file loaded"
+# The env file is PARSED with an allow-list. It is never `source`d.
+#
+# It used to be sourced straight into this script's shell, and every
+# control variable — ENVIRONMENT, PLATFORM_APP, DEPLOY_GATE_VARIABLE,
+# PLATFORM_ENV_FACTS — was read AFTER the source. A copy of the staging
+# env file could therefore rewrite them, and the app-name guard compared
+# two env-file-controlled values with each other, so it could not fail:
+# the production bootstrap would create the STAGING app and satisfy the
+# STAGING deploy gate. The allow-list takes the file's SOURCE KEYS and
+# nothing else; the environment, the app, the gates and the facts are
+# the manifest's.
+ENV_FILE_VALUES="$(mktemp)"
+trap 'rm -f "$ENV_FILE_VALUES"' EXIT
 
-# The Fly org may be overridden by the env file or by the environment
-# variable the manifest names; the APP NAME may not.
+while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+  line="${raw_line%$'\r'}"
+  line="${line#"${line%%[![:space:]]*}"}"
+  [[ -z "$line" || "$line" == '#'* ]] && continue
+  [[ "$line" == export\ * ]] && line="${line#export }"
+  [[ "$line" == *=* ]] || continue
+  file_key="${line%%=*}"
+  file_value="${line#*=}"
+  file_key="${file_key%"${file_key##*[![:space:]]}"}"
+  file_value="${file_value#"${file_value%%[![:space:]]*}"}"
+  # Strip a matching pair of surrounding quotes. An unquoted value may
+  # carry a trailing comment.
+  if [[ ${#file_value} -ge 2 && "${file_value:0:1}" == "'" && "${file_value: -1}" == "'" ]]; then
+    file_value="${file_value:1:${#file_value}-2}"
+  elif [[ ${#file_value} -ge 2 && "${file_value:0:1}" == '"' && "${file_value: -1}" == '"' ]]; then
+    file_value="${file_value:1:${#file_value}-2}"
+  else
+    file_value="${file_value%% #*}"
+  fi
+  printf '%s=%s\n' "$file_key" "$file_value" >>"$ENV_FILE_VALUES"
+done <"$ENV_LOCAL"
+
+# Only the source keys and the Fly org are taken from the file.
+ENV_FILE_ALLOWED_KEYS=()
+for pair in "${LOCAL_SOURCE_MAP[@]}"; do
+  ENV_FILE_ALLOWED_KEYS+=("${pair%%:*}")
+done
+ENV_FILE_ALLOWED_KEYS+=("FLY_APP_ORG" "$FLY_ORG_VARIABLE")
+
+ENV_FILE_FLY_APP_PLATFORM=""
+ENV_FILE_FLY_APP_ORG=""
+while IFS='=' read -r file_key file_value; do
+  [[ -n "$file_key" ]] || continue
+  case "$file_key" in
+    FLY_APP_PLATFORM)
+      # Captured, never applied: the target app is the manifest's.
+      ENV_FILE_FLY_APP_PLATFORM="$file_value"
+      continue
+      ;;
+    FLY_APP_ORG)
+      ENV_FILE_FLY_APP_ORG="$file_value"
+      continue
+      ;;
+  esac
+  case " ${ENV_FILE_ALLOWED_KEYS[*]} " in
+    *" $file_key "*) printf -v "$file_key" '%s' "$file_value" ;;
+  esac
+done <"$ENV_FILE_VALUES"
+
+ok "env file parsed (allow-listed source keys only; the file cannot choose the environment, the app or the gates)"
+
+# The Fly org may be named by the env file or by the environment variable
+# the manifest names; the APP NAME may not.
+if [[ -z "$FLY_APP_ORG" ]]; then
+  FLY_APP_ORG="${!FLY_ORG_VARIABLE:-}"
+fi
 if [[ -z "$FLY_APP_ORG" ]]; then
   FLY_APP_ORG="$(node -e '
 const facts = JSON.parse(process.env.PLATFORM_ENV_FACTS);
-process.stdout.write(process.env[facts.flyOrgVariable] || facts.defaultFlyOrg);
+process.stdout.write(process.env[facts.flyOrgVariable] || "");
 ')"
+fi
+if [[ -z "$FLY_APP_ORG" ]]; then
+  FLY_APP_ORG="$ENV_FILE_FLY_APP_ORG"
+fi
+if [[ -z "$FLY_APP_ORG" ]]; then
+  FLY_APP_ORG="$DEFAULT_FLY_ORG"
 fi
 
 # The target is NOT free-form. The environment is ONE app: the per-service
@@ -271,10 +376,18 @@ fi
 # 2026-11-07 cutover; in production they were never created), and a
 # resurrected per-service auto-post worker would put two consumers on one
 # BullMQ queue. The org may be overridden; the app name may not.
-if [[ -n "${FLY_APP_PLATFORM:-}" && "$FLY_APP_PLATFORM" != "$PLATFORM_APP" ]]; then
-  fail "refusing to bootstrap Fly app '$FLY_APP_PLATFORM': $ENVIRONMENT is one app ($PLATFORM_APP). The retired per-service apps must not be recreated. Remove FLY_APP_PLATFORM from $ENV_LOCAL." 1
-fi
+#
+# The comparison is against the MANIFEST's app name — not against another
+# env-file-controlled value — so a stale FLY_APP_PLATFORM in the env file
+# fails the bootstrap instead of silently retargeting it.
+for candidate_app in "${FLY_APP_PLATFORM:-}" "$ENV_FILE_FLY_APP_PLATFORM"; do
+  [[ -n "$candidate_app" ]] || continue
+  if [[ "$candidate_app" != "$PLATFORM_APP" ]]; then
+    fail "refusing to bootstrap Fly app '$candidate_app': $ENVIRONMENT is one app ($PLATFORM_APP). The retired per-service apps must not be recreated. Remove FLY_APP_PLATFORM from $ENV_LOCAL." 1
+  fi
+done
 FLY_APP_PLATFORM="$PLATFORM_APP"
+readonly FLY_APP_PLATFORM
 
 command -v flyctl >/dev/null 2>&1 || command -v fly >/dev/null 2>&1 \
   || fail "fly CLI not found in PATH. Install: https://fly.io/docs/hands-on/install-flyctl/" 1
@@ -378,7 +491,7 @@ ok "payload validated (no Fly calls yet)"
 create_app_if_missing() {
   local app="$1"
   local apps_json
-  apps_json=$("$FLY" apps list --json 2>/dev/null) \
+  apps_json=$("$FLY" apps list --json --org "$FLY_APP_ORG" 2>/dev/null) \
     || fail "unable to list Fly apps (is the fly CLI authenticated?)" 2
   # Exact-name match via python3 (the prior `grep -q "\"Name\":\"$app\""` form
   # is a substring match — an app named `$app-extra` would falsely match).
@@ -429,6 +542,12 @@ if [[ "$RUN_MIGRATIONS" -eq 0 ]]; then
 fi
 
 if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
+  # Migrations change the DATABASE, not the app, so they carry their own
+  # gate: `--migrate` alone is not consent to run schema changes against
+  # a production database.
+  if [[ "${!MIGRATIONS_GATE_VARIABLE:-}" != "true" ]]; then
+    fail "the $ENVIRONMENT schema migrations are opt-in: set $MIGRATIONS_GATE_VARIABLE=true. Migrations change the database, so they carry their own gate." 1
+  fi
   confirm "Apply the platform Prisma migrations (tasks-api, budget-api, content-scheduler schemas)?"
   # The platform's release_command runs the same chain on every deploy
   # (infra/cloud/platform/platform-migrate.mjs), so this step is a
@@ -476,7 +595,12 @@ if [[ "$RUN_DEPLOY" -eq 1 ]]; then
   fi
   confirm "Run the canary deploy of the consolidated $ENVIRONMENT platform?"
   info "deploying $FLY_APP_PLATFORM ($deploy_config)"
-  "$FLY" deploy --config "$deploy_config" --strategy canary --wait-timeout 600 \
+  # The app name is passed EXPLICITLY as well as carried by the rendered
+  # config. The rendered config's `app` comes from the overlay, and the
+  # renderer refuses an overlay that names another environment's app —
+  # but naming the target here means a stale or hand-edited rendered
+  # file cannot send the deploy to a different app either.
+  "$FLY" deploy --app "$FLY_APP_PLATFORM" --config "$deploy_config" --strategy canary --wait-timeout 600 \
     || fail "canary deploy failed: platform" 4
   ok "deployed: $FLY_APP_PLATFORM"
 fi
