@@ -581,8 +581,43 @@ resolve_prometheus_datasource_uid() {
 # but product dashboards (GymTrack browser error telemetry) are Loki-backed. A
 # missing Loki datasource must not fail provisioning for Prometheus-only setups,
 # so callers pass the empty string through and fall back to the placeholder uid.
+#
+# "The first Loki datasource" is NOT a usable selection rule. A Grafana Cloud
+# tenant exposes several Loki datasources at once: the canonical application
+# logs datasource (`<stack>-logs`) plus purpose-built ones (for example an
+# alert-state-history datasource and a usage-insights datasource). None of them
+# is the tenant default when Prometheus holds that flag, so the generic
+# default-first/first-loki fallback picks whichever the tenant happens to list
+# first. On the live Sindustries tenant that is
+# `grafanacloud-alert-state-history`, which never receives application logs —
+# every Loki-backed dashboard and every operator query bound to it comes back
+# empty while the rows sit in `grafanacloud-logs`.
+#
+# Selection order, most specific first:
+#   1. GRAFANA_CLOUD_LOKI_DATASOURCE_UID — an operator pin for tenants whose
+#      canonical logs datasource does not follow the naming convention.
+#   2. The canonical logs datasource, matched on a `logs` uid/name suffix.
+#   3. The tenant's default datasource, when it is a Loki datasource.
+#   4. The first Loki datasource (the previous behaviour).
 resolve_loki_datasource_uid() {
-  resolve_datasource_uid loki
+  local response uid
+  response="$(curl --fail --silent --show-error \
+    -H "$(grafana_auth_header)" \
+    "$(grafana_api_url '/api/datasources')")"
+  uid="$(jq -r --arg override "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" '
+    map(select(.type == "loki"))
+    | (
+        [ map(select($override != "" and .uid == $override))[0] ]
+        + [ map(select(((.uid // "") | test("(^|-)logs$")) or ((.name // "") | test("(^|[- ])logs$"))))[0] ]
+        + [ map(select(.isDefault == true))[0] ]
+        + [ .[0] ]
+        + [ {} ]
+      )
+    | map(select(. != null))
+    | .[0]
+    | .uid // empty
+  ' <<<"${response}")"
+  printf '%s' "${uid}"
 }
 
 grafana_folder_uid() {

@@ -300,18 +300,32 @@ So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix a
 
 ```bash
 # 1. the Loki datasource uid on the hosted tenant (do not hardcode it).
-#    This mirrors `resolve_datasource_uid()` in
+#    This mirrors `resolve_loki_datasource_uid()` in
 #    infra/cloud/observability/bootstrap-observability.sh: select every
-#    Loki datasource, prefer the default one, otherwise take the first.
-#    Selecting on `isDefault == true` alone yields an empty uid on a
-#    valid tenant whose default datasource is Prometheus and whose Loki
-#    datasource is not default — which degenerates the query URL below to
-#    /proxy/uid//... . The uid is not hardcoded because it is tenant state.
+#    Loki datasource, then prefer, in order, an operator pin
+#    (GRAFANA_CLOUD_LOKI_DATASOURCE_UID), the canonical application-logs
+#    datasource (a `logs` uid/name suffix), the tenant default, and only
+#    then the first Loki datasource.
+#    The "default first, otherwise the first Loki datasource" rule this
+#    replaces picked `grafanacloud-alert-state-history` on the live tenant
+#    — a purpose-built Loki datasource that never receives application
+#    logs — while the GymTrack rows sat in `grafanacloud-logs`. Every
+#    query and dashboard bound to the wrong datasource then answered "no
+#    rows" against a healthy telemetry pipeline. The uid is not hardcoded
+#    because it is tenant state.
 loki_uid=$(curl -sS -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
   "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/datasources" \
-  | jq -r '
+  | jq -r --arg override "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" '
       map(select(.type == "loki"))
-      | (map(select(.isDefault == true))[0] // .[0] // {})
+      | (
+          [ map(select($override != "" and .uid == $override))[0] ]
+          + [ map(select(((.uid // "") | test("(^|-)logs$")) or ((.name // "") | test("(^|[- ])logs$"))))[0] ]
+          + [ map(select(.isDefault == true))[0] ]
+          + [ .[0] ]
+          + [ {} ]
+        )
+      | map(select(. != null))
+      | .[0]
       | .uid // empty
     ' | head -1)
 
