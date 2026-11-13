@@ -321,6 +321,19 @@ describe('assertEnvironmentManifest', () => {
     };
     assert.throws(() => assertEnvironmentManifest(broken), /has no CORS origins for budgetApi/);
   });
+
+  it('refuses a production manifest that drops a forbidden host environment label', () => {
+    const broken = {
+      ...PRODUCTION,
+      forbiddenHostLabels: (PRODUCTION.forbiddenHostLabels ?? []).filter(
+        (label) => label !== 'dev',
+      ),
+    };
+    assert.throws(
+      () => assertEnvironmentManifest(broken),
+      /must forbid these host environment labels: dev/,
+    );
+  });
 });
 
 describe('findForbiddenValues', () => {
@@ -356,6 +369,53 @@ describe('findForbiddenValues', () => {
       ['DATABASE_URL', 'REDIS_URL'],
     );
     assert.ok(found.every((entry) => entry.marker === 'staging hostname segment'));
+  });
+
+  it('rejects provider-style dev Neon and Upstash endpoints', () => {
+    const found = findForbiddenValues(PRODUCTION, {
+      DATABASE_URL: 'postgresql://u:***@ep-dev-blue-123.us-east-2.aws.neon.tech/neondb',
+      REDIS_URL: 'rediss://default:***@eu1-dev-redis.upstash.io:6379',
+    });
+    assert.deepEqual(
+      found.map((entry) => entry.label).sort(),
+      ['DATABASE_URL', 'REDIS_URL'],
+    );
+    assert.ok(found.every((entry) => entry.marker === 'environment label "dev"'));
+  });
+
+  it('rejects a host whose DNS label carries the environment word', () => {
+    const found = findForbiddenValues(PRODUCTION, {
+      DATABASE_URL: 'postgresql://u:***@staging-db.neon.tech/neondb',
+      REDIS_URL: 'rediss://default:***@staging.upstash.io:6379',
+    });
+    assert.deepEqual(
+      found.map((entry) => entry.label).sort(),
+      ['DATABASE_URL', 'REDIS_URL'],
+    );
+    assert.ok(found.every((entry) => entry.marker === 'environment label "staging"'));
+  });
+
+  it('accepts a production endpoint whose provider label is not an environment word', () => {
+    assert.deepEqual(
+      findForbiddenValues(PRODUCTION, {
+        DATABASE_URL: 'postgresql://u:***@ep-cool-blue-123.us-east-2.aws.neon.tech/neondb',
+        REDIS_URL: 'rediss://default:***@eu1-cool-redis.upstash.io:6379',
+      }),
+      [],
+    );
+  });
+
+  it('ignores a value that is not a host', () => {
+    // The approval credential blob is JSON: it must never be read as a
+    // hostname, or a token that happens to contain an environment word
+    // would fail a production payload for no reason.
+    assert.deepEqual(
+      findForbiddenValues(PRODUCTION, {
+        TASKS_API_APPROVAL_SERVICE_CREDENTIALS:
+          '[{"token":"dev-elephant-quartz","actor":"production-cloud-validate","approvalTypes":[]}]',
+      }),
+      [],
+    );
   });
 
   it('imposes no markers on staging, whose values carry staging hostnames', () => {
@@ -497,6 +557,22 @@ describe('buildPlatformSecretPayload for production', () => {
           productionEnv({
             [PRODUCTION.sourceNames.tasksDatabaseUrl]:
               'postgresql://u:***@db.staging.example.test/neondb',
+          }),
+          { environment: 'production' },
+        ),
+      /refuses these values/,
+    );
+  });
+
+  it('fails closed when a production payload carries a provider-style dev endpoint', () => {
+    assert.throws(
+      () =>
+        buildPlatformSecretPayload(
+          productionEnv({
+            [PRODUCTION.sourceNames.tasksDatabaseUrl]:
+              'postgresql://u:***@ep-dev-blue-123.us-east-2.aws.neon.tech/neondb',
+            [PRODUCTION.sourceNames.redisUrl]:
+              'content-scheduler=rediss://default:***@eu1-dev-redis.upstash.io:6379',
           }),
           { environment: 'production' },
         ),

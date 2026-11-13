@@ -119,6 +119,12 @@ export const PLATFORM_ENVIRONMENTS = {
      */
     forbiddenValueMarkers: [],
     /**
+     * Host labels that must never appear in a host of this environment.
+     * Staging forbids none: staging values legitimately carry staging
+     * hostnames.
+     */
+    forbiddenHostLabels: [],
+    /**
      * Source names that must be present. `contentSchedulerDatabaseUrl` is
      * deliberately absent: it is optional in both environments because the
      * content-scheduler schema lives in the same database as tasks_api.
@@ -207,6 +213,42 @@ export const PLATFORM_ENVIRONMENTS = {
         label: 'staging hostname segment',
         pattern: /(?:^|[.-])staging(?:[.-]|$)/i,
       },
+    ],
+    /**
+     * Environment labels that must never appear in a host of this
+     * environment.
+     *
+     * Providers label their own endpoints, and they label them in more
+     * than one shape:
+     *
+     *   - Neon writes the environment into the endpoint name:
+     *     `ep-dev-blue-123.us-east-2.aws.neon.tech`;
+     *   - Upstash does the same: `eu1-dev-redis.upstash.io`;
+     *   - a DNS label carries it: `staging-db.neon.tech`,
+     *     `staging.upstash.io`.
+     *
+     * A single substring denylist cannot separate those shapes from a
+     * production endpoint whose endpoint name happens to contain a
+     * similar substring, so the guard below splits the host into its
+     * labels and compares them as WORDS: the label itself
+     * (`staging.upstash.io`) and the hyphen-separated parts of a label
+     * (`ep-dev-blue-123` -> `ep`, `dev`, `blue`, `123`).
+     *
+     * The list is the set of non-production environment words a provider
+     * can expose. A production host that exposes NO environment label at
+     * all (`ep-cool-blue-123...neon.tech`) is allowed: the provider does
+     * not expose one, so there is nothing to contradict.
+     */
+    forbiddenHostLabels: [
+      'staging',
+      'dev',
+      'test',
+      'testing',
+      'sandbox',
+      'uat',
+      'demo',
+      'preview',
+      'local',
     ],
     requiredSourceNames: [
       'tasksDatabaseUrl',
@@ -322,7 +364,117 @@ export function assertEnvironmentManifest(environment) {
     if (leaked.length > 0) {
       throw new Error(`production must not reuse staging base URLs: ${leaked.join(', ')}`);
     }
+    // The separation contract itself is structural: a manifest that drops
+    // the forbidden host labels would silently accept a dev endpoint, so
+    // the two labels the design names are required, not optional.
+    const requiredForbiddenLabels = ['staging', 'dev'];
+    const missingLabels = requiredForbiddenLabels.filter(
+      (label) => !(environment.forbiddenHostLabels ?? []).includes(label),
+    );
+    if (missingLabels.length > 0) {
+      throw new Error(
+        `production must forbid these host environment labels: ${missingLabels.join(', ')}`,
+      );
+    }
   }
+}
+
+/**
+ * A hostname-shaped authority: dot-separated labels of `[a-z0-9-]`.
+ *
+ * A value that does not match is not a host and is not scanned: an
+ * approval credential blob, a token, or an app name must never be read
+ * as a hostname.
+ */
+const HOSTNAME_SHAPE =
+  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+/**
+ * Extract the host of a URL, a bare hostname, or an authority.
+ *
+ * @param {string} value
+ * @returns {string|null} the lower-cased host, or null when the value is
+ *   not host-shaped
+ */
+export function extractHost(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  let authority = trimmed;
+  const schemeAt = trimmed.indexOf('://');
+  if (schemeAt !== -1) authority = trimmed.slice(schemeAt + 3);
+  authority = authority.split(/[/?#]/, 1)[0];
+
+  const at = authority.lastIndexOf('@');
+  if (at !== -1) authority = authority.slice(at + 1);
+  const colon = authority.indexOf(':');
+  if (colon !== -1) authority = authority.slice(0, colon);
+
+  const host = authority.trim().toLowerCase();
+  return HOSTNAME_SHAPE.test(host) ? host : null;
+}
+
+/**
+ * Every host named by a value.
+ *
+ * A value can be a single URL, a comma-separated allow-list (the CORS
+ * values), or a bare hostname. The whole value and each of its
+ * comma-separated entries are parsed, so a value whose password carries a
+ * comma still yields its host.
+ *
+ * @param {string} value
+ * @returns {string[]}
+ */
+export function extractHosts(value) {
+  if (typeof value !== 'string' || value.trim() === '') return [];
+  const hosts = [];
+  const push = (host) => {
+    if (host && !hosts.includes(host)) hosts.push(host);
+  };
+  push(extractHost(value));
+  for (const part of value.split(/[,\s]+/)) {
+    push(extractHost(part));
+  }
+  return hosts;
+}
+
+/**
+ * Public suffixes that are reserved for testing and can never name a real
+ * production host, so the final label is not read as an environment label
+ * when it is one of these.
+ */
+const RESERVED_HOST_SUFFIXES = new Set(['test', 'example', 'invalid', 'localhost']);
+
+/**
+ * The forbidden environment label a host carries, if any.
+ *
+ * The label is compared as a WORD, both as the DNS label itself and as
+ * the hyphen-separated parts of a label, so `ep-dev-blue-123` carries
+ * `dev` and `staging-db.neon.tech` carries `staging`.
+ *
+ * The final label is skipped when it is a reserved testing suffix
+ * (`.test`, `.example`): those can never name a production host, and the
+ * repository's own fixtures use them.
+ *
+ * @param {string} host
+ * @param {string[]} labels
+ * @returns {string|null} the offending label
+ */
+export function findForbiddenHostLabel(host, labels) {
+  const forbidden = new Set(
+    (labels ?? []).map((entry) => String(entry).trim().toLowerCase()).filter(Boolean),
+  );
+  if (forbidden.size === 0) return null;
+  const parts = String(host).split('.');
+  for (const [index, label] of parts.entries()) {
+    if (index === parts.length - 1 && RESERVED_HOST_SUFFIXES.has(label)) continue;
+    if (forbidden.has(label)) return label;
+    for (const token of label.split(/[-_]/)) {
+      if (forbidden.has(token)) return token;
+    }
+  }
+  return null;
 }
 
 /**
@@ -335,7 +487,8 @@ export function assertEnvironmentManifest(environment) {
 export function findForbiddenValues(environment, values) {
   const markers = environment.forbiddenValueMarkers ?? [];
   const patterns = environment.forbiddenValuePatterns ?? [];
-  if (markers.length === 0 && patterns.length === 0) return [];
+  const hostLabels = environment.forbiddenHostLabels ?? [];
+  if (markers.length === 0 && patterns.length === 0 && hostLabels.length === 0) return [];
   const found = [];
   for (const [label, value] of Object.entries(values ?? {})) {
     if (typeof value !== 'string' || value === '') continue;
@@ -351,6 +504,17 @@ export function findForbiddenValues(environment, values) {
     for (const entry of patterns) {
       if (entry.pattern.test(value)) {
         found.push({ label, marker: entry.label });
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    // The host-label guard: a provider that exposes its own environment
+    // label must not expose a non-production one.
+    for (const host of extractHosts(value)) {
+      const offending = findForbiddenHostLabel(host, hostLabels);
+      if (offending) {
+        found.push({ label, marker: `environment label "${offending}"` });
         break;
       }
     }
