@@ -1,0 +1,49 @@
+# fly.production.overlay.toml — environment-owned values for the PRODUCTION
+# health-probe app.
+#
+# This file is an OVERLAY, not a copy. The probe topology — image, probe
+# service, VM shape, canary strategy, the 30s probe cadence — lives in
+# the shared infra/cloud/observability/health-probe/fly.toml and is NOT
+# repeated here. Only the values that differ per environment appear below.
+#
+# Render the effective config with:
+#   node infra/cloud/platform/render-fly-config.mjs \
+#     --shared infra/cloud/observability/health-probe/fly.toml \
+#     --overlay infra/cloud/observability/health-probe/fly.production.overlay.toml \
+#     --out infra/cloud/observability/health-probe/fly.production.fly.toml \
+#     --environment production
+#
+# The rendered file is written NEXT TO the shared config on purpose: Fly
+# resolves a config's relative build paths against the config file's own
+# directory. The rendered path is gitignored: generated output, never a
+# source file.
+#
+# CADENCE
+# -------
+# The shared staging config probes each Fly app and each database once a
+# day (86400s). That is a deliberate dev-artifact trade: it stops the
+# probes from waking staging Machines and from holding a live Postgres
+# connection open on the Neon staging branch.
+#
+# Production does not have that budget. Quinn's approved decision (tech
+# design open question 4, task fb1240c0) is:
+#
+#   FLY_APP_PROBE_INTERVAL_SECONDS = 120   (2 minutes)
+#   DB_PROBE_INTERVAL_SECONDS      = 3600  (1 hour)
+#
+# The Fly-app cadence is the tight one because it is the liveness signal
+# for the production platform; the DB cadence stays hourly because each
+# pass holds a live Postgres connection. The contract test asserts both
+# values AND that production is strictly tighter than the staging daily
+# cadence — a production probe left at 86400 would pass every check while
+# watching nothing.
+#
+# The app name is derived from the environment manifest
+# (infra/cloud/platform/platform-environments.mjs); the contract test
+# fails if this file and the manifest disagree.
+
+app = 'sindustries-health-probe-production'
+
+[env]
+  FLY_APP_PROBE_INTERVAL_SECONDS = '120'
+  DB_PROBE_INTERVAL_SECONDS = '3600'

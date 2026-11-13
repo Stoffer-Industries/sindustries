@@ -46,13 +46,27 @@ CONSOLIDATED_PLATFORM_APP="sindustries-platform-staging"
 # failure drill (its scenarios scaled the per-service apps) and the
 # staging validation workflow (it woke a per-service Machine and read its
 # targets from staging environment variables).
+#
+# The bootstrap is NOT in this list: since task fb1240c0 (Slice B) it
+# resolves the app name from the ENVIRONMENT MANIFEST instead of naming
+# an app literally, so "does this surface name the consolidated app" is
+# the wrong question for it — the right question is "does this surface
+# resolve the app name from the manifest, and does the manifest name the
+# consolidated app". BOOTSTRAP_SURFACES below asserts exactly that.
 OPERATOR_SURFACES=(
   infra/cloud/bin/deploy
   infra/cloud/bin/status
   infra/cloud/bin/rollback
-  infra/cloud/scripts/bootstrap-staging.sh
   infra/cloud/observability/failure-inject.sh
   .github/workflows/cloud-staging-validate.yml
+)
+
+# The bootstrap surfaces: the shared implementation and its two thin
+# wrappers.
+BOOTSTRAP_SURFACES=(
+  infra/cloud/scripts/bootstrap-platform.sh
+  infra/cloud/scripts/bootstrap-staging.sh
+  infra/cloud/scripts/bootstrap-production.sh
 )
 
 failures=0
@@ -92,7 +106,7 @@ done
 # The per-service fly.toml files are staging configs for apps that no
 # longer exist. They are retained as templates for the production
 # migration, but no operator surface may deploy them.
-for surface in "${OPERATOR_SURFACES[@]}"; do
+for surface in "${OPERATOR_SURFACES[@]}" "${BOOTSTRAP_SURFACES[@]}"; do
   path="$REPO_ROOT/$surface"
   [[ -f "$path" ]] || continue
   code="$(strip_comments "$path")"
@@ -110,7 +124,6 @@ done
 DEPLOYING_SURFACES=(
   infra/cloud/bin/deploy
   infra/cloud/bin/rollback
-  infra/cloud/scripts/bootstrap-staging.sh
 )
 for surface in "${DEPLOYING_SURFACES[@]}"; do
   path="$REPO_ROOT/$surface"
@@ -122,6 +135,67 @@ for surface in "${DEPLOYING_SURFACES[@]}"; do
   echo "FAIL: $surface does not reference infra/cloud/fly/platform.fly.toml" >&2
   failures=$((failures + 1))
 done
+
+# ---------- the bootstrap surfaces resolve the app from the manifest ------
+#
+# The bootstrap must not carry a SECOND copy of the environment facts: an
+# app name hard-coded in the script is a copy that drifts, and a drifted
+# copy provisions the wrong app. So the bootstrap surfaces must NOT name
+# a platform app literally, and the manifest must name the consolidated
+# app (and the shared config) for both environments.
+for surface in "${BOOTSTRAP_SURFACES[@]}"; do
+  path="$REPO_ROOT/$surface"
+  if [[ ! -f "$path" ]]; then
+    echo "FAIL: $surface is missing" >&2
+    failures=$((failures + 1))
+    continue
+  fi
+  code="$(strip_comments "$path")"
+  for app in sindustries-platform-staging sindustries-platform-production sindustries-health-probe-staging sindustries-health-probe-production; do
+    if grep -qF "$app" <<<"$code"; then
+      echo "FAIL: $surface hard-codes the app name '$app'; the app name belongs to the environment manifest" >&2
+      failures=$((failures + 1))
+    fi
+  done
+  for app in "${RETIRED_APPS[@]}"; do
+    if grep -qF "$app" <<<"$code"; then
+      echo "FAIL: $surface still references the retired app $app" >&2
+      failures=$((failures + 1))
+    fi
+  done
+done
+
+FACTS_CLI="$REPO_ROOT/infra/cloud/platform/platform-environment-facts.mjs"
+if [[ ! -f "$FACTS_CLI" ]]; then
+  echo "FAIL: $FACTS_CLI is missing — the bootstrap resolves the app name from it" >&2
+  failures=$((failures + 1))
+else
+  for surface in "${BOOTSTRAP_SURFACES[@]}"; do
+    path="$REPO_ROOT/$surface"
+    code="$(strip_comments "$path")"
+    if ! grep -qF "platform-environment-facts.mjs" <<<"$code" \
+       && ! grep -qF "bootstrap-platform.sh" <<<"$code"; then
+      echo "FAIL: $surface does not resolve the environment facts (or delegate to the shared bootstrap)" >&2
+      failures=$((failures + 1))
+    fi
+  done
+  # The manifest side of the contract: the consolidated staging app, the
+  # production app, and the shared config path both environments deploy.
+  if [[ "$(node "$FACTS_CLI" --environment staging --field platformApp)" != "$CONSOLIDATED_PLATFORM_APP" ]]; then
+    echo "FAIL: the environment manifest does not name the consolidated staging app" >&2
+    failures=$((failures + 1))
+  fi
+  if [[ "$(node "$FACTS_CLI" --environment production --field platformApp)" != "sindustries-platform-production" ]]; then
+    echo "FAIL: the environment manifest does not name the consolidated production app" >&2
+    failures=$((failures + 1))
+  fi
+  for environment in staging production; do
+    if [[ "$(node "$FACTS_CLI" --environment "$environment" --field artefacts.flyConfig.shared)" != "infra/cloud/fly/platform.fly.toml" ]]; then
+      echo "FAIL: the $environment environment does not deploy the consolidated platform config" >&2
+      failures=$((failures + 1))
+    fi
+  done
+fi
 
 if [[ "$failures" -gt 0 ]]; then
   echo "retired-staging-apps: $failures failure(s)" >&2

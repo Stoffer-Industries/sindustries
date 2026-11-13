@@ -41,6 +41,18 @@ services/budget-api/.env.prodlike
 # infra/cloud/.env.local — Quinn keeps real values here, never committed.
 infra/cloud/.env.local
 
+# Quinn-owned production env file consumed by infra/cloud/scripts/bootstrap-production.sh.
+# infra/cloud/.env.production.local — Quinn keeps real values here, never committed.
+infra/cloud/.env.production.local
+
+# Generated Fly configs: rendered from the shared config plus the environment
+# overlay by infra/cloud/platform/render-fly-config.mjs. The rendered file is
+# written NEXT TO the shared config because Fly resolves a config's relative
+# build paths against the config file's own directory. A rendered file is
+# generated output, never a source file — never commit one.
+infra/cloud/fly/platform.production.fly.toml
+infra/cloud/observability/health-probe/fly.production.fly.toml
+
 # brain/ is workspace-only thinking-work (bookmarks, reviews, specs, posts) —
 # it does not belong in this codebase repo. Accidentally committed once
 # (cd2ad2a19ea098c860facf25418aecf06a8f486a); ignore to prevent recurrence.
