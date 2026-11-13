@@ -547,5 +547,39 @@
     ],
     "evidence": "The proxy bypass shipped on 2026-10-16 after the recurring task-discovery failure had required a per-run workaround for two weeks.",
     "visibility": "published"
+  },
+  {
+    "title": "Repo-wide secret-scan enforcement",
+    "slug": "repo-wide-secret-scan-enforcement",
+    "releasedAt": "2026-11-10",
+    "summary": "Every tracked file is now covered by the merge-gate secret scan, with a separate scheduled scan watching published history.",
+    "type": "system",
+    "links": [
+      {
+        "label": "Secret-scan enforcement pull request",
+        "url": "https://github.com/Stoffer-Industries/sindustries/pull/952"
+      }
+    ],
+    "evidence": "The tracked-tree and full-history scans completed with zero unreviewed findings. Contract tests cover scan scope, allowlist boundaries, binary integrity, and a live negative-control failure in the merge gate.",
+    "visibility": "published"
+  },
+  {
+    "title": "Edge migration preflight gate",
+    "slug": "edge-migration-preflight-gate",
+    "releasedAt": "2026-11-12",
+    "summary": "Edge services now apply pending database migrations and verify the expected schema before they begin serving requests.",
+    "type": "system",
+    "links": [
+      {
+        "label": "Migration preflight pull request",
+        "url": "https://github.com/Stoffer-Industries/sindustries/pull/966"
+      },
+      {
+        "label": "Hoisted Prisma detection fix",
+        "url": "https://github.com/Stoffer-Industries/sindustries/pull/976"
+      }
+    ],
+    "evidence": "The startup path now fails before serving when required migrations or schema objects are missing. A follow-up fixed the repository-root Prisma hoist case in the migration helper.",
+    "visibility": "published"
   }
 ]
