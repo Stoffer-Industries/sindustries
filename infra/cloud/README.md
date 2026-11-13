@@ -277,6 +277,29 @@ Production live provisioning (create the Neon branch, create the app, set
 the spend limit, publish DNS) is the operator sequence in
 `docs/specs/production-environment-provisioning-tech-design.md` Slice D.
 
+#### Production bootstrap / deploy / rollback index
+
+| Step | Command | Owner | Gate |
+| --- | --- | --- | --- |
+| Bootstrap the production app (local, once) | `infra/cloud/scripts/bootstrap-production.sh` | Quinn | the bootstrap refuses to write until the provisioner's dry-run passes; the deploy step additionally needs the deploy gate variable to be `true` |
+| Register the production app-level secrets | `infra/cloud/platform/platform-provision-secrets.mjs --environment production` | Quinn | refuses a value that still carries a staging/dev hostname, a placeholder or a localhost address |
+| Provision in CI | `.github/workflows/deploy-production-platform.yml` | CI | `PRODUCTION_PLATFORM_PROVISION_ENABLED=true` |
+| Deploy the production platform | `.github/workflows/deploy-production-platform.yml` | CI | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` |
+| Deploy the production health probe | `.github/workflows/deploy-production-health-probe.yml` | CI | `PRODUCTION_HEALTH_PROBE_DEPLOY_ENABLED=true` |
+| Run the production migrations | the migrations job of `.github/workflows/deploy-production-platform.yml` | CI | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` |
+| Re-read the effective production facts | `node infra/cloud/platform/platform-environment-facts.mjs --environment production` | anyone | read-only; prints names and flags, never secret values |
+| Roll back a bad production release | `fly releases rollback --app sindustries-platform-production` | Quinn | app-wide: one Machine carries all four services |
+
+Rollback for production is app-wide for the same reason staging's is — the
+production platform is one Machine carrying four services, so
+`fly releases rollback` restores the whole platform to a prior image and
+cannot roll one service back. The full sequence is in
+`docs/runbooks/platform-consolidation-rollback.md`. The production topology,
+its shared-fate consequences, the spend-limit rule and the credential
+boundary are written up in `docs/systems/cloud-platform.md`
+("Production topology"); the operator-facing blocker list is
+`docs/cloud/production-blockers.md`.
+
 
 ## PR strategy
 

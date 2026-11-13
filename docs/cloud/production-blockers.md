@@ -174,18 +174,30 @@ credential boundary.
   environment manifest
   (`infra/cloud/platform/platform-environments.mjs`), which is the single
   source of truth for the production topology.
-- App creation and the production validation workflow are NOT in this slice:
-  the validation workflow is still staging-specific, and the manifest-to-
-  workflow drift check that would bind them belongs to a later slice. This
-  register therefore describes only the command that exists.
+- App creation and the production deploy workflows now exist (task
+  `fb1240c0`, PR #979): `bootstrap-production.sh` creates the production
+  platform app through the shared bootstrap, and
+  `.github/workflows/deploy-production-platform.yml` and
+  `.github/workflows/deploy-production-health-probe.yml` deploy it. The
+  manifest-to-workflow drift check
+  (`tests/cloud/scripts/check-production-deploy-contract.mjs`) binds those
+  workflows' app name, gates, rendered Fly config and secret names to the
+  manifest, so a workflow cannot drift from the manifest it claims to follow.
+- The production environment does not exist yet: no production app, no
+  production Neon branch, no production DNS records and no production
+  secrets. The rows above are the target topology, not a live inventory. The
+  live provisioning evidence is Slice D of
+  `docs/specs/production-environment-provisioning-tech-design.md` and is
+  still to be captured.
 
-### 6. Production deploy workflows (separate task)
+### 6. Production deploy workflows (task `fb1240c0`)
 
 This task ships the **staging** deploy workflow migration to the stable
 hostname (slice 3, PR #775, merged 2026-10-08T10:28:43Z). The
-**production** deploy workflows (`deploy-production-tasks-api.yml` etc.)
-are a separate task — not in scope for `5cb4a8fe`. Quinn runs the
-production deploy by dispatching the same pattern against the production
+**production** deploy workflows are not in scope for `5cb4a8fe`; they ship
+with task `fb1240c0` as one consolidated pair, because production follows
+the consolidated topology rather than one workflow per service. Quinn runs
+the production deploy by dispatching those workflows against the production
 GitHub environment.
 
 | Workflow | Status | Owner |
@@ -194,10 +206,8 @@ GitHub environment.
 | `deploy-staging-budget-api.yml` | Merged (PR #775) | Rowan |
 | `deploy-staging-content-scheduler-api.yml` | Merged (PR #775) | Rowan |
 | `deploy-staging-health-probe.yml` | Merged (PR #775) | Rowan |
-| `deploy-production-tasks-api.yml` | Out of scope for this task | Separate task |
-| `deploy-production-budget-api.yml` | Out of scope for this task | Separate task |
-| `deploy-production-content-scheduler-api.yml` | Out of scope for this task | Separate task |
-| `deploy-production-health-probe.yml` | Out of scope for this task | Separate task |
+| `deploy-production-platform.yml` | Shipped by task `fb1240c0` (PR #979, unmerged) — one consolidated production app, not one app per service | Rowan |
+| `deploy-production-health-probe.yml` | Shipped by task `fb1240c0` (PR #979, unmerged) — the probe keeps its own app and its own gate | Rowan |
 
 ### 7. Production smoke + cutover (separate task)
 

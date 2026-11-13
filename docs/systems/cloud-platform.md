@@ -181,6 +181,80 @@ Where an operator should look:
 
 ---
 
+## Production topology (task `fb1240c0`)
+
+Production uses the **same consolidated topology as staging** — one Fly app
+carrying all four services, plus a separate app for the health probe. The
+environment manifest (`infra/cloud/platform/platform-environments.mjs`) is the
+single source of truth for the production app names, and the bootstrap, the
+deploy workflows, the hostname matrix and the secret contract all read it
+from there instead of restating it.
+
+| Fact | Production value | Where it comes from |
+| --- | --- | --- |
+| Platform app | `sindustries-platform-production` | the manifest's `platformApp` |
+| Health-probe app | `sindustries-health-probe-production` | the manifest's `healthProbeApp` |
+| API hostnames | `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz`, `content-scheduler-api.sindustries.co.nz` | `infra/cloud/hostname-matrix.json` |
+| Health hostname | `health-probe.sindustries.co.nz` | `infra/cloud/hostname-matrix.json` |
+| Provision gate (CI) | `PRODUCTION_PLATFORM_PROVISION_ENABLED=true` | the manifest |
+| Deploy gate | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` | the manifest |
+| Migrations gate | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` | the manifest |
+| Fly config | the shared `infra/cloud/fly/platform.fly.toml` plus the production overlay, rendered to a gitignored path | `infra/cloud/fly/platform.production.overlay.toml` |
+
+**Shared fate applies to production exactly as it does to staging.** One
+Machine carries tasks-api, budget-api, content-scheduler-api and the
+auto-post worker, so a crash, an OOM kill or a deploy restart takes all four
+down together; `fly releases rollback` is app-wide and cannot roll one
+service back; per-service scaling is impossible. Read
+[Shared-fate topology (staging)](#shared-fate-topology-staging) for the full
+consequence table — it carries over unchanged, because production deploys
+the same shared topology with a production overlay rather than a
+one-app-per-service shape. The production-only difference is the deployment
+target: the overlay names the production app and the production CORS
+origins, and the renderer refuses an overlay that forks the topology.
+
+**Ownership split.** Rowan owns the repository contracts — the manifest, the
+provisioner, the bootstrap, the deploy workflows, the drift checks and these
+docs. Quinn owns the operator execution — the production Neon branch, the
+Fly apps, the secrets, the DNS records, the spend limit and the deploy
+dispatch — using the credentials registered in the `production` GitHub
+Environment. Tom owns the organisation billing action if the Fly account
+does not allow the spend limit to be set directly. The full operator order
+is Slice D of
+[`docs/specs/production-environment-provisioning-tech-design.md`](../specs/production-environment-provisioning-tech-design.md).
+
+**The spend limit comes before real traffic.** The production app carries a
+live budget and a public API surface, so the organisation/app spend limit
+must be set — and read back — **before** the platform canary deploy or any
+public hostname is enabled. It is not a post-cutover tidy-up: the limit is
+what bounds the blast radius of a runaway production deploy, and the
+health probe must not go out before it either (the operator order deploys
+the platform first and the probe last).
+
+**Credential boundary.** The production credential path is the same rule as
+staging, with the `production` GitHub Environment instead of `staging`: the
+live values (`FLY_API_TOKEN`, the Neon production DSNs, the Upstash
+production Redis URLs, the DNS provider token) are owned and registered by
+Quinn as masked secrets and never enter the repo. The repository carries
+only the *names* the manifest requires (the `PRODUCTION_*` source names) and
+the provisioning contract that maps them onto the app-level `PLATFORM_*`
+secrets. The provisioner refuses a production value that still carries a
+staging/dev hostname, a placeholder or a localhost address, so a staging
+credential cannot be registered on the production app by accident, and the
+dry-run mode prints secret *names* only — never values. See
+[Credential boundary](#credential-boundary) for the full boundary and the
+repair path for a missing `FLY_API_TOKEN`.
+
+**Nothing is live yet.** As of this writing the production environment does
+not exist: no production Fly app, no production Neon branch, no production
+DNS records, no production secrets. Everything above describes the target
+topology and the contract that will create it; the live provisioning
+evidence is Slice D of the tech design, and the operator-facing blocker
+list lives in
+[`docs/cloud/production-blockers.md`](../cloud/production-blockers.md).
+
+---
+
 ## Platform secret provisioning (task `219fb673`)
 
 The consolidated platform app (`sindustries-platform-staging`) needs fifteen
@@ -516,7 +590,7 @@ The custom domains Vercel serves each project on (production: `mission-control.s
 
 ## Production blockers (task `5cb4a8fe`)
 
-The full production-blockers list — DNS records, TLS certs, Vercel custom domain registration, Vercel env var provisioning, Fly secrets, and the cross-environment safety net — is tracked in [`docs/cloud/production-blockers.md`](../cloud/production-blockers.md). Each blocker has a named owner (Quinn for DNS / TLS / Vercel / Fly secrets; separate tasks for production deploy workflows and production cutover) and a status field; the production deploy workflows and production cutover are explicitly out of scope for `5cb4a8fe` and tracked under tasks `020f423e` and `f2c23e26`.
+The full production-blockers list — DNS records, TLS certs, Vercel custom domain registration, Vercel env var provisioning, Fly secrets, and the cross-environment safety net — is tracked in [`docs/cloud/production-blockers.md`](../cloud/production-blockers.md). Each blocker has a named owner (Quinn for DNS / TLS / Vercel / Fly secrets; separate tasks for production deploy workflows and production cutover) and a status field. The production deploy workflows and the production cutover are explicitly out of scope for `5cb4a8fe`: the deploy workflows ship with task `fb1240c0` (see [Production topology](#production-topology-task-fb1240c0)), and the cutover stays with tasks `020f423e` and `f2c23e26`.
 
 The static checks above are the cross-environment safety net: a staging URL accidentally pasted into a production Vercel environment or production fly.toml fails the cross-env drift check at compile time, not at runtime. Quinn does not need to remember "don't paste staging credentials into production"; the contract makes it impossible to ship without the matching matrix value.
 
