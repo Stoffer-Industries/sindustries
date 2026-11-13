@@ -192,7 +192,76 @@ describe('the overlay is bound to the environment manifest', () => {
             overlayPath,
             environment: 'production',
           }).rendered,
-        /not an app of the production environment/,
+        /overlay names app "sindustries-platform-staging".*renders the production platform app/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a probe overlay that names the platform app', () => {
+    // The binding is to the app the SHARED CONFIG renders, not to "any
+    // app of this environment". The probe's shared config renders the
+    // probe app, so a probe overlay naming the platform app is a
+    // mismatch even though both apps belong to production — and the
+    // rendered config would then say the probe deploys to the platform
+    // app.
+    const directory = mkdtempSync(join(tmpdir(), 'render-fly-config-'));
+    const overlayPath = join(directory, 'probe.platform-app.overlay.toml');
+    writeFileSync(overlayPath, "app = 'sindustries-platform-production'\n", 'utf8');
+    try {
+      assert.throws(
+        () =>
+          renderFlyConfig({
+            sharedPath: repoUrl(HEALTH_PROBE_SHARED).pathname,
+            overlayPath,
+            environment: 'production',
+          }).rendered,
+        /overlay names app "sindustries-platform-production".*renders the production health-probe app/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a platform overlay that names the probe app', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'render-fly-config-'));
+    const overlayPath = join(directory, 'platform.probe-app.overlay.toml');
+    writeFileSync(overlayPath, "app = 'sindustries-health-probe-production'\n", 'utf8');
+    try {
+      assert.throws(
+        () =>
+          renderFlyConfig({
+            sharedPath: repoUrl(PLATFORM_SHARED).pathname,
+            overlayPath,
+            environment: 'production',
+          }).rendered,
+        /overlay names app "sindustries-health-probe-production".*renders the production platform app/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an overlay whose shared config is not a known artefact', () => {
+    // The app is bound to the app the shared config renders. If the
+    // shared config is not one of the environment's known artefacts,
+    // that app cannot be determined — and an overlay that names an app
+    // is refused rather than accepted unchecked.
+    const directory = mkdtempSync(join(tmpdir(), 'render-fly-config-'));
+    const sharedPath = join(directory, 'unknown.fly.toml');
+    const overlayPath = join(directory, 'unknown.overlay.toml');
+    writeFileSync(sharedPath, "app = 'sindustries-platform-staging'\n", 'utf8');
+    writeFileSync(overlayPath, "app = 'sindustries-platform-production'\n", 'utf8');
+    try {
+      assert.throws(
+        () =>
+          renderFlyConfig({
+            sharedPath,
+            overlayPath,
+            environment: 'production',
+          }).rendered,
+        /cannot tell which app the shared config .* renders/,
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
