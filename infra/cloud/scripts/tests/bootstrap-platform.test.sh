@@ -27,6 +27,9 @@
 #      gates on.
 #   7. The published production example file satisfies the source contract:
 #      the documented first-time path works.
+#   8. The local env file may provide values for the exact gate names selected
+#      by the manifest, without being able to select a different gate.
+#   9. Env values ending in '=' survive parsing byte-for-byte.
 #
 # No real secret value appears in this file: every fixture is obviously fake.
 #
@@ -65,6 +68,9 @@ case "$1 $2" in
     done
     printf 'INVOKED: %s\n' "${names[*]}" >>"$FLY_LOG"
     for arg in "$@"; do
+      if [[ "$arg" == 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS=[{"token":"stub-tasks-token==","actor":"production-cloud-validate","approvalTypes":[]}]' ]]; then
+        : >"$FLY_TRAILING_EQUALS_PRESERVED"
+      fi
       case "$arg" in
         --detach|--app) continue ;;
         *=*) printf '%s\n' "${arg%%=*}" >>"$FLY_REGISTERED" ;;
@@ -130,6 +136,7 @@ run_production() {
   rm -f "$TMP/registered.${label}"
   FLY_LOG="$TMP/fly.${label}.log" \
   FLY_REGISTERED="$TMP/registered.${label}" \
+  FLY_TRAILING_EQUALS_PRESERVED="$TMP/trailing-equals.${label}" \
   FLY_LIST_JSON="${FLY_LIST_JSON_OVERRIDE:-[]}" \
   PATH="$TMP/bin:$PATH" \
     bash "$PRODUCTION_SCRIPT" --yes --env-local "$env_file" "$@" \
@@ -395,4 +402,28 @@ if ! grep -qF 'PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true' "$TMP/err.migrations
   exit 1
 fi
 
-echo "bootstrap-platform: ok (11 cases)"
+# ---------- case 12: manifest-selected gates may come from the env file ----
+
+cat >"$TMP/.env.production.deploy-gate" <<ENV
+$(cat "$TMP/.env.production.local")
+PRODUCTION_PLATFORM_DEPLOY_ENABLED=true
+ENV
+FLY_LIST_JSON_OVERRIDE='[{"Name":"sindustries-platform-production","Status":"running"}]' \
+  run_production "deploy-env-gate" "$TMP/.env.production.deploy-gate" --deploy
+if ! grep -qF 'INVOKED: deploy --app sindustries-platform-production --config infra/cloud/fly/platform.production.fly.toml --strategy canary' "$TMP/fly.deploy-env-gate.log"; then
+  echo "FAIL: case=deploy-env-gate — the manifest-selected deploy gate value from the env file was ignored" >&2
+  sed 's/^/  /' "$TMP/fly.deploy-env-gate.log" >&2
+  exit 1
+fi
+
+# ---------- case 13: values ending in '=' survive env parsing --------------
+
+sed 's/^TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=.*/TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-tasks-token==/' \
+  "$TMP/.env.production.local" >"$TMP/.env.production.trailing-equals"
+run_production "trailing-equals" "$TMP/.env.production.trailing-equals"
+if [[ ! -f "$TMP/trailing-equals.trailing-equals" ]]; then
+  echo "FAIL: case=trailing-equals — the env parser did not preserve the complete value" >&2
+  exit 1
+fi
+
+echo "bootstrap-platform: ok (13 cases)"
