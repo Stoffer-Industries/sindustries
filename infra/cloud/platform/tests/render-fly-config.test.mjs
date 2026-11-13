@@ -30,7 +30,9 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { PLATFORM_ENVIRONMENTS } from '../platform-environments.mjs';
@@ -151,10 +153,70 @@ describe('overlay parsing fails closed', () => {
 
   it('accepts app and [env] values', () => {
     const overlay = parseOverlay(
-      "app = 'sindustries-platform-production'\n\n[env]\n  PORT = '8080'\n",
+      "app = 'sindustries-platform-production'\n\n[env]\n" +
+        "  PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS = 'https://mission-control.sindustries.co.nz'\n",
     );
     assert.equal(overlay.app, 'sindustries-platform-production');
-    assert.deepEqual(overlay.env, { PORT: '8080' });
+    assert.deepEqual(overlay.env, {
+      PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS: 'https://mission-control.sindustries.co.nz',
+    });
+  });
+
+  it('rejects an [env] key outside the allow-list', () => {
+    // The allow-list is KEY-level: an overlay that could set NODE_ENV or
+    // the router port could fork the app it is supposed to configure.
+    assert.throws(
+      () => parseOverlay("app = 'x'\n\n[env]\n  NODE_ENV = 'development'\n"),
+      /may not set the \[env\] key/,
+    );
+    assert.throws(
+      () => parseOverlay("app = 'x'\n\n[env]\n  PLATFORM_ROUTER_PORT = '9999'\n"),
+      /may not set the \[env\] key/,
+    );
+  });
+});
+
+describe('the overlay is bound to the environment manifest', () => {
+  it('refuses an overlay that names another environment app', () => {
+    // The app name is what Fly deploys to. An overlay edited to name the
+    // staging app renders successfully and then deploys production to
+    // staging, so the renderer refuses it.
+    const directory = mkdtempSync(join(tmpdir(), 'render-fly-config-'));
+    const overlayPath = join(directory, 'platform.staging.overlay.toml');
+    writeFileSync(overlayPath, "app = 'sindustries-platform-staging'\n", 'utf8');
+    try {
+      assert.throws(
+        () =>
+          renderFlyConfig({
+            sharedPath: repoUrl(PLATFORM_SHARED).pathname,
+            overlayPath,
+            environment: 'production',
+          }).rendered,
+        /not an app of the production environment/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an overlay env key the shared config does not define', () => {
+    const shared = [
+      "app = 'sindustries-platform-staging'",
+      '',
+      '[env]',
+      "  NODE_ENV = 'production'",
+      '',
+    ].join('\n');
+    assert.throws(
+      () =>
+        mergeFlyConfig(shared, {
+          app: null,
+          env: {
+            PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS: 'https://mission-control.sindustries.co.nz',
+          },
+        }),
+      /the shared config does not define/,
+    );
   });
 });
 

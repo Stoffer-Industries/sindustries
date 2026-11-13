@@ -98,6 +98,16 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetApi: 'https://budget-api.staging.sindustries.co.nz/api/v1',
       contentSchedulerApi: 'https://content-scheduler-api.staging.sindustries.co.nz/api/v1',
     },
+    /**
+     * The public base URL of this environment's health probe.
+     *
+     * The probe is a separate Fly app with its own stable hostname, so
+     * the probe deploy workflow needs one base URL of its own. It lives in
+     * the manifest for the same reason the API base URLs do: the deploy
+     * workflow resolves it at runtime instead of writing the hostname
+     * into the workflow, where a second copy would drift.
+     */
+    healthProbeBaseUrl: 'https://health-probe.staging.sindustries.co.nz',
     /** The CORS allow-lists of this environment's frontends. */
     corsAllowedOrigins: {
       tasksApi: [
@@ -164,6 +174,12 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetApi: 'https://budget-api.sindustries.co.nz/api/v1',
       contentSchedulerApi: 'https://content-scheduler-api.sindustries.co.nz/api/v1',
     },
+    /**
+     * The public base URL of this environment's health probe. See the
+     * staging entry for why the probe's own base URL is an environment
+     * fact rather than a hostname written into the deploy workflow.
+     */
+    healthProbeBaseUrl: 'https://health-probe.sindustries.co.nz',
     corsAllowedOrigins: {
       tasksApi: [
         'https://tasks.sindustries.co.nz',

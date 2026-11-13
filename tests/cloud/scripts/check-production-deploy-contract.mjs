@@ -132,6 +132,68 @@ function readTopLevelApp(text) {
 }
 
 /**
+ * The workflow's steps, as text blocks.
+ *
+ * The checker is pure Node with no deps, so the YAML is read line-wise:
+ * a step starts at `      - name:` and runs until the next step. That
+ * is enough to ask the questions that matter here — does this step run
+ * before that one, does this step carry this variable — without a YAML
+ * parser.
+ *
+ * @param {string} text
+ * @returns {{name: string, text: string}[]}
+ */
+function readSteps(text) {
+  const steps = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    const start = /^ {6}- name:\s*(.*)$/.exec(line);
+    if (start) {
+      current = { name: start[1].trim(), text: '' };
+      steps.push(current);
+      continue;
+    }
+    if (current && !line.trim().startsWith('#')) current.text += `${line}\n`;
+  }
+  return steps;
+}
+
+/**
+ * The environment variable names a step declares.
+ *
+ * Only the `env:` block of the step is read, and only its keys. The
+ * indentation is measured rather than assumed: a hard-coded column made
+ * the check vacuous the moment the workflow was re-indented.
+ *
+ * @param {string} stepText
+ * @returns {string[]}
+ */
+function stepEnvNames(stepText) {
+  const names = [];
+  let inEnv = false;
+  let envIndent = 0;
+  for (const rawLine of stepText.split('\n')) {
+    if (!inEnv) {
+      const envMatch = /^(\s*)env:\s*$/.exec(rawLine);
+      if (envMatch) {
+        inEnv = true;
+        envIndent = envMatch[1].length;
+      }
+      continue;
+    }
+    if (rawLine.trim() === '') continue;
+    const indent = rawLine.length - rawLine.trimStart().length;
+    if (indent <= envIndent) {
+      inEnv = false;
+      continue;
+    }
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(rawLine);
+    if (match) names.push(match[1]);
+  }
+  return names;
+}
+
+/**
  * The environment manifest and its derived facts.
  *
  * @returns {Promise<object|null>}
@@ -149,6 +211,7 @@ async function loadManifest() {
       environment,
       requiredSourceNames: environments.requiredSourceNames(environment),
       deployGateVariable: facts.buildEnvironmentFacts('production').deployGateVariable,
+      provisionGateVariable: facts.buildEnvironmentFacts('production').provisionGateVariable,
       healthProbeDeployGateVariable:
         facts.buildEnvironmentFacts('production').healthProbeDeployGateVariable,
     };
@@ -174,20 +237,68 @@ async function loadManifest() {
  * @param {string} label
  */
 function checkDeployUsesRenderedConfig(text, path, label) {
-  const deployLines = text
-    .split('\n')
-    .filter((line) => line.includes('flyctl deploy'));
-  if (deployLines.length === 0) {
+  const steps = readSteps(text);
+  const deploySteps = steps.filter((step) => step.text.includes('flyctl deploy'));
+  if (deploySteps.length === 0) {
     fail(`${path}: has no "flyctl deploy" step`);
     return;
   }
-  for (const line of deployLines) {
-    const usesRendered =
-      line.includes('$FLY_CONFIG_RENDERED') || line.includes('.production.fly.toml');
-    if (!usesRendered) {
+  const renderSteps = steps.filter((step) => step.text.includes('render-fly-config.mjs'));
+  if (renderSteps.length === 0) {
+    fail(`${path}: has no step that renders the ${label} Fly config`);
+    return;
+  }
+  const renderStep = renderSteps[0];
+
+  for (const step of deploySteps) {
+    const deployLine = step.text.split('\n').find((line) => line.includes('flyctl deploy')) ?? '';
+
+    // The deploy must name the RENDERED config, and never the shared
+    // one. A comment cannot satisfy this: the line must BE the command.
+    if (!deployLine.includes('$FLY_CONFIG_RENDERED')) {
       fail(
         `${path}: deploys the ${label} config that is not the rendered production config — ` +
-          `a shared-config deploy sends the staging app name to production: ${line.trim()}`,
+          `a shared-config deploy sends the staging app name to production: ${deployLine.trim()}`,
+      );
+    }
+    if (deployLine.includes('$FLY_CONFIG_SHARED')) {
+      fail(
+        `${path}: the deploy names the SHARED Fly config — a shared-config deploy sends the ` +
+          `staging app name to production: ${deployLine.trim()}`,
+      );
+    }
+
+    // The deploy must come AFTER the render: a deploy that runs first
+    // deploys whatever config was left on disk.
+    if (steps.indexOf(step) <= steps.indexOf(renderStep)) {
+      fail(
+        `${path}: the deploy runs BEFORE the ${label} Fly config is rendered — the deploy ` +
+          'would use whatever config was left on disk',
+      );
+    }
+
+    // The deploy's config must be the file the render step writes.
+    const renderOut = /--out\s+"(\$[A-Z_]+)"/.exec(renderStep.text)?.[1] ?? null;
+    const deployConfig = /--config\s+"(\$[A-Z_]+)"/.exec(deployLine)?.[1] ?? null;
+    if (!renderOut || !deployConfig) {
+      fail(
+        `${path}: the render step's --out and the deploy's --config must name variables ` +
+          '(`--out "$VAR"`, `--config "$VAR"`) so the check can prove they are the same file',
+      );
+    } else if (renderOut !== deployConfig) {
+      fail(
+        `${path}: the deploy uses ${deployConfig} but the render step writes ${renderOut} — ` +
+          'the deploy must use the file the render step produced',
+      );
+    }
+
+    // The deploy must name the app explicitly. The rendered config
+    // carries the app name too, but a stale rendered file would carry a
+    // stale app name with it.
+    if (!/--app\s+"?\$\{?\{?/.test(deployLine)) {
+      fail(
+        `${path}: the deploy does not name the target app explicitly (--app) — a rendered ` +
+          'config left over from another environment would otherwise decide the target',
       );
     }
   }
@@ -240,6 +351,20 @@ function checkMatrixAgreement(matrix, manifest) {
           `"${probe.cnameTargets?.production}", expected "${expectedCname}"`,
       );
     }
+    // The manifest owns the probe's base URL (the deploy workflow
+    // resolves it at runtime), so the two must agree.
+    if (environment.healthProbeBaseUrl) {
+      const probeOrigin = new URL(environment.healthProbeBaseUrl).origin;
+      const expectedOrigin = `https://${probe.production}`;
+      if (probeOrigin !== expectedOrigin) {
+        fail(
+          `the production manifest's healthProbeBaseUrl resolves to ${probeOrigin}, but the ` +
+            `hostname matrix names the production host "${probe.production}"`,
+        );
+      }
+    } else {
+      fail('the production manifest has no healthProbeBaseUrl for the probe deploy workflow');
+    }
   }
 }
 
@@ -266,9 +391,15 @@ function checkOverlayAgreement(manifest) {
     }
     const env = readEnvTable(platformOverlay);
     for (const [secretName, origins] of Object.entries(environment.corsAllowedOrigins)) {
-      const key = `PLATFORM_${secretName.toUpperCase()}_CORS_ALLOWED_ORIGINS`;
+      const key = `PLATFORM_${secretName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase()}_CORS_ALLOWED_ORIGINS`;
       const expected = origins.join(',');
-      if (env[key] !== undefined && env[key] !== expected) {
+      if (env[key] === undefined) {
+        fail(
+          `${PLATFORM_OVERLAY_PATH}: does not set ${key} — an omitted CORS value inherits the ` +
+            'SHARED (staging) one, because the merge keeps every shared value the overlay does ' +
+            'not own',
+        );
+      } else if (env[key] !== expected) {
         fail(
           `${PLATFORM_OVERLAY_PATH}: ${key} is "${env[key]}", but the production manifest's ` +
             `CORS origins are "${expected}"`,
@@ -387,16 +518,153 @@ function checkNoSecretLogging(text, path, secretNames) {
     .split('\n')
     .filter((line) => !line.trim().startsWith('#'))
     .join('\n');
-  if (commands.includes('set -x')) {
-    fail(`${path}: enables "set -x" — command tracing can print a secret value`);
+
+  // Command tracing prints every command, with its arguments: a traced
+  // `flyctl secrets set KEY=$VALUE` prints the value. `set -x`,
+  // `set -eux` and `set -o xtrace` are all tracing.
+  if (/set\s+-[a-z]*x/.test(commands) || /set\s+-o\s+xtrace/.test(commands)) {
+    fail(`${path}: enables command tracing ("set -x") — command tracing can print a secret value`);
   }
+
+  // The secret names the workflow itself references are included, so a
+  // workflow that references NO manifest source name is still checked
+  // against its own credentials.
+  const referenced = [...text.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
+  const names = new Set([...secretNames, ...referenced]);
+
+  // Anything that PRINTS a value is a leak: echo, printf, printenv, env
+  // and cat all write to stdout.
+  const printing = /\b(echo|printf|printenv|env|cat)\b/;
   for (const line of commands.split('\n')) {
-    if (!/\becho\b/.test(line)) continue;
-    for (const name of secretNames) {
-      if (line.includes(`\${${name}}`) || line.includes(`$${name}`)) {
-        fail(`${path}: echoes ${name} — a secret value must never be printed`);
+    if (!printing.test(line)) continue;
+    for (const name of names) {
+      const forms = [
+        '${' + name + '}',
+        '$' + name,
+        '${' + name + ':-',
+        '${' + name + ':+',
+        '${' + name + '%%',
+        '$' + name + ':-',
+      ];
+      if (forms.some((form) => line.includes(form))) {
+        fail(`${path}: prints ${name} — a secret value must never be printed`);
       }
     }
+    // The GitHub Actions expression form: `${{ secrets.NAME }}` inside a
+    // printing command.
+    const expression = /\$\{\{\s*secrets\.([A-Z0-9_]+)\s*\}\}/.exec(line);
+    if (expression) {
+      fail(`${path}: prints ${expression[1]} — a secret value must never be printed`);
+    }
+  }
+}
+
+/**
+ * The provisioning gate must be evaluated BEFORE the provisioning step,
+ * and the provisioning step must be gated on it.
+ *
+ * A secret write restarts the app's Machines, so provisioning is a
+ * production mutation and not a no-op. A workflow that provisions
+ * before it checks its gate mutates production whatever the gate says.
+ *
+ * @param {string} text
+ * @param {string} path
+ * @param {string} provisionGateVariable
+ */
+function checkProvisionGateOrdering(text, path, provisionGateVariable) {
+  const steps = readSteps(text);
+  const gateStep = steps.find(
+    (step) =>
+      /id:\s*provision\b/.test(step.text) && step.text.includes(provisionGateVariable),
+  );
+  if (!gateStep) {
+    fail(`${path}: does not evaluate the provisioning gate "${provisionGateVariable}"`);
+    return;
+  }
+  const provisionStep = steps.find((step) => step.text.includes('platform-provision-secrets.mjs'));
+  if (!provisionStep) {
+    fail(`${path}: has no provisioning step`);
+    return;
+  }
+  if (steps.indexOf(gateStep) >= steps.indexOf(provisionStep)) {
+    fail(
+      `${path}: the provisioning gate is evaluated AFTER the provisioning step — a production ` +
+        'mutation would happen before its gate',
+    );
+  }
+  if (!/if:[^\n]*steps\.provision\.outputs\.enabled/.test(provisionStep.text)) {
+    fail(
+      `${path}: the provisioning step is not gated on the provisioning gate ` +
+        `(steps.provision.outputs.enabled)`,
+    );
+  }
+}
+
+/**
+ * The Fly org must be REQUIRED before the first Fly call.
+ *
+ * `vars.PRODUCTION_FLY_ORG` expands to the empty string when it is
+ * unset, and an empty `--org` makes flyctl act on the CLI's default
+ * org — which may not own the production app.
+ *
+ * @param {string} text
+ * @param {string} path
+ * @param {string} flyOrgVariable
+ */
+function checkFlyOrgRequired(text, path, flyOrgVariable) {
+  const steps = readSteps(text);
+  const orgStep = steps.find((step) => stepEnvNames(step.text).includes(flyOrgVariable));
+  if (!orgStep) {
+    fail(`${path}: does not reference "${flyOrgVariable}"`);
+    return;
+  }
+  if (!/exit 1/.test(orgStep.text) || !/if \[ -z/.test(orgStep.text)) {
+    fail(
+      `${path}: does not FAIL when "${flyOrgVariable}" is unset — an empty org makes flyctl ` +
+        'act on its default org',
+    );
+  }
+  const firstFlyCall = steps.findIndex(
+    (step) =>
+      step.text.includes('flyctl deploy') || step.text.includes('platform-provision-secrets.mjs'),
+  );
+  if (firstFlyCall !== -1 && steps.indexOf(orgStep) > firstFlyCall) {
+    fail(
+      `${path}: the "${flyOrgVariable}" check runs AFTER the first Fly call — the org must be ` +
+        'required before anything is created, written or deployed',
+    );
+  }
+}
+
+/**
+ * The probe smoke check must resolve its hostname at runtime.
+ *
+ * A hard-coded hostname in the workflow is a second copy of a fact the
+ * manifest owns, and the old check only asserted that the hostname
+ * appeared SOMEWHERE in the file — a comment satisfied it.
+ *
+ * @param {string} text
+ * @param {string} path
+ */
+function checkProbeSmokeUrl(text, path) {
+  const steps = readSteps(text);
+  const smokeStep = steps.find((step) => step.name.includes('Smoke check'));
+  if (!smokeStep) {
+    fail(`${path}: has no smoke-check step`);
+    return;
+  }
+  if (!smokeStep.text.includes('healthProbeOrigin')) {
+    fail(
+      `${path}: the smoke check does not resolve the probe origin from the environment ` +
+        'manifest (healthProbeOrigin) — a hard-coded hostname is a second copy of a fact ' +
+        'that drifts',
+    );
+  }
+  if (!/URL="\$\{PROBE_ORIGIN\}\/healthz"/.test(smokeStep.text)) {
+    fail(
+      `${path}: the smoke check does not build its URL from the resolved probe origin in an ` +
+        'executable assignment (URL="${PROBE_ORIGIN}/healthz")',
+    );
   }
 }
 
@@ -423,9 +691,13 @@ function checkPlatformWorkflow(manifest, matrix) {
 
   // Every manifest source name must be carried by the workflow, and the
   // workflow must not carry a source name the manifest does not know.
+  // The names are read from the steps' `env:` blocks: a source name
+  // mentioned only in a COMMENT is not a source the workflow carries.
   const sourceNames = Object.values(manifest.environment.sourceNames);
+  const steps = readSteps(text);
+  const declaredNames = new Set(steps.flatMap((step) => stepEnvNames(step.text)));
   for (const name of sourceNames) {
-    if (!text.includes(name)) {
+    if (!declaredNames.has(name)) {
       fail(`${PLATFORM_WORKFLOW_PATH}: does not provide the source "${name}"`);
     }
   }
@@ -434,15 +706,17 @@ function checkPlatformWorkflow(manifest, matrix) {
     'FLY_API_TOKEN',
     'FLY_ORG',
     manifest.deployGateVariable,
+    manifest.provisionGateVariable,
+    manifest.environment.flyOrgVariable,
   ]);
-  const declared = text.match(/^\s{10}([A-Z][A-Z0-9_]+):\s*\$\{\{/gm) ?? [];
-  for (const line of declared) {
-    const name = line.trim().split(':')[0];
-    if (!allowedEnvNames.has(name)) {
-      fail(
-        `${PLATFORM_WORKFLOW_PATH}: declares "${name}", which is not a production source name in ` +
-          'the environment manifest',
-      );
+  for (const step of steps) {
+    for (const name of stepEnvNames(step.text)) {
+      if (!allowedEnvNames.has(name)) {
+        fail(
+          `${PLATFORM_WORKFLOW_PATH}: step "${step.name}" declares "${name}", which is not a ` +
+            'production source name in the environment manifest',
+        );
+      }
     }
   }
 
@@ -477,7 +751,10 @@ function checkPlatformWorkflow(manifest, matrix) {
   }
   for (const id of API_SURFACE_IDS) {
     const surface = surfaces.get(id);
-    if (!surface) continue;
+    if (!surface) {
+      fail(`${MATRIX_PATH}: has no "${id}" surface — its origin agreement cannot be checked`);
+      continue;
+    }
     const key = id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     const baseUrl = manifestOrigins[key];
     if (!baseUrl) {
@@ -522,6 +799,8 @@ function checkPlatformWorkflow(manifest, matrix) {
   }
 
   checkNoSecretLogging(text, PLATFORM_WORKFLOW_PATH, sourceNames);
+  checkProvisionGateOrdering(text, PLATFORM_WORKFLOW_PATH, manifest.provisionGateVariable);
+  checkFlyOrgRequired(text, PLATFORM_WORKFLOW_PATH, manifest.environment.flyOrgVariable);
 }
 
 function checkProbeWorkflow(manifest, matrix) {
@@ -553,17 +832,15 @@ function checkProbeWorkflow(manifest, matrix) {
   checkDeployUsesRenderedConfig(text, PROBE_WORKFLOW_PATH, 'health-probe');
 
   const probe = (matrix.surfaces ?? []).find((surface) => surface.id === 'health-probe');
-  if (probe && !text.includes(probe.production)) {
-    fail(
-      `${PROBE_WORKFLOW_PATH}: does not smoke-check the production hostname ` +
-        `"${probe.production}"`,
-    );
+  if (!probe) {
+    fail(`${MATRIX_PATH}: has no "health-probe" surface`);
   }
   if (text.includes('staging.sindustries.co.nz')) {
     fail(`${PROBE_WORKFLOW_PATH}: references a staging hostname`);
   }
 
   checkNoSecretLogging(text, PROBE_WORKFLOW_PATH, []);
+  checkProbeSmokeUrl(text, PROBE_WORKFLOW_PATH);
 }
 
 async function main() {

@@ -39,6 +39,24 @@
 //      fails.
 //  17. A manifest whose production base URL no longer matches the
 //      matrix's production hostname fails.
+//  18. A production overlay that OMITS a CORS value fails — an omitted
+//      value inherits the shared (staging) one.
+//  19. A production workflow that deploys BEFORE it renders the config
+//      fails.
+//  20. A production workflow that deploys a config the render step did
+//      not write fails.
+//  21. A production workflow that does not name the target app on the
+//      deploy fails.
+//  22. A production workflow that evaluates the provisioning gate
+//      AFTER the provisioning step fails.
+//  23. A production workflow that does not FAIL when the Fly org is
+//      unset fails.
+//  24. A production workflow that declares an unknown env var fails —
+//      whatever the indentation.
+//  25. A production workflow that mentions a source name only in a
+//      comment fails.
+//  26. A health-probe workflow that prints a secret fails.
+//  27. A health-probe workflow with a hard-coded probe URL fails.
 //
 // Run with: node --test tests/cloud/tests/check-production-deploy-contract.test.mjs
 
@@ -246,8 +264,8 @@ test('a production workflow that deploys the shared Fly config fails', async () 
   try {
     edit(root, '.github/workflows/deploy-production-platform.yml', (text) =>
       text.replace(
-        'flyctl deploy --config "$FLY_CONFIG_RENDERED"',
-        'flyctl deploy --config "$FLY_CONFIG_SHARED"',
+        '--config "$FLY_CONFIG_RENDERED" --strategy canary',
+        '--config "$FLY_CONFIG_SHARED" --strategy canary',
       ),
     );
     await expectRejected(root, 'not the rendered production config');
@@ -339,8 +357,8 @@ test('a health-probe workflow that deploys the shared probe config fails', async
   try {
     edit(root, '.github/workflows/deploy-production-health-probe.yml', (text) =>
       text.replace(
-        'flyctl deploy --config "$FLY_CONFIG_RENDERED"',
-        'flyctl deploy --config "$FLY_CONFIG_SHARED"',
+        '--config "$FLY_CONFIG_RENDERED" --strategy canary',
+        '--config "$FLY_CONFIG_SHARED" --strategy canary',
       ),
     );
     await expectRejected(root, 'not the rendered production config');
@@ -359,6 +377,160 @@ test('a manifest whose production base URL drifts from the matrix fails', async 
       ),
     );
     await expectRejected(root, 'resolves to');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production overlay that omits a CORS value fails', async () => {
+  const root = copyTree();
+  try {
+    // An omitted CORS value inherits the SHARED (staging) one, because
+    // the merge keeps every shared value the overlay does not own.
+    edit(root, 'infra/cloud/fly/platform.production.overlay.toml', (text) =>
+      text.replace(/^\s*PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS\s*=.*$/m, ''),
+    );
+    await expectRejected(root, 'does not set PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production workflow that deploys before it renders fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-platform.yml', (text) => {
+      const renderBlock = text.match(
+        /      - name: Render the production Fly config[\s\S]*?\n\n/,
+      )?.[0];
+      if (!renderBlock) throw new Error('the render step was not found');
+      // Move the render step AFTER the deploy step.
+      return text.replace(renderBlock, '').replace(
+        '      # Smoke check 1 — each production API hostname answers its own',
+        `${renderBlock}      # Smoke check 1 — each production API hostname answers its own`,
+      );
+    });
+    await expectRejected(root, 'runs BEFORE');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production workflow that deploys a config the render step did not write fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-platform.yml', (text) =>
+      text.replace(
+        '--config "$FLY_CONFIG_RENDERED" --strategy canary',
+        '--config "$FLY_CONFIG_OTHER" --strategy canary',
+      ),
+    );
+    await expectRejected(root, 'the deploy uses');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production workflow that does not name the target app on the deploy fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-platform.yml', (text) =>
+      text.replace('flyctl deploy --app "${{ steps.facts.outputs.app }}"', 'flyctl deploy'),
+    );
+    await expectRejected(root, 'does not name the target app explicitly');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production workflow that provisions before its gate fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-platform.yml', (text) => {
+      const gateBlock = text.match(/      # Gate 1 — PROVISIONING[\s\S]*?\n\n/)?.[0];
+      if (!gateBlock) throw new Error('the provisioning gate step was not found');
+      const withoutGate = text.replace(gateBlock, '');
+      return withoutGate.replace(
+        '      - name: Render the production Fly config',
+        `${gateBlock}      - name: Render the production Fly config`,
+      );
+    });
+    await expectRejected(root, 'the provisioning gate is evaluated AFTER');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production workflow that does not fail on an unset Fly org fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-platform.yml', (text) =>
+      text.replace(
+        '            echo "::error::PRODUCTION_FLY_ORG is not configured for the production GitHub environment. Set it through Settings > Environments > production > Environment variables. A missing org makes flyctl act on its default org, which may not own the production app."\n            exit 1\n',
+        '',
+      ),
+    );
+    await expectRejected(root, 'does not FAIL when "PRODUCTION_FLY_ORG" is unset');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production workflow that declares an unknown env var fails at any indentation', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-platform.yml', (text) =>
+      text.replace(
+        '          FLY_ORG: ${{ steps.org.outputs.org }}\n',
+        '          FLY_ORG: ${{ steps.org.outputs.org }}\n            FLY_SOME_OTHER_VAR: ${{ vars.SOMETHING }}\n',
+      ),
+    );
+    await expectRejected(root, 'which is not a production source name');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a production workflow that mentions a source name only in a comment fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-platform.yml', (text) =>
+      text.replace(
+        '          PRODUCTION_BUDGET_API_DATABASE_URL: ${{ secrets.PRODUCTION_BUDGET_API_DATABASE_URL }}\n',
+        '          # PRODUCTION_BUDGET_API_DATABASE_URL is documented here\n',
+      ),
+    );
+    await expectRejected(root, 'does not provide the source');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a health-probe workflow that prints a secret fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-health-probe.yml', (text) =>
+      text.replace(
+        '          set -euo pipefail\n          PROBE_ORIGIN=',
+        '          set -euo pipefail\n          echo "${{ secrets.FLY_API_TOKEN }}"\n          PROBE_ORIGIN=',
+      ),
+    );
+    await expectRejected(root, 'never be printed');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a health-probe workflow with a hard-coded probe URL fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/deploy-production-health-probe.yml', (text) =>
+      text.replace(
+        '          PROBE_ORIGIN="$(node infra/cloud/platform/platform-environment-facts.mjs --environment production --field healthProbeOrigin)"\n          URL="${PROBE_ORIGIN}/healthz"',
+        '          URL="https://health-probe.sindustries.co.nz/healthz"',
+      ),
+    );
+    await expectRejected(root, 'does not resolve the probe origin');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

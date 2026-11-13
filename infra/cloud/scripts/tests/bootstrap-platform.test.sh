@@ -223,8 +223,8 @@ fi
 PRODUCTION_PLATFORM_DEPLOY_ENABLED=true \
 FLY_LIST_JSON_OVERRIDE='[{"Name":"sindustries-platform-production","Status":"running"}]' \
   run_production "deploy" "$TMP/.env.production.local" --deploy
-if ! grep -qF 'INVOKED: deploy --config infra/cloud/fly/platform.production.fly.toml --strategy canary' "$TMP/fly.deploy.log"; then
-  echo "FAIL: case=deploy — expected the deploy to use the rendered production config" >&2
+if ! grep -qF 'INVOKED: deploy --app sindustries-platform-production --config infra/cloud/fly/platform.production.fly.toml --strategy canary' "$TMP/fly.deploy.log"; then
+  echo "FAIL: case=deploy — expected the deploy to use the rendered production config and name the production app" >&2
   sed 's/^/  /' "$TMP/fly.deploy.log" >&2
   exit 1
 fi
@@ -320,4 +320,79 @@ if ! grep -qF 'INVOKED: secrets set --app sindustries-platform-production --deta
   exit 1
 fi
 
-echo "bootstrap-platform: ok (9 cases)"
+# ---------- case 10: the env file cannot rewrite the control variables -----
+#
+# The env file used to be `source`d into the script's shell, and every
+# control variable was read AFTER the source. A copy of the staging env
+# file could therefore rewrite the environment, the app, the deploy gate
+# and the facts, and the app-name guard compared two env-file-controlled
+# values with each other, so it could not fail. The production bootstrap
+# would create the STAGING app and satisfy the STAGING deploy gate.
+#
+# The env file is parsed with an allow-list now, so these keys are inert.
+
+cat >"$TMP/.env.production.controlled" <<ENV
+$(cat "$TMP/.env.production.local")
+ENVIRONMENT=staging
+PLATFORM_APP=sindustries-platform-staging
+DEPLOY_GATE_VARIABLE=STAGING_PLATFORM_DEPLOY_ENABLED
+STAGING_PLATFORM_DEPLOY_ENABLED=true
+PLATFORM_ENV_FACTS={"platformApp":"sindustries-platform-staging"}
+ENV
+
+FLY_LIST_JSON_OVERRIDE='[{"Name":"sindustries-platform-production","Status":"running"}]' \
+  run_production "controlled" "$TMP/.env.production.controlled"
+if grep -qE 'INVOKED: apps create sindustries-platform-staging' "$TMP/fly.controlled.log"; then
+  echo "FAIL: case=controlled — the env file rewrote the target app to staging" >&2
+  sed 's/^/  /' "$TMP/fly.controlled.log" >&2
+  exit 1
+fi
+if ! grep -qF 'INVOKED: secrets set --app sindustries-platform-production --detach' "$TMP/fly.controlled.log"; then
+  echo "FAIL: case=controlled — the production app must still receive the secrets" >&2
+  sed 's/^/  /' "$TMP/fly.controlled.log" >&2
+  exit 1
+fi
+
+# The staging deploy gate in the env file must not satisfy the PRODUCTION
+# deploy gate.
+FLY_LIST_JSON_OVERRIDE='[{"Name":"sindustries-platform-production","Status":"running"}]' \
+  run_production "controlled-deploy" "$TMP/.env.production.controlled" --deploy
+if grep -qE '^INVOKED: deploy' "$TMP/fly.controlled-deploy.log"; then
+  echo "FAIL: case=controlled-deploy — the staging gate in the env file satisfied the production deploy gate" >&2
+  sed 's/^/  /' "$TMP/fly.controlled-deploy.log" >&2
+  exit 1
+fi
+if ! grep -qF 'PRODUCTION_PLATFORM_DEPLOY_ENABLED=true' "$TMP/err.controlled-deploy"; then
+  echo "FAIL: case=controlled-deploy — expected the PRODUCTION gate to be named on stderr" >&2
+  sed 's/^/  /' "$TMP/err.controlled-deploy" >&2
+  exit 1
+fi
+
+# A stale FLY_APP_PLATFORM in the env file is REFUSED, not applied: the
+# target app is the manifest's, and the guard compares against it.
+cat >"$TMP/.env.production.stale-app" <<ENV
+$(cat "$TMP/.env.production.local")
+FLY_APP_PLATFORM=sindustries-platform-staging
+ENV
+run_production "stale-app" "$TMP/.env.production.stale-app"
+assert_no_fly_mutation "$TMP/fly.stale-app.log" "case=stale-app"
+if ! grep -qF "refusing to bootstrap Fly app 'sindustries-platform-staging'" "$TMP/err.stale-app"; then
+  echo "FAIL: case=stale-app — expected the stale FLY_APP_PLATFORM to be refused" >&2
+  sed 's/^/  /' "$TMP/err.stale-app" >&2
+  exit 1
+fi
+
+# ---------- case 11: the migrations carry their own gate ------------------
+
+run_production "migrations-gated" "$TMP/.env.production.local" --migrate
+if grep -qE 'INVOKED: migrate' "$TMP/fly.migrations-gated.log"; then
+  echo "FAIL: case=migrations-gated — the migrations ran without the migrations gate" >&2
+  exit 1
+fi
+if ! grep -qF 'PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true' "$TMP/err.migrations-gated"; then
+  echo "FAIL: case=migrations-gated — expected the migrations gate to be named on stderr" >&2
+  sed 's/^/  /' "$TMP/err.migrations-gated" >&2
+  exit 1
+fi
+
+echo "bootstrap-platform: ok (11 cases)"

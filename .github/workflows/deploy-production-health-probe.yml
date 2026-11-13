@@ -130,21 +130,25 @@ jobs:
 
       - name: Deploy (canary)
         if: steps.deploy.outputs.enabled == 'true'
-        run: flyctl deploy --config "$FLY_CONFIG_RENDERED" --strategy canary --wait-timeout 600
+        run: flyctl deploy --app "${{ steps.facts.outputs.app }}" --config "$FLY_CONFIG_RENDERED" --strategy canary --wait-timeout 600
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       # Smoke check — the probe's own /healthz route on the production
-      # stable hostname (the hostname matrix is the source of truth for
-      # it). An unreachable production hostname is a FAILURE: the
-      # production DNS records are part of the operator order that
-      # precedes the probe deploy.
+      # stable hostname. The hostname is RESOLVED FROM THE MANIFEST at
+      # runtime (the environment manifest owns the production base
+      # URLs), not written into this file: a hard-coded hostname is a
+      # second copy of a fact that would drift, and the checker could
+      # only assert that the hostname appeared SOMEWHERE in the file —
+      # a comment satisfied it. The contract check now requires the
+      # resolved value in an executable assignment.
       - name: Smoke check (/healthz)
         if: steps.deploy.outputs.enabled == 'true'
         id: smoke
         run: |
           set -euo pipefail
-          URL="https://health-probe.sindustries.co.nz/healthz"
+          PROBE_ORIGIN="$(node infra/cloud/platform/platform-environment-facts.mjs --environment production --field healthProbeOrigin)"
+          URL="${PROBE_ORIGIN}/healthz"
           STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 "${URL}")"
           if [ "${STATUS}" != "200" ]; then
             echo "::error::smoke check failed: GET ${URL} returned ${STATUS}"
@@ -153,8 +157,11 @@ jobs:
           echo "smoke=ok"
           echo "smoke_url=${URL}" >> "$GITHUB_OUTPUT"
 
+      # The summary reports a DEPLOY, so it is gated on the deploy having
+      # run. `if: success()` is also true when the deploy was SKIPPED,
+      # which would report "deployed" for a run that deployed nothing.
       - name: Summary
-        if: success()
+        if: steps.deploy.outputs.enabled == 'true'
         run: |
           echo "### health-probe deployed (production)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"

@@ -39,6 +39,15 @@
  * Fly configs live), not environment policy, so they live beside the
  * projection rather than in the manifest.
  *
+ * OUTPUT IS JSON — NEVER EVAL IT
+ * ------------------------------
+ * This projection prints JSON on stdout. A shell caller consumes it with
+ * a JSON PARSER (jq, node), never with `eval` and never by `source`-ing
+ * it into a shell: the values are environment facts, and a shell that
+ * evaluates them would execute whatever the JSON happened to contain.
+ * `bootstrap-platform.sh` reads the facts through `node -e` for exactly
+ * that reason.
+ *
  * Usage:
  *   node infra/cloud/platform/platform-environment-facts.mjs --environment production
  *   node infra/cloud/platform/platform-environment-facts.mjs --environment production \
@@ -51,6 +60,7 @@
  */
 
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 import {
   DEFAULT_ENVIRONMENT_ID,
@@ -132,6 +142,26 @@ export function buildEnvironmentFacts(id = DEFAULT_ENVIRONMENT_ID) {
      */
     deployGateVariable: `${environment.id.toUpperCase()}_PLATFORM_DEPLOY_ENABLED`,
     /**
+     * The variable that must be `true` before this environment's platform
+     * app may be PROVISIONED (created, and its secrets registered).
+     *
+     * Provisioning and deploying are two different mutations, and they
+     * carry two different risks. A secret write restarts the app's
+     * Machines, so "provision" is not a no-op; but it is still a
+     * production mutation that should be a separate, explicit decision
+     * from "serve production traffic". One gate for both meant a run
+     * with the deploy gate closed still wrote secrets and restarted
+     * Machines, which is not what "the deploy is off" says.
+     */
+    provisionGateVariable: `${environment.id.toUpperCase()}_PLATFORM_PROVISION_ENABLED`,
+    /**
+     * The variable that must be `true` before this environment's schema
+     * migrations may run. Migrations are their own mutation: they change
+     * the DATABASE, not the app. Derived from the environment id for the
+     * same reason as the other gates.
+     */
+    migrationsGateVariable: `${environment.id.toUpperCase()}_PLATFORM_MIGRATIONS_ENABLED`,
+    /**
      * The variable that must be `true` before a deploy of this
      * environment's HEALTH PROBE may run. Derived from the environment id
      * for the same reason as the platform gate: a stored constant could be
@@ -153,6 +183,8 @@ export function buildEnvironmentFacts(id = DEFAULT_ENVIRONMENT_ID) {
     schemas: environment.schemas,
     corsAllowedOrigins: environment.corsAllowedOrigins,
     apiBaseUrls: environment.apiBaseUrls,
+    /** The public base URL of this environment's health probe. */
+    healthProbeBaseUrl: environment.healthProbeBaseUrl,
     /**
      * The ORIGIN of each API base URL — scheme and host, no path.
      *
@@ -166,6 +198,13 @@ export function buildEnvironmentFacts(id = DEFAULT_ENVIRONMENT_ID) {
     apiOrigins: Object.fromEntries(
       Object.entries(environment.apiBaseUrls).map(([key, url]) => [key, new URL(url).origin]),
     ),
+    /**
+     * The ORIGIN of the health probe's base URL — scheme and host, no
+     * path. The probe deploy workflow smoke-checks `/healthz` on this
+     * origin; resolving it here keeps the production hostname out of the
+     * workflow file, where a second copy would drift.
+     */
+    healthProbeOrigin: new URL(environment.healthProbeBaseUrl).origin,
     approvalActors: environment.approvalActors,
     artefacts,
   };
@@ -270,6 +309,6 @@ export function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   process.exit(main());
 }

@@ -106,6 +106,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 import { looksLikeRedisUrl } from './platform-services.mjs';
 import { redactOutput } from './redact-output.mjs';
@@ -525,12 +526,19 @@ function flyctl(args, io) {
 /**
  * Does the Fly app exist?
  *
+ * The org is passed to the list call: `flyctl apps list` without `--org`
+ * acts on the CLI's ACTIVE org, so with a different active org the app
+ * looks absent and the create collides with an app that already exists.
+ *
  * @param {string} app
  * @param {object} [io]
+ * @param {string} [org]
  * @returns {boolean}
  */
-export function appExists(app, io = createIo()) {
-  const { status, stdout } = flyctl(['apps', 'list', '--json'], io);
+export function appExists(app, io = createIo(), org = DEFAULT_ORG) {
+  const args = ['apps', 'list', '--json'];
+  if (org) args.push('--org', org);
+  const { status, stdout } = flyctl(args, io);
   if (status !== 0 || !stdout) {
     io.log(`Could not read the Fly app list (exit ${status}) — assuming ${app} is absent`);
     return false;
@@ -563,7 +571,7 @@ export function appExists(app, io = createIo()) {
  * @returns {number} exit code
  */
 export function ensureApp(app, org, io = createIo()) {
-  if (appExists(app, io)) {
+  if (appExists(app, io, org)) {
     io.log(`Fly app ${app} already exists`);
     return 0;
   }
@@ -792,6 +800,6 @@ export function main(argv = process.argv.slice(2), overrides = {}) {
   return applySecrets(app, payload.secrets, io);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   process.exit(main());
 }

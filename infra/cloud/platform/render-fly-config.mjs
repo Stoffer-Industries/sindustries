@@ -25,6 +25,19 @@
  * `[processes]` table, a different build context, a different release
  * command) and quietly fork the platform.
  *
+ * The `[env]` allow-list is KEY-level, not table-level: the overlay may
+ * set only the five environment-owned values (the three CORS allow-lists
+ * and the two probe cadences), and only those the shared config already
+ * defines. A table-level allow-list would have let an overlay set
+ * `NODE_ENV` or a new variable — the same class of fork the table
+ * allow-list exists to prevent.
+ *
+ * The app name in the overlay is BOUND TO THE MANIFEST: when the
+ * environment is known, the overlay's `app` must be one of that
+ * environment's own app names. Without that binding an overlay edited to
+ * `app = 'sindustries-platform-staging'` renders successfully, and the
+ * production deploy then targets staging.
+ *
  * The merge is LINE-ORIENTED, not parse-and-re-emit: every line of the
  * shared file that the overlay does not own is preserved byte for byte,
  * comments included. That keeps the shared file the single readable
@@ -46,12 +59,32 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+import { getPlatformEnvironment } from './platform-environments.mjs';
 
 /** Tables an overlay may contribute to. */
 const ALLOWED_OVERLAY_TABLES = new Set(['env']);
 
 /** Top-level keys an overlay may set (outside any table). */
 const ALLOWED_OVERLAY_KEYS = new Set(['app']);
+
+/**
+ * The `[env]` keys an overlay may set.
+ *
+ * These are the environment-owned values: the three CORS allow-lists and
+ * the two probe cadences. Everything else in `[env]` belongs to the
+ * shared topology (the router port, the status port, NODE_ENV, the
+ * probe's own service name) and an overlay that could change it would
+ * fork the app it is supposed to configure.
+ */
+const ALLOWED_OVERLAY_ENV_KEYS = new Set([
+  'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+  'FLY_APP_PROBE_INTERVAL_SECONDS',
+  'DB_PROBE_INTERVAL_SECONDS',
+]);
 
 /**
  * Parse a single TOML assignment line.
@@ -119,6 +152,14 @@ export function parseOverlay(text) {
       continue;
     }
 
+    if (!ALLOWED_OVERLAY_ENV_KEYS.has(assignment.key)) {
+      throw new Error(
+        `overlay may not set the [env] key \`${assignment.key}\` — an overlay may set only ` +
+          `${[...ALLOWED_OVERLAY_ENV_KEYS].map((k) => `\`${k}\``).join(', ')}; every other ` +
+          '[env] value belongs to the shared config',
+      );
+    }
+
     overlay.env[assignment.key] = assignment.value;
   }
 
@@ -138,6 +179,36 @@ export function mergeFlyConfig(sharedText, overlay) {
   let table = null;
   let seenApp = false;
   const emittedEnvKeys = new Set();
+
+  // The env keys the SHARED config defines. An overlay may only set a
+  // key the shared config already owns: an overlay value for a key the
+  // shared config does not define would silently ADD an env var to the
+  // rendered app — a new name the supervisor never reads, or worse, one
+  // it does.
+  const sharedEnvKeys = new Set();
+  {
+    let sharedTable = null;
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      const tableMatch = /^\[([^\]]+)\]$/.exec(line);
+      if (tableMatch) {
+        sharedTable = tableMatch[1];
+        continue;
+      }
+      if (sharedTable !== 'env' || !line || line.startsWith('#')) continue;
+      const assignment = parseAssignment(line);
+      if (assignment) sharedEnvKeys.add(assignment.key);
+    }
+  }
+
+  for (const key of Object.keys(overlay.env)) {
+    if (!sharedEnvKeys.has(key)) {
+      throw new Error(
+        `overlay sets the [env] key \`${key}\`, which the shared config does not define — ` +
+          'an overlay may only override a value the shared config already owns',
+      );
+    }
+  }
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -229,6 +300,34 @@ export function renderHeader({ sharedPath, overlayPath = null, environment = nul
 }
 
 /**
+ * Bind an overlay's app name to the environment manifest.
+ *
+ * The overlay's `app` is what Fly deploys to. An overlay edited to name
+ * another environment's app renders successfully and then deploys
+ * production to staging, so the renderer refuses an app name that is not
+ * one of the environment's own apps.
+ *
+ * @param {string|null} app
+ * @param {string} environmentId
+ */
+export function assertOverlayAppMatchesEnvironment(app, environmentId) {
+  if (app === null) return;
+  let environment;
+  try {
+    environment = getPlatformEnvironment(environmentId);
+  } catch (error) {
+    throw new Error(`unknown environment "${environmentId}" (${error.message})`);
+  }
+  const owned = [environment.platformApp, environment.healthProbeApp];
+  if (!owned.includes(app)) {
+    throw new Error(
+      `overlay names app "${app}", which is not an app of the ${environmentId} environment — ` +
+        `expected one of ${owned.map((name) => `"${name}"`).join(' or ')}`,
+    );
+  }
+}
+
+/**
  * Render the effective Fly config for one environment.
  *
  * @param {{sharedPath: string, overlayPath?: string|null, outPath?: string|null,
@@ -246,6 +345,8 @@ export function renderFlyConfig({
   const overlay = overlayPath
     ? parseOverlay(readFileSync(resolve(overlayPath), 'utf8'))
     : { app: null, env: {} };
+
+  if (environment) assertOverlayAppMatchesEnvironment(overlay.app, environment);
 
   const merged = mergeFlyConfig(sharedText, overlay);
   const rendered = stampHeader
@@ -330,6 +431,6 @@ export function main(argv = process.argv.slice(2)) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   process.exit(main());
 }

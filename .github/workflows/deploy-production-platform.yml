@@ -33,15 +33,24 @@
 # A production deploy is not something a merge may cause by accident.
 # Two gates stand in front of it and BOTH must be open:
 #
-#   1. PRODUCTION_PLATFORM_DEPLOY_ENABLED — the repository variable the
-#      operator sets on the `production` GitHub environment. Until it is
-#      `true`, the workflow PROVISIONS the app and its secrets but SKIPS
-#      the deploy, so the environment can be prepared and inspected
-#      without anything serving traffic.
-#   2. The operator order in the tech design (Slice D) — the spend limit
-#      and the production DNS records are set BEFORE the deploy, because
-#      a canary deploy against a production app with no spend limit is
-#      the one failure this task cannot undo.
+#   1. PRODUCTION_PLATFORM_PROVISION_ENABLED — the repository variable
+#      that authorises the PROVISIONING mutation: creating the app and
+#      registering its secrets. Provisioning is not a no-op: a secret
+#      write restarts the app's Machines. So it carries its own gate,
+#      evaluated BEFORE the provisioning step runs.
+#   2. PRODUCTION_PLATFORM_DEPLOY_ENABLED — the repository variable that
+#      authorises the DEPLOY itself. Until it is `true`, nothing is
+#      deployed, so the environment can be prepared and inspected without
+#      anything serving traffic.
+#
+# The deploy also requires the provisioning gate to be open: a deploy
+# without the app's secrets registered would start an app whose
+# supervisor cannot reach its database.
+#
+# The operator order in the tech design (Slice D) is the third gate: the
+# spend limit and the production DNS records are set BEFORE the deploy,
+# because a canary deploy against a production app with no spend limit
+# is the one failure this task cannot undo.
 #
 # WHY THE CONFIG IS RENDERED
 # --------------------------
@@ -127,6 +136,61 @@ jobs:
           echo "app=${app}" >> "$GITHUB_OUTPUT"
           echo "Production platform app: ${app}"
 
+      # Gate 1 — PROVISIONING. The app creation and the secret write are
+      # production mutations (a secret write restarts the app's
+      # Machines), so they carry their own gate, and the gate is
+      # evaluated BEFORE the provisioning step.
+      - name: Check whether the production platform provisioning is enabled
+        id: provision
+        run: |
+          set -euo pipefail
+          if [ "${PRODUCTION_PLATFORM_PROVISION_ENABLED:-}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Production platform provisioning enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Production platform provisioning not enabled::The production platform app is NOT created and its secrets are NOT registered. Set the production environment variable PRODUCTION_PLATFORM_PROVISION_ENABLED=true to enable provisioning."
+          fi
+        env:
+          PRODUCTION_PLATFORM_PROVISION_ENABLED: ${{ vars.PRODUCTION_PLATFORM_PROVISION_ENABLED }}
+
+      # Gate 2 — the deploy stays off until the operator opens it.
+      - name: Check whether the production platform deploy is enabled
+        id: deploy
+        run: |
+          set -euo pipefail
+          if [ "${PRODUCTION_PLATFORM_DEPLOY_ENABLED:-}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Production platform deploy enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Production platform deploy not enabled::The production platform deploy is SKIPPED. Set the production environment variable PRODUCTION_PLATFORM_DEPLOY_ENABLED=true to enable it, after the production spend limit and the production DNS records are in place (docs/specs/production-environment-provisioning-tech-design.md Slice D)."
+          fi
+          if [ "${PRODUCTION_PLATFORM_PROVISION_ENABLED:-}" != "true" ]; then
+            echo "::notice title=Production platform deploy needs provisioning::The deploy is enabled but PRODUCTION_PLATFORM_PROVISION_ENABLED is not, so the deploy is skipped: an app deployed without its secrets registered cannot reach its database."
+          fi
+        env:
+          PRODUCTION_PLATFORM_DEPLOY_ENABLED: ${{ vars.PRODUCTION_PLATFORM_DEPLOY_ENABLED }}
+          PRODUCTION_PLATFORM_PROVISION_ENABLED: ${{ vars.PRODUCTION_PLATFORM_PROVISION_ENABLED }}
+
+      # The Fly org is a REQUIRED input. `vars.PRODUCTION_FLY_ORG`
+      # expands to the empty string when it is unset, and an empty
+      # `--org` makes flyctl act on the CLI's default org — which may not
+      # own the production app. The check runs after the gates (it reads
+      # their outputs) and before any Fly call.
+      - name: Require the production Fly org
+        id: org
+        if: steps.provision.outputs.enabled == 'true' || steps.deploy.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          if [ -z "${PRODUCTION_FLY_ORG:-}" ]; then
+            echo "::error::PRODUCTION_FLY_ORG is not configured for the production GitHub environment. Set it through Settings > Environments > production > Environment variables. A missing org makes flyctl act on its default org, which may not own the production app."
+            exit 1
+          fi
+          echo "org=${PRODUCTION_FLY_ORG}" >> "$GITHUB_OUTPUT"
+        env:
+          PRODUCTION_FLY_ORG: ${{ vars.PRODUCTION_FLY_ORG }}
+
       # Provisioning — creates the app when it is absent and registers the
       # fifteen app-level secrets from the production GitHub environment.
       # The provisioner owns the mapping from source names to the
@@ -143,6 +207,7 @@ jobs:
       # carries a staging/dev hostname, a placeholder or a localhost
       # address, and when a required source is missing.
       - name: Provision the production platform app and its secrets
+        if: steps.provision.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           node infra/cloud/platform/platform-provision-secrets.mjs \
@@ -150,7 +215,7 @@ jobs:
             --org "$FLY_ORG"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          FLY_ORG: ${{ vars.PRODUCTION_FLY_ORG }}
+          FLY_ORG: ${{ steps.org.outputs.org }}
           PRODUCTION_TASKS_API_DATABASE_URL: ${{ secrets.PRODUCTION_TASKS_API_DATABASE_URL }}
           PRODUCTION_BUDGET_API_DATABASE_URL: ${{ secrets.PRODUCTION_BUDGET_API_DATABASE_URL }}
           PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL }}
@@ -158,28 +223,13 @@ jobs:
           PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
 
-      # Gate 1 — the deploy stays off until the operator opens it.
-      - name: Check whether the production platform deploy is enabled
-        id: deploy
-        run: |
-          set -euo pipefail
-          if [ "${PRODUCTION_PLATFORM_DEPLOY_ENABLED:-}" = "true" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Production platform deploy enabled"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Production platform deploy not enabled::The production platform app is provisioned and its secrets are registered, but the deploy is SKIPPED. Set the production environment variable PRODUCTION_PLATFORM_DEPLOY_ENABLED=true to enable it, after the production spend limit and the production DNS records are in place (docs/specs/production-environment-provisioning-tech-design.md Slice D)."
-          fi
-        env:
-          PRODUCTION_PLATFORM_DEPLOY_ENABLED: ${{ vars.PRODUCTION_PLATFORM_DEPLOY_ENABLED }}
-
       # Render the effective production config from the shared config and
       # the production overlay. The renderer refuses any key or table the
       # overlay does not own, so an overlay cannot fork the platform
       # topology (a second [processes] table, a different release
       # command).
       - name: Render the production Fly config
-        if: steps.deploy.outputs.enabled == 'true'
+        if: steps.deploy.outputs.enabled == 'true' && steps.provision.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           node infra/cloud/platform/render-fly-config.mjs \
@@ -189,16 +239,22 @@ jobs:
             --environment production
 
       - name: Validate fly.toml
-        if: steps.deploy.outputs.enabled == 'true'
+        if: steps.deploy.outputs.enabled == 'true' && steps.provision.outputs.enabled == 'true'
         run: flyctl config validate --config "$FLY_CONFIG_RENDERED"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
+      # The app name is passed EXPLICITLY as well as carried by the
+      # rendered config. The renderer refuses an overlay that names
+      # another environment's app, and the drift check binds the overlay
+      # to the manifest — but naming the target here means a stale or
+      # hand-edited rendered file cannot send the deploy elsewhere.
       - name: Deploy (canary)
-        if: steps.deploy.outputs.enabled == 'true'
-        run: flyctl deploy --config "$FLY_CONFIG_RENDERED" --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=${{ github.sha }}
+        if: steps.deploy.outputs.enabled == 'true' && steps.provision.outputs.enabled == 'true'
+        run: flyctl deploy --app "${{ steps.facts.outputs.app }}" --org "$FLY_ORG" --config "$FLY_CONFIG_RENDERED" --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=${{ github.sha }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_ORG: ${{ steps.org.outputs.org }}
 
       # Smoke check 1 — each production API hostname answers its own
       # health route. The origins are resolved from the environment
@@ -212,7 +268,7 @@ jobs:
       # hostname here means the environment is not the one this deploy
       # assumed.
       - name: Smoke check (production API hostnames)
-        if: steps.deploy.outputs.enabled == 'true'
+        if: steps.deploy.outputs.enabled == 'true' && steps.provision.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           failed=0
@@ -244,7 +300,7 @@ jobs:
       # startup line in the logs is the evidence that the queue consumer
       # came up inside the SAME production Machine that just deployed.
       - name: Smoke check (auto-post worker startup)
-        if: steps.deploy.outputs.enabled == 'true'
+        if: steps.deploy.outputs.enabled == 'true' && steps.provision.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           DEADLINE=$((SECONDS + 60))
