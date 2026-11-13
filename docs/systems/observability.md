@@ -300,34 +300,56 @@ So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix a
 
 ```bash
 # 1. the Loki datasource uid on the hosted tenant (do not hardcode it).
-#    This mirrors `resolve_loki_datasource_uid()` in
-#    infra/cloud/observability/bootstrap-observability.sh: select every
-#    Loki datasource, then prefer, in order, an operator pin
+#
+#    The selection rule lives in ONE file —
+#    infra/cloud/observability/loki-datasource-selector.jq — which
+#    `resolve_loki_datasource_uid()` in
+#    infra/cloud/observability/bootstrap-observability.sh also runs, so the
+#    operator path and the provisioning path cannot drift. Run this from the
+#    repo root.
+#
+#    The rule prefers, in order, an operator pin
 #    (GRAFANA_CLOUD_LOKI_DATASOURCE_UID), the canonical application-logs
 #    datasource (a `logs` uid/name suffix), the tenant default, and only
-#    then the first Loki datasource.
-#    The "default first, otherwise the first Loki datasource" rule this
-#    replaces picked `grafanacloud-alert-state-history` on the live tenant
-#    — a purpose-built Loki datasource that never receives application
-#    logs — while the GymTrack rows sat in `grafanacloud-logs`. Every
-#    query and dashboard bound to the wrong datasource then answered "no
-#    rows" against a healthy telemetry pipeline. The uid is not hardcoded
+#    then the first Loki datasource. The "default first, otherwise the
+#    first Loki datasource" rule this replaces picked
+#    `grafanacloud-alert-state-history` on the live tenant — a
+#    purpose-built Loki datasource that never receives application logs —
+#    while the GymTrack rows sat in `grafanacloud-logs`. Every query and
+#    dashboard bound to the wrong datasource then answered "no rows"
+#    against a healthy telemetry pipeline. The uid is not hardcoded
 #    because it is tenant state.
-loki_uid=$(curl -sS -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
-  "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/datasources" \
-  | jq -r --arg override "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" '
-      map(select(.type == "loki"))
-      | (
-          [ map(select($override != "" and .uid == $override))[0] ]
-          + [ map(select(((.uid // "") | test("(^|-)logs$")) or ((.name // "") | test("(^|[- ])logs$"))))[0] ]
-          + [ map(select(.isDefault == true))[0] ]
-          + [ .[0] ]
-          + [ {} ]
-        )
-      | map(select(. != null))
-      | .[0]
-      | .uid // empty
-    ' | head -1)
+#
+#    The pin is AUTHORITATIVE: a pin that matches no Loki datasource
+#    produces no uid, and both this path and the script fail closed rather
+#    than falling back to a rule that is known not to work on that tenant.
+#
+#    The datasource list is fetched into a file first, so a transport or
+#    auth failure is reported as a failure instead of being mistaken for
+#    "the tenant has no Loki datasource", and jq's exit status is not
+#    masked by a pipeline.
+loki_response_file="$(mktemp)"
+loki_status="$(curl --silent --show-error \
+  --output "${loki_response_file}" --write-out '%{http_code}' \
+  -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
+  "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/datasources")"
+if [ "${loki_status}" != "200" ]; then
+  echo "could not read the Grafana datasource list (HTTP ${loki_status})" >&2
+  rm -f "${loki_response_file}"
+  exit 1
+fi
+loki_uid="$(jq -r --arg override "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" \
+  -f infra/cloud/observability/loki-datasource-selector.jq < "${loki_response_file}")" \
+  || { echo "could not parse the Grafana datasource list" >&2; rm -f "${loki_response_file}"; exit 1; }
+rm -f "${loki_response_file}"
+
+# an operator pin is authoritative: if it is set and the selector did not
+# return it, the pin matches no Loki datasource on this tenant
+if [ -n "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" ] \
+    && [ "${loki_uid}" != "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID}" ]; then
+  echo "GRAFANA_CLOUD_LOKI_DATASOURCE_UID=${GRAFANA_CLOUD_LOKI_DATASOURCE_UID} matches no Loki datasource on the hosted Grafana tenant" >&2
+  exit 1
+fi
 
 # fail explicitly when the tenant has no Loki datasource at all, rather
 # than building a /proxy/uid//... URL that answers 404 for a confusing reason
@@ -338,7 +360,8 @@ fi
 
 # 2. run the selector over the window you care about
 now=$(date +%s); start=$((now-3600))
-curl -sS -G -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
+curl --fail --silent --show-error -G \
+  -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
   --data-urlencode 'query={service_name="gymtrack"}' \
   --data-urlencode "start=${start}000000000" --data-urlencode "end=${now}000000000" \
   "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/datasources/proxy/uid/${loki_uid}/loki/api/v1/query_range"
@@ -346,7 +369,7 @@ curl -sS -G -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
 
 `GRAFANA_CLOUD_INSTANCE_URL` is the stack base URL and `GRAFANA_CLOUD_PROVISIONING_AUTH` is the quoted `Bearer <service-account-token>` value; both live in `infra/cloud/observability/.env.local` (gitignored) and in the operator environment. **A `401` from this path is a credential-scope problem, not an empty result** — the same "probe answered 401, so the telemetry is broken" confusion that the health-probe section describes above applies to the query path: a `401` means the provisioning credential was not applied, and an empty `data.result` with a `200` means the selector matched no rows in that window. Check for rows, not for a status code.
 
-**Authentication-failure coverage.** Every explicitly handled authentication failure is exported, including the branch that Clerk reaches first: an unknown or unregistered identifier. That branch used to return before the telemetry report, so the most common sign-in failure (a typo'd or unregistered address) produced **no** telemetry at all and no operator could distinguish "the user mistyped their email" from "the auth provider is broken". It is now exported as `operation=signin_identify` with the safe Clerk error code and status (`errorCode=identifier_not_found`, `status=404`), alongside the existing `operation=signin` (password step) and `operation=signin_finalize` rows. `apps/gymtrack/src/lib/clerkAuth.test.jsx` § "browser telemetry contract" pins both branches.
+**Authentication-failure coverage.** Every explicitly handled authentication failure is exported, including the branch that Clerk reaches first: an unknown or unregistered identifier. That branch used to return before the telemetry report, so the most common sign-in failure (a typo'd or unregistered address) produced **no** telemetry at all and no operator could distinguish "the user mistyped their email" from "the auth provider is broken". It is now exported as `operation=signin_identify` with the safe Clerk error code and status (`errorCode=form_identifier_not_found`, `status=422`), alongside the existing `operation=signin` (password step) and `operation=signin_finalize` rows. `apps/gymtrack/src/lib/clerkAuth.test.jsx` § "browser telemetry contract" pins both branches.
 
 The auth reporting surface is **context-only**. Callers reduce the provider envelope to the provider, operation, safe error code, and status before calling `reportAuthError(context)`; the envelope has no parameter through which it could reach the serializer. Auth events therefore always have `message=null` and `stack=null`, regardless of what the provider envelope contains. `apps/gymtrack/src/lib/browserTelemetry.test.js` § "never lets a Clerk envelope reach the POST body" serializes a representative envelope with email, token, session, and stack sentinels and asserts that none of them reach the POST body.
 
