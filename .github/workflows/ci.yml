@@ -942,6 +942,18 @@ jobs:
         # beyond bash + python3 here.
         run: bash infra/cloud/scripts/tests/bootstrap-staging.test.sh
 
+      - name: Run environment-aware bootstrap contract tests (task fb1240c0, Slice B)
+        # The staging and production bootstraps are ONE implementation
+        # (bootstrap-platform.sh) selected by the environment manifest, so
+        # the production path has to be covered by its own contract: the
+        # production app name comes from the manifest, the secrets go
+        # through the shared provisioner, a staging value is refused BEFORE
+        # anything is created, a missing production source is named on
+        # stderr, and the deploy is gated twice (--deploy AND
+        # PRODUCTION_PLATFORM_DEPLOY_ENABLED). Stub flyctl only; no live
+        # Fly auth and no real secret value.
+        run: bash infra/cloud/scripts/tests/bootstrap-platform.test.sh
+
       - name: Run retired staging apps guard test (task 219fb673)
         # The four per-service staging Fly apps were destroyed at the
         # staging cutover. No operator surface may still resolve to them:
@@ -1045,6 +1057,17 @@ jobs:
       # call site is unchanged.
       - name: Run platform environment manifest and production separation tests
         run: node --test infra/cloud/platform/tests/platform-environments.test.mjs
+
+      # Task fb1240c0, Slice B — the production Fly configs are OVERLAYS on
+      # the shared config, not copies: an overlay may set the app name and
+      # [env] values and nothing else, so it can never fork the topology.
+      # The contract suite proves the overlay cannot smuggle in a second
+      # [processes] table, that the production overlays agree with the
+      # environment manifest, that the rendered production config keeps the
+      # one-app / one-process-group shape, and that the production probe
+      # cadence is strictly tighter than the staging daily cadence.
+      - name: Run production Fly overlay render tests
+        run: node --test infra/cloud/platform/tests/render-fly-config.test.mjs
 
       - name: Run platform cutover order and deploy gate tests
         run: node --test infra/cloud/platform/tests/platform-cutover-order.test.mjs

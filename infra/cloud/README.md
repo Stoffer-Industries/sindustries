@@ -32,14 +32,17 @@ infra/cloud/
 │   ├── budget-api.env.example
 │   ├── auto-post-worker.env.example
 │   ├── platform.env.example    # consolidated app's PLATFORM_* secrets (destination names)
-│   └── bootstrap-staging.env.example  # source names read by scripts/bootstrap-staging.sh
+│   ├── bootstrap-staging.env.example  # source names read by scripts/bootstrap-staging.sh
+│   └── bootstrap-production.env.example  # source names read by scripts/bootstrap-production.sh
 ├── bin/                        # Operator-facing deploy/status/rollback wrappers (task 2850c5ac)
 │   ├── deploy                  # Pin-and-deploy a single service
 │   ├── status                  # Check process types + machines across services
 │   ├── rollback                # Roll a single service back to a prior release
 │   └── tests/                  # Stub-flyctl tests for the bin/ scripts
 └── scripts/                    # Owner-supplied operational scripts (Quinn runs locally)
-    └── bootstrap-staging.sh
+    ├── bootstrap-platform.sh   # the shared, environment-aware bootstrap (staging | production)
+    ├── bootstrap-staging.sh    # thin wrapper -> bootstrap-platform.sh --environment staging
+    └── bootstrap-production.sh  # thin wrapper -> bootstrap-platform.sh --environment production
 ```
 
 CI's live staging deploy surfaces are `.github/workflows/deploy-staging-platform.yml` (the consolidated platform app) and `.github/workflows/deploy-staging-health-probe.yml` (the separate health-probe app); `.github/workflows/ci.yml` calls only these two. The four per-service reusable workflows — `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-content-scheduler-api.yml` and `deploy-staging-auto-post-worker.yml` — are retained but orphaned: they are `workflow_call`-only, and nothing calls them since their deploy jobs were removed from `ci.yml` on 2026-11-07, when the four underlying Fly apps were destroyed ahead of the cutover. They stay in the tree until the cutover cleanup in `docs/runbooks/platform-consolidation-rollback.md` §5 deletes them; `tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs` still requires three of them (tasks-api, budget-api, content-scheduler-api) to exist.
@@ -227,6 +230,41 @@ The retired per-service names are refused by the script: bootstrapping one
 would recreate an app that must stay destroyed.
 
 The script is idempotent — re-running it does not destroy existing apps.
+
+### Production (task fb1240c0)
+
+Production is the SAME implementation, selected by the environment manifest
+(`infra/cloud/platform/platform-environments.mjs`); no environment fact is
+copied into a script. `bootstrap-staging.sh` and `bootstrap-production.sh`
+are thin wrappers over `bootstrap-platform.sh --environment staging|production`.
+
+| | staging | production |
+|---|---|---|
+| Entry point | `infra/cloud/scripts/bootstrap-staging.sh` | `infra/cloud/scripts/bootstrap-production.sh` |
+| Local env file (gitignored) | `infra/cloud/.env.local` | `infra/cloud/.env.production.local` |
+| Source contract (placeholders only) | `infra/cloud/env/bootstrap-staging.env.example` | `infra/cloud/env/bootstrap-production.env.example` |
+| Operator contract | this file | `docs/cloud/production-source-contract.md` |
+| Platform app | `sindustries-platform-staging` | `sindustries-platform-production` |
+| Health-probe app | `sindustries-health-probe-staging` | `sindustries-health-probe-production` |
+| Deploy gate | `STAGING_PLATFORM_DEPLOY_ENABLED=true` | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` |
+| Fly config | the shared `infra/cloud/fly/platform.fly.toml` | the shared config + `platform.production.overlay.toml`, rendered to `platform.production.fly.toml` (gitignored) |
+
+Production-specific properties, all enforced before anything is written:
+
+- The app name is NOT overridable: the environment is one app, and the
+  per-service apps are never created.
+- A value that still carries a staging/dev hostname, a placeholder or a
+  localhost address is REFUSED by the provisioner before any Fly mutation
+  (the bootstrap runs the provisioner in `--dry-run` mode first).
+- The deploy is gated twice: `--deploy` AND the environment's deploy gate
+  variable.
+- The effective Fly config is the shared topology plus a small overlay
+  (app name, CORS origins, probe cadence). An overlay may set `app` and
+  `[env]` values and nothing else, so it cannot fork the platform topology.
+
+Production live provisioning (create the Neon branch, create the app, set
+the spend limit, publish DNS) is the operator sequence in
+`docs/specs/production-environment-provisioning-tech-design.md` Slice D.
 
 
 ## PR strategy
