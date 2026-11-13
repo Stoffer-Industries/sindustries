@@ -1,0 +1,162 @@
+# GitHub Actions: deploy health-probe to Fly.io production.
+#
+# Task fb1240c0 (Slice C). The production counterpart of
+# deploy-staging-health-probe.yml.
+#
+# The probe is a SEPARATE Fly app from the platform. It is deployed after
+# the platform, against the production targets, with a tighter cadence
+# than staging (the staging probe runs once a day because staging is a
+# dev artifact; production is watched).
+#
+# THE PROBE DEPLOYS THE RENDERED PRODUCTION CONFIG
+# -----------------------------------------------
+# The probe's Fly config is an OVERLAY on the shared probe config
+# (infra/cloud/observability/health-probe/fly.production.overlay.toml).
+# Deploying the shared config would deploy the STAGING probe app name and
+# the staging daily cadence to production. The rendered file is written
+# next to the shared config (Fly resolves a config's relative build paths
+# against that config's own directory) and is gitignored.
+#
+# WHY THIS CARRYING ITS OWN DEPLOY GATE
+# -------------------------------------
+# The operator order (tech design Slice D) deploys the platform first and
+# the probe last: the probe is pointed at live production targets, and a
+# probe that starts before the production spend limit and the production
+# DNS records exist is a probe reporting on a half-provisioned
+# environment. A probe that starts early can also hold a live Postgres
+# connection open against the production database before the database
+# roles are restricted.
+#
+# PRODUCTION SECRETS
+# ------------------
+# The probe's own secrets (its database URLs, Redis URL and OTLP
+# credentials) are NOT registered by this workflow. They are set on the
+# production probe app by the operator, under the contract in
+# docs/cloud/production-source-contract.md. This workflow deploys and
+# smoke-checks; it never writes a secret value.
+#
+# Quinn-owned: FLY_API_TOKEN must be registered once in the `production`
+# GitHub environment. Rowan references it by name only.
+
+name: Deploy health-probe (Fly.io production)
+
+on:
+  workflow_call:
+
+concurrency:
+  group: deploy-health-probe-production-${{ github.ref }}
+  # Production never cancels an in-flight deployment.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  ENVIRONMENT: production
+  FLY_CONFIG_SHARED: infra/cloud/observability/health-probe/fly.toml
+  FLY_CONFIG_OVERLAY: infra/cloud/observability/health-probe/fly.production.overlay.toml
+  FLY_CONFIG_RENDERED: infra/cloud/observability/health-probe/fly.production.fly.toml
+
+jobs:
+  deploy:
+    name: Deploy health-probe to Fly.io production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Require Fly deployment credential
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "::error::FLY_API_TOKEN is not configured for the production GitHub environment. Add it through Settings > Environments > production > Environment secrets."
+            exit 1
+          fi
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: 0.4.102
+
+      # The app name is environment-owned: read from the manifest
+      # projection rather than written here.
+      - name: Resolve the production health-probe app name
+        id: facts
+        run: |
+          set -euo pipefail
+          app="$(node infra/cloud/platform/platform-environment-facts.mjs --environment production --field healthProbeApp)"
+          echo "app=${app}" >> "$GITHUB_OUTPUT"
+          echo "Production health-probe app: ${app}"
+
+      # Gate — the probe deploy stays off until the operator opens it.
+      - name: Check whether the production health-probe deploy is enabled
+        id: deploy
+        run: |
+          set -euo pipefail
+          if [ "${PRODUCTION_HEALTH_PROBE_DEPLOY_ENABLED:-}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Production health-probe deploy enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Production health-probe deploy not enabled::The production health-probe deploy is SKIPPED. Set the production environment variable PRODUCTION_HEALTH_PROBE_DEPLOY_ENABLED=true to enable it, after the production platform is deployed and the production spend limit and DNS records are in place (docs/specs/production-environment-provisioning-tech-design.md Slice D)."
+          fi
+        env:
+          PRODUCTION_HEALTH_PROBE_DEPLOY_ENABLED: ${{ vars.PRODUCTION_HEALTH_PROBE_DEPLOY_ENABLED }}
+
+      - name: Render the production health-probe Fly config
+        if: steps.deploy.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          node infra/cloud/platform/render-fly-config.mjs \
+            --shared "$FLY_CONFIG_SHARED" \
+            --overlay "$FLY_CONFIG_OVERLAY" \
+            --out "$FLY_CONFIG_RENDERED" \
+            --environment production
+
+      - name: Validate fly.toml
+        if: steps.deploy.outputs.enabled == 'true'
+        run: flyctl config validate --config "$FLY_CONFIG_RENDERED"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy (canary)
+        if: steps.deploy.outputs.enabled == 'true'
+        run: flyctl deploy --config "$FLY_CONFIG_RENDERED" --strategy canary --wait-timeout 600
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # Smoke check — the probe's own /healthz route on the production
+      # stable hostname (the hostname matrix is the source of truth for
+      # it). An unreachable production hostname is a FAILURE: the
+      # production DNS records are part of the operator order that
+      # precedes the probe deploy.
+      - name: Smoke check (/healthz)
+        if: steps.deploy.outputs.enabled == 'true'
+        id: smoke
+        run: |
+          set -euo pipefail
+          URL="https://health-probe.sindustries.co.nz/healthz"
+          STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 "${URL}")"
+          if [ "${STATUS}" != "200" ]; then
+            echo "::error::smoke check failed: GET ${URL} returned ${STATUS}"
+            exit 1
+          fi
+          echo "smoke=ok"
+          echo "smoke_url=${URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "### health-probe deployed (production)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- App: ${{ steps.facts.outputs.app }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Health: ${{ steps.smoke.outputs.smoke_url }}" >> "$GITHUB_STEP_SUMMARY"

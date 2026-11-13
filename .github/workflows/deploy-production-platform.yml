@@ -1,0 +1,265 @@
+# GitHub Actions: deploy the consolidated Fly production platform.
+#
+# Task fb1240c0 (Slice C). The production counterpart of
+# deploy-staging-platform.yml. One workflow, one Fly app, one Machine,
+# four processes — the same consolidated shape as staging, with the
+# production environment's own facts.
+#
+# THIS IS NOT A COPY OF THE STAGING WORKFLOW
+# -------------------------------------------
+# The staging workflow hard-codes `sindustries-platform-staging` and the
+# staging source names. A copy of it would hard-code the production
+# equivalents, and two copies of the same facts are exactly what drifts:
+# a production deploy that provisions the STAGING database URL onto the
+# production app looks healthy and is not.
+#
+# So the production facts come from ONE place — the environment manifest
+# (infra/cloud/platform/platform-environments.mjs) — and this workflow
+# reads them through the read-only projection for shell callers
+# (infra/cloud/platform/platform-environment-facts.mjs):
+#
+#   - the app name is resolved from the manifest, never written here;
+#   - the secret SOURCE names are the manifest's, and the drift check
+#     (tests/cloud/scripts/check-production-deploy-contract.mjs) asserts
+#     that the names below are exactly the manifest's source names;
+#   - the deploy gate variable is derived from the environment id and is
+#     asserted against the literal below by the same drift check.
+#
+# The drift check is the contract, not this file: the manifest can change
+# and the check will fail until the workflow and the drift check agree.
+#
+# WHY THE DEPLOY IS OPT-IN
+# -------------------------
+# A production deploy is not something a merge may cause by accident.
+# Two gates stand in front of it and BOTH must be open:
+#
+#   1. PRODUCTION_PLATFORM_DEPLOY_ENABLED — the repository variable the
+#      operator sets on the `production` GitHub environment. Until it is
+#      `true`, the workflow PROVISIONS the app and its secrets but SKIPS
+#      the deploy, so the environment can be prepared and inspected
+#      without anything serving traffic.
+#   2. The operator order in the tech design (Slice D) — the spend limit
+#      and the production DNS records are set BEFORE the deploy, because
+#      a canary deploy against a production app with no spend limit is
+#      the one failure this task cannot undo.
+#
+# WHY THE CONFIG IS RENDERED
+# --------------------------
+# The production Fly config is an OVERLAY on the shared config, not a
+# copy (infra/cloud/fly/platform.production.overlay.toml). The deploy
+# MUST use the rendered file: deploying the shared config would deploy
+# the staging app name and the staging CORS origins to production.
+# The rendered path is gitignored.
+#
+# NO SECRET VALUES IN LOGS
+# -------------------------
+# The provisioner maps source names to the app-level `PLATFORM_*` secret
+# names and hands the values to flyctl without printing them. This
+# workflow never echoes a secret, never enables `set -x`, and never
+# prints a source value. The only credential referenced here is by name:
+# `secrets.FLY_API_TOKEN`.
+#
+# Quinn-owned: FLY_API_TOKEN must be registered once in the `production`
+# GitHub environment. Rowan references it by name only.
+
+name: Deploy platform (Fly.io production)
+
+on:
+  workflow_call:
+
+concurrency:
+  group: deploy-platform-production-${{ github.ref }}
+  # Production never cancels an in-flight deployment: a cancelled canary
+  # can leave a partially released Machine, and the operator order for
+  # production (tech design Slice D) is a sequence, not a queue.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  ENVIRONMENT: production
+  # The shared config is the topology; the overlay is the production-owned
+  # values; the rendered file is what actually gets deployed.
+  FLY_CONFIG_SHARED: infra/cloud/fly/platform.fly.toml
+  FLY_CONFIG_OVERLAY: infra/cloud/fly/platform.production.overlay.toml
+  FLY_CONFIG_RENDERED: infra/cloud/fly/platform.production.fly.toml
+
+jobs:
+  deploy:
+    name: Deploy consolidated platform to Fly.io production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Require Fly deployment credential
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "::error::FLY_API_TOKEN is not configured for the production GitHub environment. Add it through Settings > Environments > production > Environment secrets."
+            exit 1
+          fi
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: 0.4.102
+
+      # The app name is environment-owned. It is read from the manifest
+      # projection rather than written in this file, so a manifest change
+      # cannot leave this workflow deploying a different app than the
+      # manifest, the Fly overlay and the hostname matrix name.
+      - name: Resolve the production platform app name
+        id: facts
+        run: |
+          set -euo pipefail
+          app="$(node infra/cloud/platform/platform-environment-facts.mjs --environment production --field platformApp)"
+          echo "app=${app}" >> "$GITHUB_OUTPUT"
+          echo "Production platform app: ${app}"
+
+      # Provisioning — creates the app when it is absent and registers the
+      # fifteen app-level secrets from the production GitHub environment.
+      # The provisioner owns the mapping from source names to the
+      # app-level `PLATFORM_*` names, so this workflow and the local
+      # operator path can never register different secrets on the same
+      # app.
+      #
+      # The source names below are the manifest's production source
+      # names. The drift check asserts that set exactly, so a source
+      # added to the manifest fails the merge gate until this workflow
+      # carries it.
+      #
+      # The provisioner fails closed before any Fly mutation when a value
+      # carries a staging/dev hostname, a placeholder or a localhost
+      # address, and when a required source is missing.
+      - name: Provision the production platform app and its secrets
+        run: |
+          set -euo pipefail
+          node infra/cloud/platform/platform-provision-secrets.mjs \
+            --environment production \
+            --org "$FLY_ORG"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_ORG: ${{ vars.PRODUCTION_FLY_ORG }}
+          PRODUCTION_TASKS_API_DATABASE_URL: ${{ secrets.PRODUCTION_TASKS_API_DATABASE_URL }}
+          PRODUCTION_BUDGET_API_DATABASE_URL: ${{ secrets.PRODUCTION_BUDGET_API_DATABASE_URL }}
+          PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL }}
+          PRODUCTION_HEALTH_PROBE_REDIS: ${{ secrets.PRODUCTION_HEALTH_PROBE_REDIS }}
+          PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+
+      # Gate 1 — the deploy stays off until the operator opens it.
+      - name: Check whether the production platform deploy is enabled
+        id: deploy
+        run: |
+          set -euo pipefail
+          if [ "${PRODUCTION_PLATFORM_DEPLOY_ENABLED:-}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Production platform deploy enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Production platform deploy not enabled::The production platform app is provisioned and its secrets are registered, but the deploy is SKIPPED. Set the production environment variable PRODUCTION_PLATFORM_DEPLOY_ENABLED=true to enable it, after the production spend limit and the production DNS records are in place (docs/specs/production-environment-provisioning-tech-design.md Slice D)."
+          fi
+        env:
+          PRODUCTION_PLATFORM_DEPLOY_ENABLED: ${{ vars.PRODUCTION_PLATFORM_DEPLOY_ENABLED }}
+
+      # Render the effective production config from the shared config and
+      # the production overlay. The renderer refuses any key or table the
+      # overlay does not own, so an overlay cannot fork the platform
+      # topology (a second [processes] table, a different release
+      # command).
+      - name: Render the production Fly config
+        if: steps.deploy.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          node infra/cloud/platform/render-fly-config.mjs \
+            --shared "$FLY_CONFIG_SHARED" \
+            --overlay "$FLY_CONFIG_OVERLAY" \
+            --out "$FLY_CONFIG_RENDERED" \
+            --environment production
+
+      - name: Validate fly.toml
+        if: steps.deploy.outputs.enabled == 'true'
+        run: flyctl config validate --config "$FLY_CONFIG_RENDERED"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy (canary)
+        if: steps.deploy.outputs.enabled == 'true'
+        run: flyctl deploy --config "$FLY_CONFIG_RENDERED" --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=${{ github.sha }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # Smoke check 1 — each production API hostname answers its own
+      # health route. The origins are resolved from the environment
+      # manifest (the owner of the production base URLs) rather than
+      # written here, so a hostname change cannot leave this workflow
+      # smoke-checking a host the manifest no longer names.
+      #
+      # Unlike staging, an unreachable production hostname is a FAILURE,
+      # not a notice: the production DNS records are part of the
+      # operator order that precedes the deploy, so an unreachable
+      # hostname here means the environment is not the one this deploy
+      # assumed.
+      - name: Smoke check (production API hostnames)
+        if: steps.deploy.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          failed=0
+          for surface in tasksApi budgetApi contentSchedulerApi; do
+            origin="$(node infra/cloud/platform/platform-environment-facts.mjs --environment production --field "apiOrigins.${surface}")"
+            URL="${origin}/health"
+            echo "Checking $URL"
+            ok=0
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl --fail --silent --show-error --max-time 10 "$URL" >/dev/null; then
+                ok=1
+                echo "Smoke OK for $surface on attempt $i"
+                break
+              fi
+              echo "Smoke attempt $i for $surface failed; retrying in 5s"
+              sleep 5
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::Smoke check failed for $surface ($URL)"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::One or more production service smoke checks failed. Check fly logs --app ${{ steps.facts.outputs.app }}"
+            exit 1
+          fi
+
+      # Smoke check 2 — the auto-post worker has no HTTP surface. Its
+      # startup line in the logs is the evidence that the queue consumer
+      # came up inside the SAME production Machine that just deployed.
+      - name: Smoke check (auto-post worker startup)
+        if: steps.deploy.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          DEADLINE=$((SECONDS + 60))
+          while [ $SECONDS -lt $DEADLINE ]; do
+            # Capture first, then grep. `flyctl logs | grep -q` closes the
+            # pipe at the first match, flyctl dies with SIGPIPE (141), and
+            # `pipefail` turns a FOUND pattern into a false no-match.
+            logs="$(flyctl logs --app "${{ steps.facts.outputs.app }}" --no-tail 2>/dev/null || true)"
+            if grep -qF '[content-scheduler-worker] starting' <<<"$logs"; then
+              echo "Worker startup log observed"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Auto-post worker startup log not observed within 60s. Check fly logs --app ${{ steps.facts.outputs.app }}"
+          exit 1
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
