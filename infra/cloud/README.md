@@ -288,7 +288,14 @@ the spend limit, publish DNS) is the operator sequence in
 | Deploy the production health probe | `.github/workflows/deploy-production-health-probe.yml` | CI | `PRODUCTION_HEALTH_PROBE_DEPLOY_ENABLED=true` |
 | Run the production migrations | the migrations job of `.github/workflows/deploy-production-platform.yml` | CI | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` |
 | Re-read the effective production facts | `node infra/cloud/platform/platform-environment-facts.mjs --environment production` | anyone | read-only; prints names and flags, never secret values |
+| Prove the production Neon treatment (AC2) | `node tests/cloud/scripts/check-production-neon-evidence.mjs <evidence-file>` | Quinn | the gate fails closed unless the redacted evidence proves the three schemas, one write-capable role per schema, a non-empty IP allowlist, and denied staging/dev connections; the contract is `docs/cloud/production-neon-contract.md` |
 | Roll back a bad production release | `fly releases rollback --app sindustries-platform-production` | Quinn | app-wide: one Machine carries all four services |
+
+The production Neon treatment — the branch, its three schemas, the service
+roles that carry the DSNs, and the connectivity restriction — is contracted
+in `docs/cloud/production-neon-contract.md`, and `tests/cloud/scripts/check-production-neon-evidence.mjs`
+is the gate that decides whether a redacted evidence artifact actually
+proves it.
 
 Rollback for production is app-wide for the same reason staging's is — the
 production platform is one Machine carrying four services, so

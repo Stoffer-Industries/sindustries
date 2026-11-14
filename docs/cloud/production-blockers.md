@@ -211,11 +211,19 @@ credential boundary.
   workflows' app name, gates, rendered Fly config and secret names to the
   manifest, so a workflow cannot drift from the manifest it claims to follow.
 - The production environment does not exist yet: no production app, no
-  production Neon branch, no production DNS records and no production
-  secrets. The rows above are the target topology, not a live inventory. The
-  live provisioning evidence is Slice D of
+  production DNS records and no production secrets. The rows above are the
+  target topology, not a live inventory. The live provisioning evidence is
+  Slice D of
   `docs/specs/production-environment-provisioning-tech-design.md` and is
   still to be captured.
+- The production Neon **branch** does exist (observed 2026-11-14 on the Neon
+  project `sindustries`; re-verify in the Neon console before creating
+  anything, because a later provider read was blocked by an egress-proxy
+  error): it carries only the `auth` and `public` schemas — none of
+  `tasks_api`, `budget_api` or `content_scheduler` — no service roles, and
+  an empty IP allowlist. The treatment it needs is contracted in
+  `docs/cloud/production-neon-contract.md`, and the AC2 evidence gate is
+  `tests/cloud/scripts/check-production-neon-evidence.mjs`.
 
 ### 6. Production deploy workflows (task `fb1240c0`)
 

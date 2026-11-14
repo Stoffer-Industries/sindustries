@@ -1220,6 +1220,23 @@ jobs:
       - name: Run production deploy contract test
         run: node --test tests/cloud/tests/check-production-deploy-contract.test.mjs
 
+      # Task fb1240c0 (Slice D preparation) AC2 evidence gate: the
+      # production Neon treatment — the branch, its three schemas, the
+      # service roles and the connectivity restriction — had no repo-owned
+      # shape, so the operator captured prose and the reviewer read it.
+      # The gate decides whether a REDACTED evidence artifact actually
+      # proves AC2, and it fails closed. The example artifact is a
+      # redacted, value-free illustration of the shape; the operator's
+      # real artifact is checked with the same checker.
+      - name: Check production Neon evidence contract
+        run: node tests/cloud/scripts/check-production-neon-evidence.mjs tests/cloud/fixtures/production-neon-evidence.example.json
+
+      # Run by explicit path so the repository-wide contract-test orphan
+      # guard sees it as executed. The sentinel cases prove the evidence
+      # gate can actually go red — a gate that cannot fail asserts nothing.
+      - name: Run production Neon evidence contract test
+        run: node --test tests/cloud/tests/check-production-neon-evidence.test.mjs
+
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
 
