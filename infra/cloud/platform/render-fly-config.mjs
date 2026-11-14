@@ -33,10 +33,10 @@
  * allow-list exists to prevent.
  *
  * The app name in the overlay is BOUND TO THE MANIFEST: when the
- * environment is known, the overlay's `app` must be one of that
- * environment's own app names. Without that binding an overlay edited to
- * `app = 'sindustries-platform-staging'` renders successfully, and the
- * production deploy then targets staging.
+ * environment is known, the overlay's `app` must name the app that its
+ * shared config renders. Without that binding an overlay edited to name
+ * another app — or edited to omit the app entirely — renders
+ * successfully and leaves the shared staging app in the output.
  *
  * The merge is LINE-ORIENTED, not parse-and-re-emit: every line of the
  * shared file that the overlay does not own is preserved byte for byte,
@@ -319,7 +319,12 @@ export function renderHeader({ sharedPath, overlayPath = null, environment = nul
  * @param {string} sharedPath
  */
 export function assertOverlayAppMatchesEnvironment(app, environmentId, sharedPath) {
-  if (app === null) return;
+  if (app === null) {
+    throw new Error(
+      `the ${environmentId} render does not carry an overlay app name — the target app ` +
+        'cannot be bound to the environment manifest',
+    );
+  }
   let environment;
   try {
     environment = getPlatformEnvironment(environmentId);

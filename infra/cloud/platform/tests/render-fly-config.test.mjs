@@ -177,6 +177,32 @@ describe('overlay parsing fails closed', () => {
 });
 
 describe('the overlay is bound to the environment manifest', () => {
+  it('refuses an environment-bound render whose overlay omits the app', () => {
+    // Omitting the app is not safer than naming the wrong app: the merge
+    // would preserve the SHARED config's staging app name, leaving a
+    // production-rendered artefact that still targets staging.
+    const directory = mkdtempSync(join(tmpdir(), 'render-fly-config-'));
+    const overlayPath = join(directory, 'platform.missing-app.overlay.toml');
+    writeFileSync(
+      overlayPath,
+      "[env]\n  PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS = 'https://mission-control.sindustries.co.nz'\n",
+      'utf8',
+    );
+    try {
+      assert.throws(
+        () =>
+          renderFlyConfig({
+            sharedPath: repoUrl(PLATFORM_SHARED).pathname,
+            overlayPath,
+            environment: 'production',
+          }).rendered,
+        /does not carry an overlay app name/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('refuses an overlay that names another environment app', () => {
     // The app name is what Fly deploys to. An overlay edited to name the
     // staging app renders successfully and then deploys production to
