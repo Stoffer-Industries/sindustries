@@ -450,7 +450,7 @@ The two Vercel frontends could not be verified **from the host that ran the harn
 
 The harness now classifies this case explicitly for both HTTPS and CORS preflight probes: a response whose body carries a proxy marker, or a gateway status behind a proxy that `NO_PROXY` does not exempt, is recorded as `failureMode: proxy_blocked` rather than an upstream status, and the row evidence says the harness could not reach the deployment. CORS preflight also requires both a successful 2xx status and the expected allow-origin header; a failed preflight reads a bounded response-body excerpt and applies the same failure classification. Before an excerpt is persisted in result JSON or row evidence, the redactor removes URI userinfo and Basic/Proxy-Authorization credential values. The row still fails — the harness could not verify the hostname, so the AC5 live gate stays open — but the failure is no longer attributed to the deployment.
 
-**Outstanding for AC5 (as recorded on 2026-11-11):** the two frontend rows must be verified from a host that is not behind the proxy block (or from CI) before the live gate can pass. **That verification now exists** — see [Live AC5 harness result — public-internet runner (2026-11-15 NZ)](#live-ac5-harness-result--public-internet-runner-2026-11-15-nz) below: dispatched on a public-internet runner, both frontend rows pass. The AC5 clause that is still open is the representative authenticated staging workflow, which that harness reports as `skip` because it is owned by `tests/cloud/staging-workflows.mjs` and needs the staging GitHub environment tokens.
+**Outstanding for AC5 (as recorded on 2026-11-11):** the two frontend rows must be verified from a host that is not behind the proxy block (or from CI) before the live gate can pass. **That verification now exists** — see [Live AC5 harness result — public-internet runner (2026-11-15 NZ)](#live-ac5-harness-result--public-internet-runner-2026-11-15-nz) below: dispatched on a public-internet runner, both frontend rows pass. The representative authenticated staging workflow was still open at that point; the separate staging-validation run recorded below now closes that final AC5 staging leg.
 
 ### Live verification from a public-internet runner
 
@@ -487,9 +487,27 @@ A failing row in that workflow is the honest signal that a surface is not servin
 
 Three rows carry no CORS column value because they are not CORS origins: the two frontends are browser entry points rather than API servers, and the health probe exposes no browser-facing surface. The harness records `cors: null` for those rows rather than a pass, so the table above does not overstate them.
 
-What this run does **not** cover: the representative authenticated staging workflow (`representativeWorkflow: skip`, owned by `tests/cloud/staging-workflows.mjs`, which needs the staging GitHub environment tokens), and the production half of AC2/AC6 — the production hostnames still have no DNS records, no certificates and no owning Vercel project, which is recorded in the AC6 register [`docs/cloud/production-blockers.md`](../../docs/cloud/production-blockers.md).
+This credential-free public-runner result did **not** cover the representative authenticated staging workflow (`representativeWorkflow: skip`, owned by `tests/cloud/staging-workflows.mjs`). The separate staging-validation run below now covers that leg. The production half of AC2/AC6 remains open — the production hostnames still have no DNS records, no certificates and no owning Vercel project, which is recorded in the AC6 register [`docs/cloud/production-blockers.md`](../../docs/cloud/production-blockers.md).
 
-A caveat worth keeping in view: the harness proves a hostname resolves and serves. It cannot tell a staging deployment from a production one behind the same hostname, because both are verified through reachability and TLS only. Environment separation for the two Vercel frontends therefore still rests on the Vercel project/environment binding the matrix records (`vercelStagingProject` + `vercelEnvironments`), not on this verdict.
+A caveat worth keeping in view: the harness proves a hostname resolves and serves. It cannot tell a staging deployment from a production one behind the same hostname, because both are verified through reachability and TLS only. Environment separation for the two Vercel frontends therefore rests on the distinct Vercel projects recorded by the matrix (`vercelStagingProject` for staging and `vercelProject` for production), not on this verdict.
+
+### Authenticated staging workflow result — staging-validation runner (2026-11-15 NZ)
+
+`.github/workflows/cloud-staging-validate.yml` dispatched on `main` at commit `5c924937` — [run `43606147320`](https://github.com/Stoffer-Industries/sindustries/actions/runs/43606147320), harness `runId: staging-validate-20261114144157-4a73` — exercised the representative authenticated staging workflows through the stable hostnames:
+
+| Surface | Authenticated workflow evidence |
+| --- | --- |
+| tasks-api | create, read, comment, patch, archive, and list-excludes-archived all passed through `tasks-api.staging.sindustries.co.nz` |
+| budget-api | `/me` passed through `budget-api.staging.sindustries.co.nz` using the synthetic staging session |
+| content-scheduler-api | auto-post health, create, approve, and unapprove passed through `content-scheduler-api.staging.sindustries.co.nz` |
+
+The structured result is `verdict: pass`; all 15 recorded checks pass, and `cleanup.ok` is `true`. The synthetic budget session was revoked (one user and one session deleted), the synthetic scheduler item was removed, and the synthetic task was archived. The artifact is redacted and contains no credential values.
+
+The run's intent commit is `5c924937`, whose diff is documentation-only, so the workflow classified it as `tests-only`; the deployed services reported version `e2c58158` and `matchesIntent: true` under that scope rule. This does not weaken the AC5 result: every request in the authenticated harness used the stable staging hostname, and none used a provider fallback URL.
+
+One accepted limitation remains explicit in the result: the deeper Budget API linked-card write path is skipped by design because its prerequisite fixture is not exposed publicly. That boundary is recorded in the approved staging-environment design and does not replace the representative `/me` authenticated workflow.
+
+Together, run `43595192346` and run `43606147320` now supply the complete AC5 staging evidence: public frontend roots/assets, API health, Content Scheduler auto-post health, and representative authenticated staging workflows all work through the stable hostnames. The task checkbox remains untouched pending Tom/QA's gate.
 
 Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the consolidated platform app (the router already serves each stable hostname at the root of its own surface) and update the smoke-check URLs in the live deploy workflow, `.github/workflows/deploy-staging-platform.yml`. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; each still defines its own `deploy` job, but nothing calls them since their caller jobs were removed from `ci.yml` on 2026-11-07) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
 
