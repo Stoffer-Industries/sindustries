@@ -318,6 +318,97 @@ else
   fail "dashboards step did not provision with a Prometheus-only datasource set"
 fi
 
+# A hosted Grafana Cloud tenant exposes SEVERAL Loki datasources at once:
+# the canonical application-logs one plus purpose-built ones (alert state
+# history, usage insights). None of them is the tenant default when
+# Prometheus holds that flag, so "default first, otherwise the first Loki
+# datasource" bound every Loki-backed dashboard to whichever the tenant
+# listed first. On the live Sindustries tenant that was
+# `grafanacloud-alert-state-history`, which never receives application logs
+# — the GymTrack rows sit in `grafanacloud-logs`. The selector must prefer
+# the canonical logs datasource.
+: > "${FAKE_CURL_LOG}"
+FAKE_DATASOURCES='[
+  {"type":"prometheus","uid":"grafanacloud-prom","isDefault":true},
+  {"type":"loki","uid":"grafanacloud-alert-state-history","name":"grafanacloud-sindustries-alert-state-history","isDefault":false},
+  {"type":"loki","uid":"grafanacloud-logs","name":"grafanacloud-sindustries-logs","isDefault":false},
+  {"type":"loki","uid":"grafanacloud-usage-insights","name":"grafanacloud-sindustries-usage-insights","isDefault":false}
+]' \
+  PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" dashboards >/dev/null 2>&1
+multi_loki_payload="$(awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/ {print $3}' "${FAKE_CURL_LOG}" \
+  | jq -c -s 'map(select(.dashboard.title? == "GymTrack / Browser errors")) | .[0] // empty')"
+if [ -n "${multi_loki_payload}" ] \
+    && jq -e '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then .uid else . end]
+            | length > 0 and all(. == "grafanacloud-logs")' <<<"${multi_loki_payload}" >/dev/null; then
+  ok "Loki-backed dashboard binds to the canonical logs datasource on a multi-Loki tenant"
+else
+  fail "Loki-backed dashboard bound to the wrong Loki datasource on a multi-Loki tenant — panels would query a datasource that never receives application logs"
+fi
+
+# Operator escape hatch: an explicit pin wins over every naming convention.
+: > "${FAKE_CURL_LOG}"
+FAKE_DATASOURCES='[
+  {"type":"prometheus","uid":"grafanacloud-prom","isDefault":true},
+  {"type":"loki","uid":"grafanacloud-logs","name":"grafanacloud-sindustries-logs","isDefault":false},
+  {"type":"loki","uid":"grafanacloud-pinned-loki","name":"pinned-loki","isDefault":false}
+]' \
+  GRAFANA_CLOUD_LOKI_DATASOURCE_UID="grafanacloud-pinned-loki" \
+  PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" dashboards >/dev/null 2>&1
+pinned_payload="$(awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/ {print $3}' "${FAKE_CURL_LOG}" \
+  | jq -c -s 'map(select(.dashboard.title? == "GymTrack / Browser errors")) | .[0] // empty')"
+if [ -n "${pinned_payload}" ] \
+    && jq -e '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then .uid else . end]
+            | length > 0 and all(. == "grafanacloud-pinned-loki")' <<<"${pinned_payload}" >/dev/null; then
+  ok "GRAFANA_CLOUD_LOKI_DATASOURCE_UID pins the Loki datasource explicitly"
+else
+  fail "GRAFANA_CLOUD_LOKI_DATASOURCE_UID did not override the Loki datasource selection"
+fi
+
+# A pin that matches no Loki datasource must fail the step CLOSED. A stale
+# or mistyped pin used to fall through to the naming-convention rule, which
+# bound the dashboards to a datasource that is known not to carry
+# application logs — the exact failure this selector exists to prevent.
+: > "${FAKE_CURL_LOG}"
+pin_exit=0
+FAKE_DATASOURCES='[
+  {"type":"prometheus","uid":"grafanacloud-prom","isDefault":true},
+  {"type":"loki","uid":"grafanacloud-logs","name":"grafanacloud-sindustries-logs","isDefault":false}
+]' \
+  GRAFANA_CLOUD_LOKI_DATASOURCE_UID="grafanacloud-pinned-missing" \
+  PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" dashboards >/dev/null 2>&1 || pin_exit=$?
+if [ "${pin_exit}" -ne 0 ] \
+    && ! awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/' "${FAKE_CURL_LOG}" | grep -q .; then
+  ok "a pin that matches no Loki datasource fails the step and provisions nothing"
+else
+  fail "a stale Loki datasource pin was silently ignored (exit ${pin_exit})"
+fi
+
+# The Loki selection rule must have ONE home. The script and the documented
+# operator path both run infra/cloud/observability/loki-datasource-selector.jq,
+# so they cannot drift; neither may keep an inline copy of the rule.
+SELECTOR_JQ="${OBS}/loki-datasource-selector.jq"
+DOC_OBSERVABILITY="${REPO_ROOT}/docs/systems/observability.md"
+if [ -f "${SELECTOR_JQ}" ]; then
+  ok "the Loki datasource selector exists as a shared file"
+else
+  fail "the Loki datasource selector is missing: ${SELECTOR_JQ}"
+fi
+if grep -q -- '-f "${LOKI_SELECTOR_JQ}"' "${BOOT}"; then
+  ok "bootstrap-observability.sh runs the shared Loki selector"
+else
+  fail "bootstrap-observability.sh does not run the shared Loki selector"
+fi
+if grep -q 'loki-datasource-selector.jq' "${DOC_OBSERVABILITY}"; then
+  ok "the operator procedure runs the shared Loki selector"
+else
+  fail "the operator procedure does not run the shared Loki selector"
+fi
+if grep -q 'map(select(.type == "loki"))' "${BOOT}" "${DOC_OBSERVABILITY}"; then
+  fail "an inline copy of the Loki selection rule survived next to the shared file"
+else
+  ok "the Loki selection rule has no inline copy in the script or the docs"
+fi
+
 : > "${FAKE_CURL_LOG}"
 PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" alerts >/dev/null
 alert_payload="$(awk -F '\t' '$1 == "POST" && $2 ~ /\/api\/v1\/provisioning\/alert-rules$/ {print $3; exit}' "${FAKE_CURL_LOG}")"
