@@ -82,6 +82,9 @@ jobs:
               - 'agents/workflows/feature-task/**'
             health_probe:
               - 'infra/cloud/observability/**'
+              - 'infra/otel-collector/**'
+              - 'infra/docker-compose.observability.yml'
+              - 'scripts/dev/**'
               - 'packages/otel-node/**'
               - 'package.json'
               - 'package-lock.json'
@@ -242,6 +245,14 @@ jobs:
         # that exits 1. This derives the refused set from the script itself
         # and fails if a doc prescribes one without saying it refuses.
         run: bash infra/cloud/scripts/tests/observability-drill-docs.test.sh
+
+      - name: Run Grafana Cloud OTel cutover contract test (task a7938522)
+        # Guards the two silent failures in the local-to-Grafana-Cloud cutover:
+        # interpolating the raw OTLP header string (which is
+        # `Authorization=Basic <base64>`, not a header value) and pointing the
+        # exporter at the gateway without the `/otlp` prefix (a 404). Offline:
+        # no credential and no Grafana access required.
+        run: bash scripts/dev/tests/grafana-cloud-otel-env.test.sh
 
   mission-control-tests:
     name: mission-control tests
