@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: a7938522-778e-40c9-bd17-423f00ff1470
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 995
+shipped_date: 2026-11-15
 ---
 
 # Grafana Cloud local OTel cutover — tech design
