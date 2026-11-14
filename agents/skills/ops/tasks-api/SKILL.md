@@ -94,6 +94,14 @@ and review feedback is absent: rebase onto the base branch, preserve both
 sides of content conflicts, push with `--force-with-lease`, and re-request the
 original reviewer because the push dismisses the approval.
 
+That force-push path is for **genuine content conflicts**. A branch that is
+merely behind `main` (`mergeStateStatus: BEHIND`) is not a conflict: GitHub
+refuses the merge with "the head branch is not up to date with the base
+branch", and the fix is GitHub's update-branch operation, which refreshes the
+branch without rewriting the reviewed commits — see the "When the merge is
+refused because the branch is behind `main`" section of
+`agents/skills/dev/pr-process/SKILL.md`.
+
 ### Attention owners: ordered action and escalation stack
 
 Use `agents/skills/ops/attention-owner-routing/SKILL.md` for the complete
