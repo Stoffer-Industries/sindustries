@@ -1,14 +1,27 @@
 # fly.toml — content-scheduler-api staging.
 #
+# RETIRED — the per-service staging Fly app this spec configures was destroyed
+# in the 2026-11-07 staging consolidation. The service now runs as a child
+# process of the ONE consolidated staging platform app; the live staging deploy
+# path is `infra/cloud/fly/platform.fly.toml` via
+# `.github/workflows/deploy-staging-platform.yml`. This file is retained as a
+# historical template only and MUST NOT be deployed — the retired-app guard in
+# `infra/cloud/scripts/tests/retired-staging-apps.test.sh` asserts that no
+# operator surface deploys it. Live topology: `docs/systems/cloud-platform.md`;
+# cutover and pending cleanup: `docs/runbooks/platform-consolidation-rollback.md`.
+#
 # Stable hostnames (task 5cb4a8fe; source of truth: infra/cloud/hostname-matrix.json):
 #   staging:    content-scheduler-api.staging.sindustries.co.nz
 #   production: content-scheduler-api.sindustries.co.nz
-# Add via `fly certs add content-scheduler-api.staging.sindustries.co.nz --app sindustries-content-scheduler-api-staging`
+# The staging certificate is added to the consolidated platform app instead:
+# `fly certs add content-scheduler-api.staging.sindustries.co.nz --app sindustries-platform-staging`
 # (Quinn-owned operator step; the cert is auto-issued by Let's Encrypt once the CNAME lands).
 #
-# The HTTP API and auto-post worker are separate Fly apps but share the
-# content_scheduler database schema and BullMQ queue. This app owns the HTTP
-# routes; infra/cloud/fly/auto-post-worker.fly.toml owns queue consumption.
+# The HTTP API and the auto-post worker were separate Fly apps that shared the
+# content_scheduler database schema and the BullMQ queue. Since the
+# 2026-11-07 consolidation both are child processes of the one consolidated
+# staging platform app, sharing that schema and that queue inside a single
+# Machine.
 
 app = 'sindustries-content-scheduler-api-staging'
 primary_region = 'syd'

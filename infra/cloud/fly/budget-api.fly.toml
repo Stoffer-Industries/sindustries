@@ -1,9 +1,20 @@
 # fly.toml — budget-api staging.
 #
+# RETIRED — the per-service staging Fly app this spec configures was destroyed
+# in the 2026-11-07 staging consolidation. The service now runs as a child
+# process of the ONE consolidated staging platform app; the live staging deploy
+# path is `infra/cloud/fly/platform.fly.toml` via
+# `.github/workflows/deploy-staging-platform.yml`. This file is retained as a
+# historical template only and MUST NOT be deployed — the retired-app guard in
+# `infra/cloud/scripts/tests/retired-staging-apps.test.sh` asserts that no
+# operator surface deploys it. Live topology: `docs/systems/cloud-platform.md`;
+# cutover and pending cleanup: `docs/runbooks/platform-consolidation-rollback.md`.
+#
 # Stable hostnames (task 5cb4a8fe; source of truth: infra/cloud/hostname-matrix.json):
 #   staging:    budget-api.staging.sindustries.co.nz
 #   production: budget-api.sindustries.co.nz
-# Add via `fly certs add budget-api.staging.sindustries.co.nz --app sindustries-budget-api-staging`
+# The staging certificate is added to the consolidated platform app instead:
+# `fly certs add budget-api.staging.sindustries.co.nz --app sindustries-platform-staging`
 # (Quinn-owned operator step; the cert is auto-issued by Let's Encrypt once the CNAME lands).
 #
 # Mirror of infra/cloud/fly/tasks-api.fly.toml with the staging-specific app
@@ -11,14 +22,15 @@
 # (PORT defaults to 4002). primary_region kept at 'syd' to match the existing
 # tasks-api and gymtrack-mcp precedent (Tom/Quinn geography).
 #
-# The build context is set to the repo root (`../../`) so the Dockerfile's
+# The build context is set to the repo root (`../../..`) so the Dockerfile's
 # `COPY pnpm-lock.yaml` / `COPY services/budget-api/` references resolve cleanly.
-# When invoking from CI: `fly deploy --config infra/cloud/fly/budget-api.fly.toml`
-# from the repo root.
+# (The `[build]` section below carries the corrected value: the earlier `../../`
+# resolved to `infra/` — silently wrong.)
 #
-# Quinn-approved answers from PR #508:
-#   - auto-post-worker is a SEPARATE Fly app process (this file is budget-api only;
-#     the worker gets its own fly.toml in infra/cloud/fly/auto-post-worker.fly.toml
+# Pre-consolidation rationale (PR #508 — superseded by the 2026-11-07 cutover
+# named above; retained for history only):
+#   - auto-post-worker was a SEPARATE Fly app process (this file is budget-api only;
+#     the worker got its own fly.toml in infra/cloud/fly/auto-post-worker.fly.toml
 #     in PR #3).
 #   - REDIS_URL stays as the env-var contract — Upstash credentials (Sydney, TLS)
 #     are Quinn-supplied and referenced by secret name only.
