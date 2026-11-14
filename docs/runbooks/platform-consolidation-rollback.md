@@ -49,7 +49,7 @@ staging footprint is replaced by one.
 ## 2. Prerequisites (all external to this repo)
 
 1. **Fly app + secrets — provisioned by CI.** The consolidated app
-   `sindustries-platform-staging` and its twelve app-level `PLATFORM_*`
+   `sindustries-platform-staging` and its fifteen app-level `PLATFORM_*`
    secrets are created by `.github/workflows/deploy-staging-platform.yml`,
    which maps the staging GitHub environment secrets onto the platform
    names (`infra/cloud/platform/platform-provision-secrets.mjs`). The app
@@ -136,7 +136,7 @@ section 4).
 ### Step 2 — deploy the platform app through the gated CI path
 
 The platform is deployed by `.github/workflows/deploy-staging-platform.yml`:
-the workflow provisions the app and its twelve secrets, and deploys only
+the workflow provisions the app and its fifteen secrets, and deploys only
 when the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED` is
 `true`. That variable is the single opt-in for the cutover — flip it in the
 staging GitHub environment, then re-run the deploy workflow.

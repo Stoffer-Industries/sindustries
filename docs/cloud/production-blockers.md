@@ -39,10 +39,10 @@ in sections 1–4.
 | Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | — | Quinn | Pending |
 | Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | `cname.vercel-dns.com` | Quinn | Pending |
 | Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | `cname.vercel-dns.com` | Quinn | Pending |
-| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → Fly app `sindustries-tasks-api` | `sindustries-tasks-api.fly.dev` | Quinn | Pending |
-| Budget API | `budget-api.sindustries.co.nz` | CNAME → Fly app `sindustries-budget-api` | `sindustries-budget-api.fly.dev` | Quinn | Pending |
-| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → Fly app `sindustries-content-scheduler-api` | `sindustries-content-scheduler-api.fly.dev` | Quinn | Pending |
-| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe` | `sindustries-health-probe.fly.dev` | Quinn | Pending |
+| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
+| Budget API | `budget-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
+| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
+| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe-production` | `sindustries-health-probe-production.fly.dev` | Quinn | Pending |
 | Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | — | Not applicable |
 
 **Notes:**
@@ -179,36 +179,60 @@ matrix; Quinn sets the actual values in the Vercel dashboard.
 - A future task may move the values into a Vercel `vercel-cli` import
   script that Quinn runs; this task only ships the contract.
 
-### 5. Fly secrets + production env vars (per service)
+### 5. Fly secrets + production env vars (current topology)
 
-The per-service fly.toml `[env]` blocks already declare the production
-hostnames for the CORS half (slices 1+2) and the smoke URL (slice 3). The
-**secret** env vars (DATABASE_URL, REDIS_URL, OTEL_*, etc.) are
-operator-owned and set via `fly secrets set` per the credential boundary.
+Production follows the same consolidated topology as staging: tasks-api,
+budget-api, content-scheduler-api, and auto-post-worker are children of one
+platform app, while health-probe keeps its own environment-specific app. The
+app-level values are operator-owned and set via `fly secrets set` per the
+credential boundary.
 
 | Fly app | Required secret env vars | Owner | Status |
 | --- | --- | --- | --- |
-| `sindustries-tasks-api` | DATABASE_URL, REDIS_URL, OTEL_*, tasks-api service-token | Quinn | Pending (staging done) |
-| `sindustries-budget-api` | DATABASE_URL, REDIS_URL, AKAHU_*, OTEL_* | Quinn | Pending (staging done) |
-| `sindustries-content-scheduler-api` | DATABASE_URL, CONTENT_SCHEDULER_REDIS_URL, OTEL_* | Quinn | Pending (staging done) |
-| `sindustries-health-probe` | OTEL_* | Quinn | Pending (staging done) |
-| `sindustries-auto-post-worker` | DATABASE_URL, CONTENT_SCHEDULER_REDIS_URL, OTEL_* | Quinn | Pending (staging done) |
+| `sindustries-platform-production` | The 15 app-level values defined by `platform-provision-secrets.mjs`: three database URLs, six Redis URLs, two approval credentials, content-scheduler base URL, and three CORS allow-lists; plus pass-through AKAHU_* and OTEL_* values where enabled | Quinn | Pending |
+| `sindustries-health-probe-production` | HEALTH_PROBE_DATABASES, HEALTH_PROBE_FLY_APPS, HEALTH_PROBE_REDIS, OTEL_* | Quinn | Pending |
 
 **Notes:**
-- The credential boundary in cloud-platform.md applies unchanged: Quinn
-  owns the live values via `fly secrets set`; Rowan ships only env-var
-  names in the committed fly.toml `[env]` blocks.
-- The bootstrap script `infra/cloud/scripts/bootstrap-staging.sh` will
-  be cloned to `bootstrap-production.sh` for production rollout; that
-  is a separate task.
+- The credential boundary in cloud-platform.md applies unchanged: Quinn owns
+  the live values; Rowan ships the environment manifest and provisioning
+  contract.
+- `platform-provision-secrets.mjs --environment production` derives the
+  production app name and the `PRODUCTION_*` secret source names from the
+  environment manifest
+  (`infra/cloud/platform/platform-environments.mjs`), which is the single
+  source of truth for the production topology.
+- App creation and the production deploy workflows now exist (task
+  `fb1240c0`, PR #979): `bootstrap-production.sh` creates the production
+  platform app through the shared bootstrap, and
+  `.github/workflows/deploy-production-platform.yml` and
+  `.github/workflows/deploy-production-health-probe.yml` deploy it. The
+  manifest-to-workflow drift check
+  (`tests/cloud/scripts/check-production-deploy-contract.mjs`) binds those
+  workflows' app name, gates, rendered Fly config and secret names to the
+  manifest, so a workflow cannot drift from the manifest it claims to follow.
+- The production environment does not exist yet: no production app, no
+  production DNS records and no production secrets. The rows above are the
+  target topology, not a live inventory. The live provisioning evidence is
+  Slice D of
+  `docs/specs/production-environment-provisioning-tech-design.md` and is
+  still to be captured.
+- The production Neon **branch** does exist (observed 2026-11-14 on the Neon
+  project `sindustries`; re-verify in the Neon console before creating
+  anything, because a later provider read was blocked by an egress-proxy
+  error): it carries only the `auth` and `public` schemas — none of
+  `tasks_api`, `budget_api` or `content_scheduler` — no service roles, and
+  an empty IP allowlist. The treatment it needs is contracted in
+  `docs/cloud/production-neon-contract.md`, and the AC2 evidence gate is
+  `tests/cloud/scripts/check-production-neon-evidence.mjs`.
 
-### 6. Production deploy workflows (separate task)
+### 6. Production deploy workflows (task `fb1240c0`)
 
 This task ships the **staging** deploy workflow migration to the stable
 hostname (slice 3, PR #775, merged 2026-10-08T10:28:43Z). The
-**production** deploy workflows (`deploy-production-tasks-api.yml` etc.)
-are a separate task — not in scope for `5cb4a8fe`. Quinn runs the
-production deploy by dispatching the same pattern against the production
+**production** deploy workflows are not in scope for `5cb4a8fe`; they ship
+with task `fb1240c0` as one consolidated pair, because production follows
+the consolidated topology rather than one workflow per service. Quinn runs
+the production deploy by dispatching those workflows against the production
 GitHub environment.
 
 | Workflow | Status | Owner |
@@ -217,10 +241,8 @@ GitHub environment.
 | `deploy-staging-budget-api.yml` | Merged (PR #775) | Rowan |
 | `deploy-staging-content-scheduler-api.yml` | Merged (PR #775) | Rowan |
 | `deploy-staging-health-probe.yml` | Merged (PR #775) | Rowan |
-| `deploy-production-tasks-api.yml` | Out of scope for this task | Separate task |
-| `deploy-production-budget-api.yml` | Out of scope for this task | Separate task |
-| `deploy-production-content-scheduler-api.yml` | Out of scope for this task | Separate task |
-| `deploy-production-health-probe.yml` | Out of scope for this task | Separate task |
+| `deploy-production-platform.yml` | Shipped by task `fb1240c0` (PR #979, unmerged) — one consolidated production app, not one app per service | Rowan |
+| `deploy-production-health-probe.yml` | Shipped by task `fb1240c0` (PR #979, unmerged) — the probe keeps its own app and its own gate | Rowan |
 
 ### 7. Production smoke + cutover (separate task)
 

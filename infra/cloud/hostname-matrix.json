@@ -40,13 +40,13 @@
     {
       "id": "tasks-api",
       "kind": "api",
-      "flyApp": "sindustries-tasks-api",
+      "flyApp": "sindustries-platform-production",
       "staging": "tasks-api.staging.sindustries.co.nz",
       "production": "tasks-api.sindustries.co.nz",
       "providerFallback": "sindustries-tasks-api.fly.dev",
       "cnameTargets": {
         "staging": "sindustries-platform-staging.fly.dev",
-        "production": "sindustries-tasks-api.fly.dev"
+        "production": "sindustries-platform-production.fly.dev"
       },
       "stagingRoutes": [
         { "host": "tasks-api.staging.sindustries.co.nz", "pathPrefix": "" },
@@ -56,13 +56,13 @@
     {
       "id": "budget-api",
       "kind": "api",
-      "flyApp": "sindustries-budget-api",
+      "flyApp": "sindustries-platform-production",
       "staging": "budget-api.staging.sindustries.co.nz",
       "production": "budget-api.sindustries.co.nz",
       "providerFallback": "sindustries-budget-api.fly.dev",
       "cnameTargets": {
         "staging": "sindustries-platform-staging.fly.dev",
-        "production": "sindustries-budget-api.fly.dev"
+        "production": "sindustries-platform-production.fly.dev"
       },
       "stagingRoutes": [
         { "host": "budget-api.staging.sindustries.co.nz", "pathPrefix": "" },
@@ -72,13 +72,13 @@
     {
       "id": "content-scheduler-api",
       "kind": "api",
-      "flyApp": "sindustries-content-scheduler-api",
+      "flyApp": "sindustries-platform-production",
       "staging": "content-scheduler-api.staging.sindustries.co.nz",
       "production": "content-scheduler-api.sindustries.co.nz",
       "providerFallback": "sindustries-content-scheduler-api.fly.dev",
       "cnameTargets": {
         "staging": "sindustries-platform-staging.fly.dev",
-        "production": "sindustries-content-scheduler-api.fly.dev"
+        "production": "sindustries-platform-production.fly.dev"
       },
       "stagingRoutes": [
         { "host": "content-scheduler-api.staging.sindustries.co.nz", "pathPrefix": "" },
@@ -88,13 +88,13 @@
     {
       "id": "health-probe",
       "kind": "api",
-      "flyApp": "sindustries-health-probe",
+      "flyApp": "sindustries-health-probe-production",
       "staging": "health-probe.staging.sindustries.co.nz",
       "production": "health-probe.sindustries.co.nz",
       "providerFallback": "sindustries-health-probe.fly.dev",
       "cnameTargets": {
         "staging": "sindustries-health-probe-staging.fly.dev",
-        "production": "sindustries-health-probe.fly.dev"
+        "production": "sindustries-health-probe-production.fly.dev"
       }
     },
     {

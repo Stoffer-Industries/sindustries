@@ -9,7 +9,7 @@
 #
 # PROVISIONING
 # -------------
-# The platform app and its twelve app-level secrets are provisioned HERE,
+# The platform app and its fifteen app-level secrets are provisioned HERE,
 # from the staging GitHub environment secrets, by
 # infra/cloud/platform/platform-provision-secrets.mjs. That mapping is the
 # source of record: the live staging values are not readable from a
@@ -99,7 +99,7 @@ jobs:
           version: 0.4.102
 
       # Provisioning — creates the app when it is absent and registers the
-      # twelve app-level secrets from the staging environment. The values
+      # fifteen app-level secrets from the staging environment. The values
       # are mapped in the script and handed to flyctl without being
       # printed; nothing here echoes a secret value.
       # The database sources are the WRITE-CAPABLE staging DSNs. The

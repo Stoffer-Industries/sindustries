@@ -544,6 +544,8 @@ called_workflows = {
     'gymtrack-deploy.yml',
     'gymtrack-mcp-deploy.yml',
     'deploy-staging-health-probe.yml',
+    'deploy-production-platform.yml',
+    'deploy-production-health-probe.yml',
 }
 docs = {name: load(name) for name in called_workflows}
 for name, doc in docs.items():
@@ -559,6 +561,8 @@ fly_names = {
     'deploy-staging-platform.yml',
     'gymtrack-mcp-deploy.yml',
     'deploy-staging-health-probe.yml',
+    'deploy-production-platform.yml',
+    'deploy-production-health-probe.yml',
 }
 sha_ref = re.compile(r'^superfly/flyctl-actions/setup-flyctl@[0-9a-f]{40}$')
 for name in sorted(fly_names):
@@ -602,7 +606,7 @@ if not platform_preflight:
 elif platform_preflight.get('env', {}).get('FLY_API_TOKEN') != '${{ secrets.FLY_API_TOKEN }}':
     fail('deploy-staging-platform.yml: Fly preflight must read the masked FLY_API_TOKEN secret')
 
-for name in ('deploy-staging-platform.yml',):
+for name in ('deploy-staging-platform.yml', 'deploy-production-platform.yml'):
     deploy_steps = docs[name].get('jobs', {}).get('deploy', {}).get('steps', [])
     deploy_command = '\n'.join(
         str(step.get('run', ''))
@@ -627,7 +631,8 @@ for name in ('deploy-staging-platform.yml', 'deploy-staging-health-probe.yml'):
     if docs[name].get('concurrency', {}).get('cancel-in-progress') is not True:
         fail(f'{name}: staging must cancel superseded deployments')
 
-for name in ('gymtrack-deploy.yml', 'gymtrack-mcp-deploy.yml'):
+for name in ('gymtrack-deploy.yml', 'gymtrack-mcp-deploy.yml',
+              'deploy-production-platform.yml', 'deploy-production-health-probe.yml'):
     if docs[name].get('concurrency', {}).get('cancel-in-progress') is not False:
         fail(f'{name}: production must never cancel an in-progress deployment')
 

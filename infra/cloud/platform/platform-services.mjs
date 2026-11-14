@@ -47,7 +47,35 @@
  * file plus a secret rename — no child, image or deploy change.
  */
 
-export const PLATFORM_APP = 'sindustries-platform-staging';
+import { PLATFORM_ENVIRONMENTS } from './platform-environments.mjs';
+
+/**
+ * The app name for the default (staging) environment.
+ *
+ * The app name is environment-owned, so it comes from the environment
+ * manifest (task fb1240c0) rather than being written here. This export
+ * stays the staging name because every existing consumer — the supervisor,
+ * the migration chain, the deploy workflow — means staging.
+ */
+export const PLATFORM_APP = PLATFORM_ENVIRONMENTS.staging.platformApp;
+
+/**
+ * The platform app name for an environment.
+ *
+ * @param {string} environmentId
+ * @returns {string}
+ */
+export function platformAppFor(environmentId) {
+  const environment = PLATFORM_ENVIRONMENTS[String(environmentId ?? '').trim().toLowerCase()];
+  if (!environment) {
+    throw new Error(
+      `unknown platform environment "${environmentId}" (expected one of: ${Object.keys(
+        PLATFORM_ENVIRONMENTS,
+      ).join(', ')})`,
+    );
+  }
+  return environment.platformApp;
+}
 
 /** Port the in-container nginx router listens on. */
 export const ROUTER_PORT = 8080;

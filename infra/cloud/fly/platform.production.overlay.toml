@@ -1,0 +1,41 @@
+# platform.production.overlay.toml — environment-owned values for the
+# consolidated PRODUCTION platform app.
+#
+# This file is an OVERLAY, not a copy. The platform topology — image,
+# supervisor, router, migration chain, one process group, one HTTP
+# service, VM shape, canary strategy — lives in the shared
+# infra/cloud/fly/platform.fly.toml and is NOT repeated here. Only the
+# values that differ per environment appear below.
+#
+# Render the effective config with:
+#   node infra/cloud/platform/render-fly-config.mjs \
+#     --shared infra/cloud/fly/platform.fly.toml \
+#     --overlay infra/cloud/fly/platform.production.overlay.toml \
+#     --out infra/cloud/fly/platform.production.fly.toml \
+#     --environment production
+#
+# The rendered file is written NEXT TO the shared config on purpose: Fly
+# resolves a config's relative build paths (the Dockerfile path, the build
+# context) against the config file's own directory, so a rendered config
+# in a different directory would deploy a different image. The rendered
+# path is gitignored: it is generated output, never a source file.
+#
+# The renderer refuses any overlay key or table outside `app` and `[env]`,
+# so this file cannot become a second source of truth for the topology.
+#
+# The values below are derived from the environment manifest
+# (infra/cloud/platform/platform-environments.mjs). The contract test
+# infra/cloud/platform/tests/render-fly-config.test.mjs fails if this file
+# and the manifest disagree.
+
+app = 'sindustries-platform-production'
+
+[env]
+  # tasks-api is consumed by the tasks app and mission-control.
+  PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS = 'https://tasks.sindustries.co.nz,https://mission-control.sindustries.co.nz'
+  # budget-api is consumed by mission-control (budget-mobile is a native
+  # client with its own auth path and is not in the CORS scope).
+  PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS = 'https://mission-control.sindustries.co.nz'
+  # content-scheduler-api is consumed by mission-control
+  # (ContentSchedulerTab in apps/mission-control/src/tabs/).
+  PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS = 'https://mission-control.sindustries.co.nz'

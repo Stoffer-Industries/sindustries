@@ -181,15 +181,99 @@ Where an operator should look:
 
 ---
 
+## Production topology (task `fb1240c0`)
+
+Production uses the **same consolidated topology as staging** — one Fly app
+carrying all four services, plus a separate app for the health probe. The
+environment manifest (`infra/cloud/platform/platform-environments.mjs`) is the
+single source of truth for the production app names, and the bootstrap, the
+deploy workflows, the hostname matrix and the secret contract all read it
+from there instead of restating it.
+
+| Fact | Production value | Where it comes from |
+| --- | --- | --- |
+| Platform app | `sindustries-platform-production` | the manifest's `platformApp` |
+| Health-probe app | `sindustries-health-probe-production` | the manifest's `healthProbeApp` |
+| API hostnames | `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz`, `content-scheduler-api.sindustries.co.nz` | `infra/cloud/hostname-matrix.json` |
+| Health hostname | `health-probe.sindustries.co.nz` | `infra/cloud/hostname-matrix.json` |
+| Provision gate (CI) | `PRODUCTION_PLATFORM_PROVISION_ENABLED=true` | the manifest |
+| Deploy gate | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` | the manifest |
+| Migrations gate | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` | the manifest |
+| Fly config | the shared `infra/cloud/fly/platform.fly.toml` plus the production overlay, rendered to a gitignored path | `infra/cloud/fly/platform.production.overlay.toml` |
+
+**Shared fate applies to production exactly as it does to staging.** One
+Machine carries tasks-api, budget-api, content-scheduler-api and the
+auto-post worker, so a crash, an OOM kill or a deploy restart takes all four
+down together; `fly releases rollback` is app-wide and cannot roll one
+service back; per-service scaling is impossible. Read
+[Shared-fate topology (staging)](#shared-fate-topology-staging) for the full
+consequence table — it carries over unchanged, because production deploys
+the same shared topology with a production overlay rather than a
+one-app-per-service shape. The production-only difference is the deployment
+target: the overlay names the production app and the production CORS
+origins, and the renderer refuses an overlay that forks the topology.
+
+**Ownership split.** Rowan owns the repository contracts — the manifest, the
+provisioner, the bootstrap, the deploy workflows, the drift checks and these
+docs. Quinn owns the operator execution — the production Neon branch, the
+Fly apps, the secrets, the DNS records, the spend limit and the deploy
+dispatch — using the credentials registered in the `production` GitHub
+Environment. Tom owns the organisation billing action if the Fly account
+does not allow the spend limit to be set directly. The full operator order
+is Slice D of
+[`docs/specs/production-environment-provisioning-tech-design.md`](../specs/production-environment-provisioning-tech-design.md).
+
+**The spend limit comes before real traffic.** The production app carries a
+live budget and a public API surface, so the organisation/app spend limit
+must be set — and read back — **before** the platform canary deploy or any
+public hostname is enabled. It is not a post-cutover tidy-up: the limit is
+what bounds the blast radius of a runaway production deploy, and the
+health probe must not go out before it either (the operator order deploys
+the platform first and the probe last).
+
+**Credential boundary.** The production credential path is the same rule as
+staging, with the `production` GitHub Environment instead of `staging`: the
+live values (`FLY_API_TOKEN`, the Neon production DSNs, the Upstash
+production Redis URLs, the DNS provider token) are owned and registered by
+Quinn as masked secrets and never enter the repo. The repository carries
+only the *names* the manifest requires (the `PRODUCTION_*` source names) and
+the provisioning contract that maps them onto the app-level `PLATFORM_*`
+secrets. The provisioner refuses a production value that still carries a
+staging/dev hostname, a placeholder or a localhost address, so a staging
+credential cannot be registered on the production app by accident, and the
+dry-run mode prints secret *names* only — never values. See
+[Credential boundary](#credential-boundary) for the full boundary and the
+repair path for a missing `FLY_API_TOKEN`.
+
+**Nothing is live yet.** As of this writing the production environment does
+not exist: no production Fly app, no production Neon branch, no production
+DNS records, no production secrets. Everything above describes the target
+topology and the contract that will create it; the live provisioning
+evidence is Slice D of the tech design, and the operator-facing blocker
+list lives in
+[`docs/cloud/production-blockers.md`](../cloud/production-blockers.md).
+
+---
+
 ## Platform secret provisioning (task `219fb673`)
 
-The consolidated platform app (`sindustries-platform-staging`) needs twelve
-app-level secrets before it can boot: three database URLs, six Redis URLs
-and two approval-service credentials. They are provisioned from the
+The consolidated platform app (`sindustries-platform-staging`) needs fifteen
+app-level secrets before it can boot: three database URLs, six Redis URLs,
+two approval-service credentials, one public base URL and three CORS
+allow-lists. They are provisioned from the
 **staging GitHub environment** by
 `infra/cloud/platform/platform-provision-secrets.mjs`, which the
 `.github/workflows/deploy-staging-platform.yml` workflow runs before the
 deploy.
+
+The provisioner is parameterised by environment
+(`--environment staging|production`, default staging). Every
+environment-owned fact — the Fly app names, the GitHub Environment, the
+secret source names, the schema names, the public base URLs and the CORS
+allow-lists — lives in one place,
+`infra/cloud/platform/platform-environments.mjs`. The table below is the
+staging half of that manifest; the production half differs in the source
+names, the base URLs and the CORS allow-lists.
 
 | Platform secret | Staging environment secret | Note |
 | --- | --- | --- |
@@ -200,6 +284,17 @@ deploy.
 | `PLATFORM_CONTENT_SCHEDULER_API_BASE_URL` | — | public URL, registered as a plain value |
 | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, token wrapped in the `[{token, actor, approvalTypes}]` JSON the services parse |
 | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, same wrapping |
+| `PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.tasksApi`), not a GitHub environment secret |
+| `PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.budgetApi`) |
+| `PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.contentSchedulerApi`) |
+
+**This table is the operator contract, and it matches the supervisor.**
+The three CORS values are not optional: `infra/cloud/platform/platform-services.mjs`
+lists them in each child's `requiredSources`, so the supervisor refuses to
+boot without them. They are registered from the environment manifest
+rather than left to the Fly TOML, because the TOML holds the STAGING
+allow-lists — a production app that inherited them would answer every
+preflight from the wrong origin.
 
 **Every database source is write-capable, and the script fails closed
 without one.** The platform runs `prisma migrate deploy` in its
@@ -392,12 +487,20 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 | --- | --- | --- |
 | mission-control | `cname.vercel-dns.com` | `cname.vercel-dns.com` |
 | tasks-app | `cname.vercel-dns.com` | `cname.vercel-dns.com` |
-| tasks-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.staging.sindustries.co.nz --> | `sindustries-tasks-api.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.sindustries.co.nz --> |
-| budget-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.staging.sindustries.co.nz --> | `sindustries-budget-api.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.sindustries.co.nz --> |
-| content-scheduler-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.staging.sindustries.co.nz --> | `sindustries-content-scheduler-api.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.sindustries.co.nz --> |
-| health-probe | `sindustries-health-probe-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.staging.sindustries.co.nz --> | `sindustries-health-probe.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.sindustries.co.nz --> |
+| tasks-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.staging.sindustries.co.nz --> | `sindustries-platform-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is tasks-api.sindustries.co.nz --> |
+| budget-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.staging.sindustries.co.nz --> | `sindustries-platform-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is budget-api.sindustries.co.nz --> |
+| content-scheduler-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.staging.sindustries.co.nz --> | `sindustries-platform-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.sindustries.co.nz --> |
+| health-probe | `sindustries-health-probe-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.staging.sindustries.co.nz --> | `sindustries-health-probe-production.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.sindustries.co.nz --> |
 
-The staging column differs from the production column because the staging topology differs from production: the three API surfaces are served by the one consolidated platform Fly app (task `219fb673`), and health-probe keeps its own staging Fly app.
+The three API surfaces use one consolidated platform Fly app per environment
+(staging: task `219fb673`; production: task `fb1240c0`). Health-probe keeps its
+own Fly app per environment. The matrix retains each API's legacy per-service
+`providerFallback` for migration and rollback evidence, but those hosts are not
+the target topology. Health-probe likewise retains
+`sindustries-health-probe.fly.dev` <!-- stable-fallback: legacy production provider host retained for migration evidence --> only as its legacy `providerFallback`; its
+production app and production CNAME target are
+`sindustries-health-probe-production` and
+`sindustries-health-probe-production.fly.dev`. <!-- stable-fallback: production provider CNAME target; the stable hostname is health-probe.sindustries.co.nz -->
 
 The Vercel frontends CNAME to Vercel's shared managed custom-domain target in both environments. That target is the same for **every** Vercel project, so the DNS shape carries no environment identity at all for those two surfaces: the staging hostname and the production hostname of one project resolve to byte-identical DNS. The environment separation therefore lives in the Vercel **project** that owns each stable hostname — the staging hostname lives in the staging project, the production hostname in the production project:
 
@@ -531,7 +634,7 @@ The custom domains Vercel serves each project on (production: `mission-control.s
 
 ## Production blockers (task `5cb4a8fe`)
 
-The full production-blockers list — DNS records, TLS certs, Vercel custom domain registration, Vercel env var provisioning, Fly secrets, and the cross-environment safety net — is tracked in [`docs/cloud/production-blockers.md`](../cloud/production-blockers.md). Each blocker has a named owner (Quinn for DNS / TLS / Vercel / Fly secrets; separate tasks for production deploy workflows and production cutover) and a status field; the production deploy workflows and production cutover are explicitly out of scope for `5cb4a8fe` and tracked under tasks `020f423e` and `f2c23e26`.
+The full production-blockers list — DNS records, TLS certs, Vercel custom domain registration, Vercel env var provisioning, Fly secrets, and the cross-environment safety net — is tracked in [`docs/cloud/production-blockers.md`](../cloud/production-blockers.md). Each blocker has a named owner (Quinn for DNS / TLS / Vercel / Fly secrets; separate tasks for production deploy workflows and production cutover) and a status field. The production deploy workflows and the production cutover are explicitly out of scope for `5cb4a8fe`: the deploy workflows ship with task `fb1240c0` (see [Production topology](#production-topology-task-fb1240c0)), and the cutover stays with tasks `020f423e` and `f2c23e26`.
 
 The static checks above are the cross-environment safety net: a staging URL accidentally pasted into a production Vercel environment or production fly.toml fails the cross-env drift check at compile time, not at runtime. Quinn does not need to remember "don't paste staging credentials into production"; the contract makes it impossible to ship without the matching matrix value.
 

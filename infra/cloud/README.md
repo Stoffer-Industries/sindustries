@@ -20,6 +20,7 @@ infra/cloud/
 │   ├── auto-post-worker.Dockerfile
 │   └── platform.Dockerfile     # combined image for all four processes
 ├── platform/                   # Consolidated platform code (task 219fb673)
+│   ├── platform-environments.mjs # environment manifest (staging/production) + separation guards
 │   ├── platform-services.mjs   # service registry + env mapping (single source of truth)
 │   ├── platform-supervisor.mjs # entrypoint: spawns the children + the router
 │   ├── platform-migrate.mjs    # release_command: the three per-service migrations
@@ -31,14 +32,17 @@ infra/cloud/
 │   ├── budget-api.env.example
 │   ├── auto-post-worker.env.example
 │   ├── platform.env.example    # consolidated app's PLATFORM_* secrets (destination names)
-│   └── bootstrap-staging.env.example  # source names read by scripts/bootstrap-staging.sh
+│   ├── bootstrap-staging.env.example  # source names read by scripts/bootstrap-staging.sh
+│   └── bootstrap-production.env.example  # source names read by scripts/bootstrap-production.sh
 ├── bin/                        # Operator-facing deploy/status/rollback wrappers (task 2850c5ac)
 │   ├── deploy                  # Pin-and-deploy a single service
 │   ├── status                  # Check process types + machines across services
 │   ├── rollback                # Roll a single service back to a prior release
 │   └── tests/                  # Stub-flyctl tests for the bin/ scripts
 └── scripts/                    # Owner-supplied operational scripts (Quinn runs locally)
-    └── bootstrap-staging.sh
+    ├── bootstrap-platform.sh   # the shared, environment-aware bootstrap (staging | production)
+    ├── bootstrap-staging.sh    # thin wrapper -> bootstrap-platform.sh --environment staging
+    └── bootstrap-production.sh  # thin wrapper -> bootstrap-platform.sh --environment production
 ```
 
 CI's live staging deploy surfaces are `.github/workflows/deploy-staging-platform.yml` (the consolidated platform app) and `.github/workflows/deploy-staging-health-probe.yml` (the separate health-probe app); `.github/workflows/ci.yml` calls only these two. The four per-service reusable workflows — `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-content-scheduler-api.yml` and `deploy-staging-auto-post-worker.yml` — are retained but orphaned: they are `workflow_call`-only, and nothing calls them since their deploy jobs were removed from `ci.yml` on 2026-11-07, when the four underlying Fly apps were destroyed ahead of the cutover. They stay in the tree until the cutover cleanup in `docs/runbooks/platform-consolidation-rollback.md` §5 deletes them; `tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs` still requires three of them (tasks-api, budget-api, content-scheduler-api) to exist.
@@ -106,6 +110,15 @@ Staging is one app, so there is one deploy:
 #    that mapping — use it rather than writing secrets by hand:
 node infra/cloud/platform/platform-provision-secrets.mjs \
   --app sindustries-platform-staging --org personal
+
+# The provisioner is parameterised by environment (task fb1240c0). The
+# default is staging, so the command above is unchanged. For production,
+# pass the environment id: it selects the app name, the GitHub Environment
+# source names, the schemas, the base URLs and the approval actors, and it
+# turns on the fail-closed guards that refuse a value carrying a
+# staging/dev hostname, a placeholder or a localhost address:
+node infra/cloud/platform/platform-provision-secrets.mjs \
+  --environment production --org personal
 
 # 2. Deploy (CI does this on push to main; manual override via workflow_dispatch)
 fly deploy --config infra/cloud/fly/platform.fly.toml --strategy canary
@@ -217,6 +230,82 @@ The retired per-service names are refused by the script: bootstrapping one
 would recreate an app that must stay destroyed.
 
 The script is idempotent — re-running it does not destroy existing apps.
+
+### Production (task fb1240c0)
+
+Production is the SAME implementation, selected by the environment manifest
+(`infra/cloud/platform/platform-environments.mjs`); no environment fact is
+copied into a script. `bootstrap-staging.sh` and `bootstrap-production.sh`
+are thin wrappers over `bootstrap-platform.sh --environment staging|production`.
+
+| | staging | production |
+|---|---|---|
+| Entry point | `infra/cloud/scripts/bootstrap-staging.sh` | `infra/cloud/scripts/bootstrap-production.sh` |
+| Local env file (gitignored) | `infra/cloud/.env.local` | `infra/cloud/.env.production.local` |
+| Source contract (placeholders only) | `infra/cloud/env/bootstrap-staging.env.example` | `infra/cloud/env/bootstrap-production.env.example` |
+| Operator contract | this file | `docs/cloud/production-source-contract.md` |
+| Platform app | `sindustries-platform-staging` | `sindustries-platform-production` |
+| Health-probe app | `sindustries-health-probe-staging` | `sindustries-health-probe-production` |
+| Deploy gate | `STAGING_PLATFORM_DEPLOY_ENABLED=true` | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` |
+| Provision gate (CI) | — | `PRODUCTION_PLATFORM_PROVISION_ENABLED=true` |
+| Migrations gate | `STAGING_PLATFORM_MIGRATIONS_ENABLED=true` | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` |
+| Fly config | the shared `infra/cloud/fly/platform.fly.toml` | the shared config + `platform.production.overlay.toml`, rendered to `platform.production.fly.toml` (gitignored) |
+
+Production-specific properties, all enforced before anything is written:
+
+- The app name is NOT overridable: the environment is one app, and the
+  per-service apps are never created.
+- The local env file is PARSED with an allow-list, never sourced into the
+  script's shell. It contributes the source keys and the Fly org; the
+  environment, the app, the gates and the facts are the manifest's and
+  are `readonly` in the script, so a copy of the staging env file cannot
+  point the production bootstrap at staging.
+- A value that still carries a staging/dev hostname, a placeholder or a
+  localhost address is REFUSED by the provisioner before any Fly mutation
+  (the bootstrap runs the provisioner in `--dry-run` mode first).
+- The deploy is gated twice: `--deploy` AND the environment's deploy gate
+  variable. The migrations carry their own gate, because they change the
+  database.
+- The effective Fly config is the shared topology plus a small overlay
+  (app name, CORS origins, probe cadence). An overlay may set `app` and
+  the five environment-owned `[env]` keys and nothing else, so it cannot
+  fork the platform topology; and the overlay's app name must be one of
+  the environment's own apps, so a stale overlay cannot deploy
+  production to staging.
+
+Production live provisioning (create the Neon branch, create the app, set
+the spend limit, publish DNS) is the operator sequence in
+`docs/specs/production-environment-provisioning-tech-design.md` Slice D.
+
+#### Production bootstrap / deploy / rollback index
+
+| Step | Command | Owner | Gate |
+| --- | --- | --- | --- |
+| Bootstrap the production app (local, once) | `infra/cloud/scripts/bootstrap-production.sh` | Quinn | the bootstrap refuses to write until the provisioner's dry-run passes; the deploy step additionally needs the deploy gate variable to be `true` |
+| Register the production app-level secrets | `infra/cloud/platform/platform-provision-secrets.mjs --environment production` | Quinn | refuses a value that still carries a staging/dev hostname, a placeholder or a localhost address |
+| Provision in CI | `.github/workflows/deploy-production-platform.yml` | CI | `PRODUCTION_PLATFORM_PROVISION_ENABLED=true` |
+| Deploy the production platform | `.github/workflows/deploy-production-platform.yml` | CI | `PRODUCTION_PLATFORM_DEPLOY_ENABLED=true` |
+| Deploy the production health probe | `.github/workflows/deploy-production-health-probe.yml` | CI | `PRODUCTION_HEALTH_PROBE_DEPLOY_ENABLED=true` |
+| Run the production migrations | the migrations job of `.github/workflows/deploy-production-platform.yml` | CI | `PRODUCTION_PLATFORM_MIGRATIONS_ENABLED=true` |
+| Re-read the effective production facts | `node infra/cloud/platform/platform-environment-facts.mjs --environment production` | anyone | read-only; prints names and flags, never secret values |
+| Prove the production Neon treatment (AC2) | `node tests/cloud/scripts/check-production-neon-evidence.mjs <evidence-file>` | Quinn | the gate fails closed unless the redacted evidence proves the three schemas, one write-capable role per schema, a non-empty IP allowlist, and denied staging/dev connections; the contract is `docs/cloud/production-neon-contract.md` |
+| Roll back a bad production release | `fly releases rollback --app sindustries-platform-production` | Quinn | app-wide: one Machine carries all four services |
+
+The production Neon treatment — the branch, its three schemas, the service
+roles that carry the DSNs, and the connectivity restriction — is contracted
+in `docs/cloud/production-neon-contract.md`, and `tests/cloud/scripts/check-production-neon-evidence.mjs`
+is the gate that decides whether a redacted evidence artifact actually
+proves it.
+
+Rollback for production is app-wide for the same reason staging's is — the
+production platform is one Machine carrying four services, so
+`fly releases rollback` restores the whole platform to a prior image and
+cannot roll one service back. The full sequence is in
+`docs/runbooks/platform-consolidation-rollback.md`. The production topology,
+its shared-fate consequences, the spend-limit rule and the credential
+boundary are written up in `docs/systems/cloud-platform.md`
+("Production topology"); the operator-facing blocker list is
+`docs/cloud/production-blockers.md`.
 
 
 ## PR strategy
