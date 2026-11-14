@@ -610,10 +610,27 @@ pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         // sweep drain a multi-entry array across multiple stage calls.
         // `workflow_attention_owner` already handles replacement of a stale
         // Quinn/Ash/Tom head in any other state via the `Some(desired)` arm.
+        //
+        // Both disjuncts below are additionally scoped to the *only* status
+        // under which `workflow_attention_owner` would ever have assigned
+        // Quinn for that specific reason (`ready` for the tech-design gate,
+        // `doing` for the capability-extension handoff). Without that status
+        // guard, `tech_design_approved_structured`/`tech_design_waived` are
+        // historical facts that stay true forever once a task's tech design
+        // is approved -- so on a `doing` task they silently satisfied (and
+        // therefore stripped) *any* Quinn row at position 0, including a
+        // genuine, unrelated, reason-bearing Quinn escalation added while the
+        // task sat in `doing` (task `5cb4a8fe`: Rowan's "Quinn must decide
+        // which Vercel project owns the two hostnames" row was dropped by the
+        // very next Task Lobsters cron sweep, twice, on 2026-11-11 and
+        // 2026-11-12/13, because tech design had been approved back on
+        // 2026-10-07 and never stopped being true).
         "Quinn" => {
-            task_approvals::qa_agent_deferred_waiting_on_capability_extension(task)
-                || product_spec_parsing::tech_design_approved_structured(task)
-                || product_spec_parsing::tech_design_waived(task)
+            (task.status == "doing"
+                && task_approvals::qa_agent_deferred_waiting_on_capability_extension(task))
+                || (task.status == "ready"
+                    && (product_spec_parsing::tech_design_approved_structured(task)
+                        || product_spec_parsing::tech_design_waived(task)))
         }
         "Ash" => task_approvals::qa_agent_verified(task),
         // Tom owns the accepted gate only once the task reaches acceptance.
@@ -1116,6 +1133,65 @@ mod tests {
     fn managed_owner_reason_satisfied_quinn_requires_approved_tech_design() {
         let task = task_with_status("ready");
         assert!(!managed_owner_reason_satisfied(&task, "Quinn"));
+    }
+
+    #[test]
+    fn managed_owner_reason_satisfied_quinn_tech_design_check_is_scoped_to_ready() {
+        // Regression for task `5cb4a8fe`: a `doing` task whose tech design was
+        // approved long ago (a permanent historical fact) must NOT satisfy an
+        // unrelated Quinn row added later for a completely different reason
+        // (e.g. "decide which Vercel project owns these hostnames"). Before
+        // this fix, `tech_design_approved_structured` alone made this true on
+        // every `doing` task forever after approval, so the Task Lobsters cron
+        // sweep silently stripped any Quinn escalation on the very next tick.
+        let mut task = task_with_status("doing");
+        task.approvals = vec![TaskApproval {
+            approval_type: "tech_design".to_string(),
+            state: "approved".to_string(),
+            ..Default::default()
+        }];
+        assert!(product_spec_parsing::tech_design_approved_structured(&task));
+        assert!(!managed_owner_reason_satisfied(&task, "Quinn"));
+    }
+
+    #[test]
+    fn managed_owner_reason_satisfied_quinn_capability_extension_check_is_scoped_to_doing() {
+        // Mirror of the above for the other disjunct: the capability-extension
+        // handoff only ever applies on a `doing` task, so it must not satisfy
+        // (and thereby strip) a Quinn row on any other status even if the
+        // dependency/deferral shape happens to match.
+        let mut task = task_with_status("ready");
+        task.dependency_blocked = true;
+        task.approvals = vec![TaskApproval {
+            approval_type: "qa_agent".to_string(),
+            state: "approved".to_string(),
+            note: Some("deferred: capability gap".to_string()),
+            ..Default::default()
+        }];
+        assert!(!managed_owner_reason_satisfied(&task, "Quinn"));
+    }
+
+    #[test]
+    fn reconciled_attention_owners_preserves_an_unrelated_quinn_escalation_on_a_doing_task_with_approved_tech_design(
+    ) {
+        // End-to-end regression for task `5cb4a8fe`: a `doing` task with tech
+        // design approved and no implementer PRs (so `workflow_attention_owner`
+        // resolves to `None`) must still keep a genuine Quinn row at position 0
+        // instead of silently draining it on the next sweep.
+        let mut task = task_with_status("doing");
+        task.assignee = Some("Rowan".to_string());
+        task.attention_owners = vec!["Quinn".to_string()];
+        task.attention_owner_details = vec![crate::TaskAttentionOwner {
+            owner: "Quinn".to_string(),
+            added_by: Some("Rowan".to_string()),
+            note: Some("Quinn must decide which Vercel project owns the two stable frontend hostnames".to_string()),
+        }];
+        task.approvals = vec![TaskApproval {
+            approval_type: "tech_design".to_string(),
+            state: "approved".to_string(),
+            ..Default::default()
+        }];
+        assert_eq!(reconciled_attention_owners(&task), vec!["Quinn".to_string()]);
     }
 
     #[test]
