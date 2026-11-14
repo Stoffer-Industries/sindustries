@@ -158,10 +158,10 @@ else
   ok "collector config does not interpolate the raw GRAFANA_CLOUD_OTLP_HEADERS value"
 fi
 
-if grep -q 'GRAFANA_CLOUD_OTLP_AUTHORIZATION' "$COLLECTOR_CONFIG"; then
-  ok "collector config reads the parsed Authorization value"
+if grep -Fqx '      Authorization: ${env:GRAFANA_CLOUD_OTLP_AUTHORIZATION}' "$COLLECTOR_CONFIG"; then
+  ok "collector config uses the exact parsed Authorization interpolation"
 else
-  fail "collector config does not read GRAFANA_CLOUD_OTLP_AUTHORIZATION"
+  fail "collector config does not use the exact parsed Authorization interpolation"
 fi
 
 # The local exporters must be gone.
