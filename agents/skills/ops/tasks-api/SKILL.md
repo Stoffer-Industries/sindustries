@@ -44,7 +44,10 @@ The client is a **single file at the skill root** — not inside `scripts/`:
 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py
 ```
 
-`scripts/` holds only `agent_task_queue.py` and `pending_tech_design_approvals.py`. A path such as `.../tasks-api/scripts/tasks_api_client.py` does not exist and fails with `No such file or directory`.
+`scripts/` holds `agent_task_queue.py` and `pending_tech_design_approvals.py`, plus a **deprecated forwarding shim** at
+`scripts/tasks_api_client.py`. That shim execs the maintained client with the same argv and exit code and prints a
+deprecation notice on stderr, so a caller still composing the old path gets a working read instead of an opaque
+`No such file or directory` (exit 2). It will be removed; use the skill-root path above.
 
 `--id` is **required** by every single-task subcommand and must be the full task UUID:
 
