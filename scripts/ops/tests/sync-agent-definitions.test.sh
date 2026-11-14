@@ -121,14 +121,29 @@ EOF
 # Fallback path: when the per-agent token env var is unset, the shim must
 # still unset GITHUB_TOKEN/GH_TOKEN and retain the resolved agent's
 # GH_CONFIG_DIR so `gh` cannot fall through to the host-default keyring.
-out=$(env -i HOME="$TMP_SHIM_HOME" PATH="$SHIM_STUB_DIR:/usr/bin:/bin" bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")
+#
+# The ambient credentials are seeded INSIDE the isolated environment on purpose.
+# With `env -i` alone there is nothing to unset, so `GITHUB_TOKEN=<unset>`
+# would be satisfied by the empty environment rather than by the shim's
+# `env -u GITHUB_TOKEN -u GH_TOKEN` — a shim that dropped the `env -u`
+# entirely would still pass. Seeding them means the assertions can only hold
+# if the shim actually stripped an inherited credential, which is the
+# property this check exists to prove.
+out=$(env -i HOME="$TMP_SHIM_HOME" PATH="$SHIM_STUB_DIR:/usr/bin:/bin" \
+  GITHUB_TOKEN=ambient-token GH_TOKEN=ambient-token \
+  bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")
 printf '%s\n' "$out" | grep -q '^argv=pr view 1$'
 printf '%s\n' "$out" | grep -q '^GITHUB_TOKEN=<unset>$'
 printf '%s\n' "$out" | grep -q '^GH_TOKEN=<unset>$'
 printf '%s\n' "$out" | grep -q "^GH_CONFIG_DIR=$TMP_SHIM_HOME/.config/gh-rowan$"
 # Full shim path: when ROWAN_GITHUB_TOKEN is set, the shim must rewrite
 # GITHUB_TOKEN=unset, GH_TOKEN=$ROWAN_GITHUB_TOKEN, GH_CONFIG_DIR=$HOME/.config/gh-rowan.
-out_with_token=$(env -i HOME="$TMP_SHIM_HOME" PATH="$SHIM_STUB_DIR:/usr/bin:/bin" ROWAN_GITHUB_TOKEN="ghp_rowan_test_token" bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")
+# The ambient GITHUB_TOKEN is seeded here too, so `GITHUB_TOKEN=<unset>`
+# proves the shim stripped it rather than the environment simply lacking it.
+out_with_token=$(env -i HOME="$TMP_SHIM_HOME" PATH="$SHIM_STUB_DIR:/usr/bin:/bin" \
+  GITHUB_TOKEN=ambient-token GH_TOKEN=ambient-token \
+  ROWAN_GITHUB_TOKEN="ghp_rowan_test_token" \
+  bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")
 printf '%s\n' "$out_with_token" | grep -q '^argv=pr view 1$'
 printf '%s\n' "$out_with_token" | grep -q '^GITHUB_TOKEN=<unset>$'
 printf '%s\n' "$out_with_token" | grep -q '^GH_TOKEN=ghp_rowan_test_token$'
