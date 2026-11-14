@@ -1,0 +1,38 @@
+{
+  "environment": "production",
+  "capturedAt": "2026-11-15T00:00:00Z",
+  "database": {
+    "project": "sindustries",
+    "branch": "production",
+    "schemas": ["tasks_api", "budget_api", "content_scheduler"]
+  },
+  "roles": [
+    {
+      "name": "sindustries_tasks_api",
+      "schema": "tasks_api",
+      "canLogin": true,
+      "canWrite": true
+    },
+    {
+      "name": "sindustries_budget_api",
+      "schema": "budget_api",
+      "canLogin": true,
+      "canWrite": true
+    },
+    {
+      "name": "sindustries_content_scheduler",
+      "schema": "content_scheduler",
+      "canLogin": true,
+      "canWrite": true
+    }
+  ],
+  "connectivity": {
+    "ipAllowlistConfigured": true,
+    "ipAllowlistEntryCount": 2,
+    "stagingRoleConnectDenied": true,
+    "devRoleConnectDenied": true
+  },
+  "redaction": {
+    "containsSecretValues": false
+  }
+}
