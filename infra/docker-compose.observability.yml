@@ -1,16 +1,16 @@
 # Project name and host ports are set per-mode by mode-env.sh / Tiltfile.
-# Internal container networking uses Docker DNS names (tempo, otel-collector, prometheus).
+#
+# Grafana Cloud is the telemetry destination (task a7938522). The collector is
+# the single local OTLP receiver and forwards every span and metric to the
+# tenant; the local Tempo, Prometheus and Grafana services were decommissioned
+# once the live cloud-ingestion gate passed.
+#
+# The collector's export credentials come from `infra/cloud/observability/.env.local`
+# and are resolved into the two environment variables below by
+# `scripts/dev/grafana-cloud-otel-env.sh`, which the supported startup path
+# (`make up` / `scripts/dev/up.sh`) runs before the stack comes up.
 
 services:
-  tempo:
-    image: grafana/tempo:2.6.0
-    command: ["-config.file=/etc/tempo/tempo.yaml"]
-    volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-    ports:
-      - "${TEMPO_PORT:-3200}:3200"
-    restart: unless-stopped
-
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.115.1
     command: ["--config=/etc/otel-collector/config.yaml"]
@@ -19,36 +19,13 @@ services:
     ports:
       - "${OTLP_GRPC_PORT:-4317}:4317"
       - "${OTLP_HTTP_PORT:-4318}:4318"
-    depends_on:
-      - tempo
-    restart: unless-stopped
-
-  prometheus:
-    image: prom/prometheus:v2.55.1
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
-    depends_on:
-      - otel-collector
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:11.4.0
+    # Grafana Cloud export credentials. These are exported into the process
+    # environment by `scripts/dev/grafana-cloud-otel-env.sh`, which the
+    # supported startup path (`make up` / `scripts/dev/up.sh`) runs before the
+    # stack comes up. Starting this compose file directly requires the same
+    # two variables to be set, or the collector has no cloud endpoint to
+    # forward to.
     environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_USERS_DEFAULT_THEME: dark
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-    ports:
-      - "${GRAFANA_PORT:-3000}:3000"
-    depends_on:
-      - prometheus
-      - tempo
+      GRAFANA_CLOUD_OTLP_ENDPOINT: "${GRAFANA_CLOUD_OTLP_ENDPOINT:-}"
+      GRAFANA_CLOUD_OTLP_AUTHORIZATION: "${GRAFANA_CLOUD_OTLP_AUTHORIZATION:-}"
     restart: unless-stopped

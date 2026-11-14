@@ -52,15 +52,26 @@ processors:
     send_batch_size: 1024
 
 exporters:
-  otlp/tempo:
-    endpoint: tempo:4317
-    tls:
-      insecure: true
-  prometheus:
-    endpoint: 0.0.0.0:8889
-    const_labels:
-      source: otel-collector
-    resource_to_telemetry_conversion:
+  # Grafana Cloud is the telemetry destination for every local span and metric.
+  # The collector stays the single local OTLP receiver; only the forwarding
+  # target changed.
+  #
+  # The endpoint is the `/otlp`-prefixed gateway path, so the exporter posts to
+  # `<endpoint>/v1/traces`. Both values are exported into the collector's
+  # process environment by `scripts/dev/grafana-cloud-otel-env.sh`.
+  #
+  # Never interpolate `GRAFANA_CLOUD_OTLP_HEADERS` here. That value is an OTLP
+  # exporter header *string* (`Authorization=Basic <base64>`), not a header
+  # value; using it directly would send `Authorization: Authorization=Basic …`
+  # and the tenant would answer 401. The helper parses it into a real
+  # Authorization value first.
+  otlphttp/grafana_cloud:
+    endpoint: ${env:GRAFANA_CLOUD_OTLP_ENDPOINT}
+    headers:
+      Authorization: ${env:GRAFANA_CLOUD_OTLP_AUTHORIZATION}
+    sending_queue:
+      enabled: true
+    retry_on_failure:
       enabled: true
 
 service:
@@ -71,11 +82,11 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/tempo, spanmetrics]
+      exporters: [otlphttp/grafana_cloud, spanmetrics]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus]
+      exporters: [otlphttp/grafana_cloud]
     metrics/spanmetrics:
       receivers: [spanmetrics]
-      exporters: [prometheus]
+      exporters: [otlphttp/grafana_cloud]
