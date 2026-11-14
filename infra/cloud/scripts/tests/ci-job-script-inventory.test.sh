@@ -265,7 +265,6 @@ NOT_RUN_BY_CI = frozenset({
     'tests/cloud/tests/check-cors-origin-matrix.test.mjs',
     'tests/cloud/tests/check-deploy-workflow-stable-hostname.test.mjs',
     'tests/cloud/tests/check-stable-url-fallbacks.test.mjs',
-    'tests/cloud/tests/check-vercel-env-matrix.test.mjs',
     'tests/cloud/tests/staging-db-migration-failure-drill.test.sh',
 })
 

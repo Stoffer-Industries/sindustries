@@ -413,7 +413,7 @@ The Vercel frontends CNAME to Vercel's shared managed custom-domain target in bo
 **AC2 for the two frontends is verified at two different levels, and the weaker one must not be overstated:**
 
 - **Repo-verified (contract):** the staging stable hostname is bound to the surface's staging Vercel project and the production stable hostname to a different one; the staging project's `VITE_*` API base URLs point at the staging API hostnames (asserted by `tests/cloud/scripts/check-vercel-env-matrix.mjs`).
-- **Operator-verified (Vercel — not repo-verified):** that the bound project is actually serving a deployment built from the expected branch (`mission-control-vercel` for the staging projects, `main` for the production projects).
+- **Operator-verified (Vercel — not repo-verified):** that the bound project is actually serving a deployment built from the expected branch (`main` for both the staging and the production projects). The `mission-control-vercel` branch named by the earlier mission-control-vercel-deployment tech design was never created in the repository; the deployments serving the stable staging hostnames were built from `main`, commit 7ba14896.
 
 The HTTPS check does **not** distinguish a staging deployment from a production one — a production build served under the staging hostname returns a healthy 200. It is a reachability and certificate check, not an environment-separation check, and the docs must not describe it as the separator.
 
