@@ -7,13 +7,13 @@
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** Staging target on Fly.io (Sydney region); production rollout is tracked under the broader cloud migration plan
 
-> **Naming history:** this workstream was originally scoped as a separate "Hosted Observability and Migration Alerts" spec (task `4b3d6e9c`). The artefacts land under `infra/cloud/observability/` plus two handover docs (`docs/systems/observability.md` and `infra/cloud/observability/README.md`); the prior per-alert response runbook (`docs/runbooks/cloud-alerts-response.md`) was retired in PR #583 — its per-alert content lives in the AC3/AC4 sections of `docs/specs/hosted-observability-migration-alerts-tech-design.md` and in this document's "Alert ownership" + "Runbook for each alert" sections. The local observability stack documented in `infra/docker-compose.observability.yml` continues to operate the developer's local machine unchanged.
+> **Naming history:** this workstream was originally scoped as a separate "Hosted Observability and Migration Alerts" spec (task `4b3d6e9c`). The artefacts land under `infra/cloud/observability/` plus two handover docs (`docs/systems/observability.md` and `infra/cloud/observability/README.md`); the prior per-alert response runbook (`docs/runbooks/cloud-alerts-response.md`) was retired in PR #583 — its per-alert content lives in the AC3/AC4 sections of `docs/specs/hosted-observability-migration-alerts-tech-design.md` and in this document's "Alert ownership" + "Runbook for each alert" sections. The local observability stack documented in `infra/docker-compose.observability.yml` was decommissioned on 2026-11-15 (task `a7938522`): the local Tempo, Prometheus and Grafana services were removed, and the local collector now forwards every span and metric to the Grafana Cloud tenant. See "Local collector → Grafana Cloud" in `infra/cloud/observability/README.md`.
 
 ---
 
 ## Context
 
-SIndustries runs a multi-service Node/TypeScript stack against a Postgres + Redis back-end. The existing local observability stack (`infra/docker-compose.observability.yml` + `packages/otel-node` + `infra/grafana/`) ships traces, metrics, and dashboards to the developer's machine. That stack is a useful dev experience, but it does not satisfy the cloud migration acceptance criteria because:
+SIndustries runs a multi-service Node/TypeScript stack against a Postgres + Redis back-end. Historically a local observability stack (`infra/docker-compose.observability.yml` + `packages/otel-node` + `infra/grafana/`) shipped traces, metrics, and dashboards to the developer's machine. That stack was decommissioned on 2026-11-15 (task `a7938522`): the local Tempo, Prometheus and Grafana services are gone, and the local collector forwards to the Grafana Cloud tenant instead. The hosted stack satisfies the cloud migration acceptance criteria because:
 
 - All four components run on the local machine; cloud services that emit signals from the staging/production region never reach them.
 - No alert evaluation or documented ownership exists beyond the Grafana dashboard; there is no Alertmanager or external notification integration.

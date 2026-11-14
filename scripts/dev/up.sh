@@ -10,6 +10,17 @@ source "$ROOT_DIR/scripts/dev/mode-env.sh"
 OBSERVABILITY="${1:-${OBSERVABILITY:-1}}"
 export OBSERVABILITY
 
+# Grafana Cloud export environment.
+#
+# The local collector forwards every span and metric to Grafana Cloud, so an
+# unusable credential is a startup error, not a runtime surprise. Resolve it
+# before any container is created: the helper fails closed with a secret-free
+# message and exports the two values the collector's compose service reads.
+if [[ "$OBSERVABILITY" == "1" ]]; then
+  # shellcheck source=./grafana-cloud-otel-env.sh
+  source "$ROOT_DIR/scripts/dev/grafana-cloud-otel-env.sh"
+fi
+
 # Pin DOCKER_HOST to colima's socket. Without this,
 # /var/run/docker.sock often symlinks to Docker Desktop on hosts that have
 # it installed (e.g. this Mac mini), and `docker info` returns Docker
@@ -283,7 +294,7 @@ echo "  App: http://localhost:$TASKS_APP_PORT"
 echo "  Mission Control: http://localhost:$MISSION_CONTROL_PORT"
 echo "  Postgres: localhost:$POSTGRES_PORT/$POSTGRES_DB"
 if [[ "$OBSERVABILITY" == "1" ]]; then
-  echo "  Observability: Grafana http://localhost:$GRAFANA_PORT (Tempo :$TEMPO_PORT, Prometheus :$PROMETHEUS_PORT, OTLP :$OTLP_HTTP_PORT)"
+  echo "  Observability: OTLP :$OTLP_HTTP_PORT -> Grafana Cloud ($GRAFANA_CLOUD_OTLP_ENDPOINT)"
 fi
 
 cd "$ROOT_DIR"
