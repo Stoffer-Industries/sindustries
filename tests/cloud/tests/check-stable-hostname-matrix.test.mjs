@@ -172,27 +172,27 @@ test('synthetic matrix whose staging CNAME target aliases the surface own provid
   }
 });
 
-test('synthetic matrix that binds the staging and production hostnames to the same Vercel environment fails the check', async () => {
+test('synthetic matrix that binds the staging and production hostnames to the same Vercel project fails the check', async () => {
   // AC2 for the two Vercel frontends. A Vercel custom domain CNAMEs to
   // the same shared managed target in every project, so the DNS shape
   // carries no environment identity — the separation lives in which
-  // Vercel environment the custom domain is bound to. Binding both
-  // stable hostnames to the same environment would serve one environment
-  // under both hostnames.
+  // Vercel PROJECT owns each stable hostname. Binding both stable
+  // hostnames to the same project would serve one environment under
+  // both hostnames.
   const dir = mkdtempSync(join(tmpdir(), 'check-stable-hostname-matrix-'));
   try {
     const matrix = JSON.parse(readFileSync(REAL_MATRIX, 'utf8'));
     const surface = matrix.surfaces.find((s) => s.id === 'mission-control');
-    surface.vercelEnvironments.staging = surface.vercelEnvironments.production;
+    surface.vercelStagingProject = surface.vercelProject;
     const matrixPath = join(dir, 'hostname-matrix.json');
     writeFileSync(matrixPath, JSON.stringify(matrix, null, 2));
     let err;
     try {
       await exec('node', [SCRIPT, matrixPath, REAL_FLY_DIR, REPO_ROOT]);
     } catch (e) { err = e; }
-    assert.ok(err, 'expected the script to fail when both stable hostnames bind to the same Vercel environment');
+    assert.ok(err, 'expected the script to fail when both stable hostnames bind to the same Vercel project');
     const stderr = (err.stderr || '') + (err.stdout || '');
-    assert.match(stderr, /must be different Vercel environments/, `expected a Vercel environment-binding error, got: ${stderr}`);
+    assert.match(stderr, /must be different Vercel projects/, `expected a Vercel project-binding error, got: ${stderr}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

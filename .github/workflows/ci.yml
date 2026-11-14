@@ -1080,6 +1080,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # This job runs node --test suites (the stable-hostname harness
+      # contract tests among them), so it pins the same Node major the rest
+      # of the workflow declares instead of inheriting the runner image's
+      # ambient Node.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Run gh-with-agent-token shim tests
         run: bash agents/lib/tests/test_gh_with_agent_token.sh
 
@@ -1124,6 +1133,24 @@ jobs:
       # orphan guard sees it as executed.
       - name: Run stable-hostname matrix contract test
         run: node --test tests/cloud/tests/check-stable-hostname-matrix.test.mjs
+
+      # Task 5cb4a8fe AC3 (Vercel half): infra/cloud/vercel-env-matrix.json
+      # records the VITE_* value contract for the two in-scope Vercel
+      # frontends, and check-vercel-env-matrix.mjs asserts that every value
+      # is derived from the staging/production hostname in the hostname
+      # matrix, that a project's customDomain matches the surface it serves,
+      # and that a project cannot claim a hostname that is not a frontend
+      # surface's. The check was not wired into any job, so the invariant it
+      # exists to enforce was not in the merge gate: a `servesEnvironment`
+      # that contradicted its own custom domain passed CI. Run the checker
+      # and its contract test explicitly so both are in the gate. Run by
+      # explicit path so the repository-wide contract-test orphan guard sees
+      # them as executed.
+      - name: Check Vercel env matrix
+        run: node tests/cloud/scripts/check-vercel-env-matrix.mjs
+
+      - name: Run Vercel env matrix contract test
+        run: node --test tests/cloud/tests/check-vercel-env-matrix.test.mjs
 
       # Task 5cb4a8fe AC6 static check: docs/cloud/production-blockers.md is
       # the AC6 evidence register — the only place that tells an operator
@@ -1186,6 +1213,17 @@ jobs:
       # safe to run on every PR without staging credentials.
       - name: Run stable-hostname verification harness tests
         run: node --test tests/cloud/tests/stable-hostname-verification.test.mjs
+
+      # Task 5cb4a8fe AC5: the live hostname verification workflow is the
+      # only path that can produce a public-internet verdict for the stable
+      # hostnames — the operator host sits behind a secret egress proxy, so
+      # every request from there is an observer-side block rather than a
+      # deployment verdict. This contract test keeps that workflow
+      # dispatch-only, credential-free and proxy-free, so it cannot start
+      # firing unattended or reading a token later. Offline: it reads the
+      # workflow file and makes no call.
+      - name: Run stable-hostname live-verify workflow contract test
+        run: node --test tests/cloud/tests/stable-hostname-live-verify-workflow.test.mjs
 
       # Task 5cb4a8fe AC5 static check: invoke the harness in dry-run
       # mode and validate the emitted JSON against the committed

@@ -10,7 +10,9 @@ import { reportAuthError } from './browserTelemetry.js';
  * `.status` (the HTTP status when the SDK surfaces one). The error
  * `.message` is user-facing and is intentionally NOT sent to
  * telemetry — only the safe code + status go out, matching the
- * Clerk implementation's redaction contract.
+ * Clerk implementation's redaction contract. That contract is
+ * structural: `reportAuthError` takes a context object only, so the
+ * envelope cannot reach the serializer even if a future caller tried.
  */
 function supabaseSafeContext(error, operation) {
   return {
@@ -100,13 +102,13 @@ export function SupabaseAuthProvider({ children }) {
       loading,
       async signIn(email, password) {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) reportAuthError(error, supabaseSafeContext(error, 'signin'));
+        if (error) reportAuthError(supabaseSafeContext(error, 'signin'));
         return { data, error };
       },
       async signUp(email, password) {
         const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) {
-          reportAuthError(error, supabaseSafeContext(error, 'signup'));
+          reportAuthError(supabaseSafeContext(error, 'signup'));
           return { data: null, error };
         }
         // A project with email confirmation enabled returns a user but NO
@@ -147,7 +149,7 @@ export function SupabaseAuthProvider({ children }) {
           type: 'signup'
         });
         if (error) {
-          reportAuthError(error, supabaseSafeContext(error, 'verify_signup_code'));
+          reportAuthError(supabaseSafeContext(error, 'verify_signup_code'));
           return { data: null, error: new Error(error.message) };
         }
         pendingSignupEmailRef.current = null;
@@ -155,7 +157,7 @@ export function SupabaseAuthProvider({ children }) {
       },
       async signOut() {
         const { error } = await supabase.auth.signOut();
-        if (error) reportAuthError(error, supabaseSafeContext(error, 'signout'));
+        if (error) reportAuthError(supabaseSafeContext(error, 'signout'));
         return { error };
       },
       /**

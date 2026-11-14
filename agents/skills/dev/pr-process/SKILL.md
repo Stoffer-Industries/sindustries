@@ -62,6 +62,36 @@ gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-bra
 
 **Repo merge policy:** sindustries only accepts `rebase` merge (squash and merge-commit are rejected by repo settings). Use `--rebase`.
 
+#### When the merge is refused because the branch is behind `main`
+
+`mergeStateStatus: BEHIND` means the head branch is behind the base branch, and
+`gh pr merge --rebase` then refuses with *"the head branch is not up to date
+with the base branch"* even though the approval is in and every check is green.
+The unified queue still lists such a PR under `mergeCandidates`, so this
+refusal is the normal outcome of a branch that `main` has moved past — it is
+not a reason to abandon the merge or to wait for a new review.
+
+**When an approval is live, refresh the branch with GitHub's update-branch
+operation.** It merges the base into the head branch, leaves the reviewed
+commits and the reviewed diff untouched, and keeps the approval:
+
+```bash
+gh api -X PUT repos/Stoffer-Industries/sindustries/pulls/<number>/update-branch \
+  -f expected_head_sha=<current head sha>
+```
+
+Then wait for CI to re-run green on the new head, read back
+`mergeStateStatus` and `reviewDecision` (the refresh adds a commit to the head,
+so confirm the approval is still reported), and merge as above.
+
+**Do not use a local rebase plus `git push --force-with-lease` while an
+approval exists.** A force-push rewrites the very commits the approval was
+given on, and this repository's `main` ruleset sets
+`dismiss_stale_reviews_on_push: true`, so the reviewed state can be dismissed
+out from under the merge. Reserve the rebase + force-push path for a genuine
+content conflict (the `authoredPrConflict` case), where the reviewer has to
+re-review the branch anyway.
+
 **Auth — always use your own token explicitly:** The default `gh` config has no token and will fail. Check your TOOLS.md for the correct config or env var to use. Before any write operation, verify you are authenticated as yourself:
 
 ```bash

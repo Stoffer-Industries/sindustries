@@ -200,7 +200,15 @@ function columnIndex(header, patterns) {
 /** The matrix's contract identifier for a surface, or null for an unknown kind. */
 function contractIdentifierFor(surface) {
   if (surface.kind === 'frontend') {
-    return { field: 'vercelProject', value: surface.vercelProject ?? null };
+    // The staging project is load-bearing under the per-project model:
+    // it is the project that actually serves the staging hostname, so
+    // the "actually bound" column of the §3 table is checked against it.
+    return {
+      field: 'vercelProject',
+      value: surface.vercelProject ?? null,
+      stagingField: 'vercelStagingProject',
+      stagingValue: surface.vercelStagingProject ?? null,
+    };
   }
   if (surface.kind === 'api') {
     return { field: 'flyApp', value: surface.flyApp ?? null };
@@ -471,6 +479,39 @@ function main() {
       errors.push(
         `${id}: no row naming ${hostname} carries the matrix ${identifier.field} \`${identifier.value}\` as an exact code span — the register and ${MATRIX_PATH} disagree about which ${identifier.field} this hostname belongs to`
       );
+    }
+
+    // (6) The "actually bound" column names the live staging project.
+    // Under the per-project model that column is load-bearing: it is
+    // where an operator learns WHICH project serves the staging
+    // hostname. The matrix records the staging project beside the
+    // production one, so the cell must carry the matrix's
+    // vercelStagingProject exactly — a rename in the matrix cannot leave
+    // the register pointing an operator at a project that does not exist.
+    if (identifier.stagingValue) {
+      for (const row of namingRows) {
+        const boundIdx = row.header.findIndex((heading) => BOUND_COLUMN_RE.test(heading));
+        if (boundIdx === -1) continue;
+        const spans = row.cellSpans[boundIdx] ?? [];
+        if (!spans.includes(identifier.stagingValue)) {
+          errors.push(
+            `${id}: the "actually bound" cell of the row naming ${hostname} must name the matrix ${identifier.stagingField} ` +
+              `\`${identifier.stagingValue}\` as an exact code span — the operator follows that cell to the live project`
+          );
+        }
+        const extras = spans.filter(
+          (span) =>
+            IDENTIFIER_SPAN_RE.test(span) &&
+            span !== identifier.stagingValue &&
+            !NON_IDENTIFIER_SPANS.has(normalise(span))
+        );
+        if (extras.length > 0) {
+          errors.push(
+            `${id}: the "actually bound" cell of the row naming ${hostname} names more than one project/app identifier ` +
+              `(${extras.map((s) => `\`${s}\``).join(', ')}) — it must name exactly the matrix ${identifier.stagingField}`
+          );
+        }
+      }
     }
   }
 

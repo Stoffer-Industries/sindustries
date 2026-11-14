@@ -17,8 +17,9 @@
  *      POSTs (volume cap).
  *   6. A `fetch` rejection in the relay does not throw out of
  *      `reportAuthError` or the global listeners.
- *   7. The payload includes the retained fields only and never the raw
- *      `error.message` (the safe message is what gets sent).
+ *   7. The payload includes the retained fields only. Auth events are
+ *      context-only (`message` and `stack` are null); the generic error path
+ *      retains only the redacted message and stack.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -47,41 +48,75 @@ describe('browserTelemetry', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('redacts email addresses from error messages', () => {
+  it('never lets a Clerk envelope reach the POST body (context-only auth contract)', () => {
     const fetchSpy = globalThis.fetch;
-    const error = new Error('Failed to sign in user foo@bar.com');
-    reportAuthError(error, {
+
+    const SENTINEL_EMAIL = 'sentinel.user@example.invalid';
+    const SENTINEL_TOKEN = 'sentinel_session_token_9f3a';
+    const SENTINEL_SESSION = 'sentinel_session_id_4b2c';
+    const SENTINEL_STACK = 'sentinel_stack_frame_7d1e';
+
+    // A representative Clerk envelope carrying every category the
+    // browser-side redaction patterns do not reliably cover: an address,
+    // a session token, a session id and a stack frame.
+    const clerkEnvelope = {
+      errors: [
+        {
+          code: 'identifier_not_found',
+          message: `Identifier ${SENTINEL_EMAIL} is not registered`,
+          longMessage: `Identifier ${SENTINEL_EMAIL} is not registered`,
+          meta: { session_token: SENTINEL_TOKEN, session_id: SENTINEL_SESSION }
+        }
+      ],
+      status: 404,
+      message: `Identifier ${SENTINEL_EMAIL} is not registered`,
+      stack: `Error: Clerk\n    at ${SENTINEL_STACK} (session=${SENTINEL_SESSION})`
+    };
+
+    // The Clerk call site reports only the safe code + status. Attach the
+    // representative envelope to the context as defence in depth: even if
+    // a future caller accidentally forwards it, the serializer must not
+    // copy any of its fields or nested sentinels into the POST body.
+    reportAuthError({
       provider: 'clerk',
-      operation: 'signin',
-      errorCode: 'invalid_credentials',
-      status: '401'
+      operation: 'signin_identify',
+      errorCode: clerkEnvelope.errors[0].code,
+      status: String(clerkEnvelope.status),
+      errors: clerkEnvelope.errors,
+      message: clerkEnvelope.message,
+      stack: clerkEnvelope.stack,
+      meta: clerkEnvelope.meta
     });
+
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.message).not.toContain('[email protected]');
-    expect(body.message).toContain('[redacted-email]');
+    const serialized = JSON.stringify(body);
+
+    for (const sentinel of [SENTINEL_EMAIL, SENTINEL_TOKEN, SENTINEL_SESSION, SENTINEL_STACK]) {
+      expect(serialized).not.toContain(sentinel);
+    }
+
+    // The safe signal still reaches the operator.
+    expect(body.errorCode).toBe('identifier_not_found');
+    expect(body.status).toBe('404');
+    expect(body.operation).toBe('signin_identify');
+    expect(body.provider).toBe('clerk');
+
+    // No message and no stack at all — not redacted, absent.
+    expect(body.message).toBeNull();
+    expect(body.stack).toBeNull();
   });
 
-  it('redacts Bearer tokens and password=… from stacks', () => {
-    const fetchSpy = globalThis.fetch;
-    const error = new Error('Sign-in failed');
-    error.stack = 'Error: Sign-in failed\n  at https://api.example.com (Authorization: Bearer abc.def.ghi)\n  at caller (password=hunter2)';
-    reportAuthError(error, {
-      provider: 'clerk',
-      operation: 'signin',
-      errorCode: 'invalid_credentials'
-    });
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.stack).not.toContain('abc.def.ghi');
-    expect(body.stack).not.toContain('hunter2');
-    expect(body.stack).toContain('Bearer [redacted]');
-    expect(body.stack).toContain('password=[redacted]');
+  it('pins the auth reporting API to a single context argument', () => {
+    // Structural pin: if a second parameter is ever added, the envelope
+    // could be handed to the serializer again and the contract above
+    // would silently stop holding.
+    expect(reportAuthError).toHaveLength(1);
   });
 
   it('sends only the allow-listed fields', () => {
     const fetchSpy = globalThis.fetch;
-    const error = new Error('Some auth failure');
-    reportAuthError(error, {
+    reportAuthError({
       provider: 'supabase',
       operation: 'signin',
       errorCode: 'invalid_grant',
@@ -136,7 +171,7 @@ describe('browserTelemetry', () => {
     const fetchSpy = globalThis.fetch;
     const ctx = { provider: 'clerk', operation: 'signin', errorCode: 'invalid_credentials' };
     for (let i = 0; i < 10; i += 1) {
-      reportAuthError(new Error(`fail ${i}`), ctx);
+      reportAuthError(ctx);
     }
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
@@ -144,7 +179,7 @@ describe('browserTelemetry', () => {
   it('caps distinct events in 60s to MAX_EVENTS_PER_MINUTE', () => {
     const fetchSpy = globalThis.fetch;
     for (let i = 0; i < 10; i += 1) {
-      reportAuthError(new Error(`fail ${i}`), {
+      reportAuthError({
         provider: 'clerk',
         operation: 'signin',
         errorCode: `code_${i}`,
@@ -157,7 +192,7 @@ describe('browserTelemetry', () => {
   it('never throws when fetch rejects', () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down'));
     expect(() =>
-      reportAuthError(new Error('whatever'), {
+      reportAuthError({
         provider: 'clerk',
         operation: 'signin',
         errorCode: 'invalid_credentials'
@@ -168,7 +203,7 @@ describe('browserTelemetry', () => {
   it('does not POST when VITE_TELEMETRY_TOKEN is missing', () => {
     vi.stubEnv('VITE_TELEMETRY_TOKEN', '');
     const fetchSpy = globalThis.fetch;
-    reportAuthError(new Error('x'), {
+    reportAuthError({
       provider: 'clerk',
       operation: 'signin',
       errorCode: 'invalid_credentials'
@@ -212,7 +247,7 @@ describe('browserTelemetry — release identifier', () => {
     vi.stubEnv('MODE', 'production');
     vi.stubEnv('VITE_RELEASE_TAG', 'gymtrack-v2026.11.11');
     vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'a'.repeat(40));
-    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    reportAuthError({ provider: 'clerk', operation: 'signin' });
     expect(capturedRelease()).toBe('gymtrack-v2026.11.11');
   });
 
@@ -221,7 +256,7 @@ describe('browserTelemetry — release identifier', () => {
     vi.stubEnv('VITE_RELEASE_TAG', '');
     const sha = 'b'.repeat(40);
     vi.stubEnv('VERCEL_GIT_COMMIT_SHA', sha);
-    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    reportAuthError({ provider: 'clerk', operation: 'signin' });
     expect(capturedRelease()).toBe(sha);
   });
 
@@ -230,7 +265,7 @@ describe('browserTelemetry — release identifier', () => {
     vi.stubEnv('VITE_RELEASE_TAG', '');
     vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
     vi.stubEnv('VERCEL_DEPLOYMENT_ID', 'dpl_abc123');
-    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    reportAuthError({ provider: 'clerk', operation: 'signin' });
     expect(capturedRelease()).toBe('dpl_abc123');
   });
 
@@ -239,7 +274,7 @@ describe('browserTelemetry — release identifier', () => {
     vi.stubEnv('VITE_RELEASE_TAG', '');
     vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
     vi.stubEnv('VERCEL_DEPLOYMENT_ID', '');
-    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    reportAuthError({ provider: 'clerk', operation: 'signin' });
     expect(capturedRelease()).toBe('unknown');
     expect(capturedRelease()).not.toBe('dev');
   });
@@ -249,7 +284,61 @@ describe('browserTelemetry — release identifier', () => {
     vi.stubEnv('VITE_RELEASE_TAG', '');
     vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
     vi.stubEnv('VERCEL_DEPLOYMENT_ID', '');
-    reportAuthError(new Error('x'), { provider: 'clerk', operation: 'signin' });
+    reportAuthError({ provider: 'clerk', operation: 'signin' });
     expect(capturedRelease()).toBe('dev');
+  });
+});
+
+/**
+ * Redaction on the generic error path (task e89db27f).
+ *
+ * The auth surface is context-only — `reportAuthError` takes a context
+ * object and has no parameter that could carry an error envelope — so the
+ * browser-side redaction patterns can no longer be exercised through it.
+ * The generic path still receives raw error objects (uncaught exceptions
+ * and unhandled rejections), so that is where the browser redaction layer
+ * is pinned.
+ */
+describe('browserTelemetry — generic error path redaction', () => {
+  beforeEach(() => {
+    _resetBrowserTelemetryForTests();
+    vi.stubEnv('VITE_TELEMETRY_ENABLED', '1');
+    vi.stubEnv('VITE_TELEMETRY_TOKEN', 'relay-test-token');
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('VITE_RELEASE_TAG', 'test-release');
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+  });
+
+  afterEach(() => {
+    _resetBrowserTelemetryForTests();
+    vi.unstubAllEnvs();
+    globalThis.fetch = originalFetch;
+  });
+
+  function emitWindowError(error) {
+    installBrowserTelemetry();
+    window.dispatchEvent(new ErrorEvent('error', { error }));
+  }
+
+  it('redacts email addresses from error messages', () => {
+    const fetchSpy = globalThis.fetch;
+    const error = new Error('Failed to sign in user foo@bar.com');
+    emitWindowError(error);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.message).not.toContain('[email protected]');
+    expect(body.message).toContain('[redacted-email]');
+  });
+
+  it('redacts Bearer tokens and password=… from stacks', () => {
+    const fetchSpy = globalThis.fetch;
+    const error = new Error('Sign-in failed');
+    error.stack = 'Error: Sign-in failed\n  at https://api.example.com (Authorization: Bearer abc.def.ghi)\n  at caller (password=hunter2)';
+    emitWindowError(error);
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.stack).not.toContain('abc.def.ghi');
+    expect(body.stack).not.toContain('hunter2');
+    expect(body.stack).toContain('Bearer [redacted]');
+    expect(body.stack).toContain('password=[redacted]');
   });
 });

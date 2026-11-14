@@ -39,6 +39,16 @@ vi.mock('./supabase.js', () => ({
   setSupabaseAccessTokenGetter: vi.fn(),
   supabase: { rpc: vi.fn() }
 }));
+// The telemetry surface is asserted directly here (task e89db27f): every
+// explicitly handled authentication failure must reach it, including the
+// unknown-identifier branch that used to return before reporting.
+//
+// The telemetry API is context-only: it takes a single context object and
+// has no parameter that could carry the Clerk envelope, so the call site
+// cannot leak a message, stack, email or session token into the payload.
+// The assertions below pin that arity as well as the context shape.
+const telemetry = vi.hoisted(() => ({ reportAuthError: vi.fn() }));
+vi.mock('./browserTelemetry.js', () => ({ reportAuthError: telemetry.reportAuthError }));
 
 import { ClerkAuthProvider } from './clerkAuth.jsx';
 import { AuthContext } from './authContext.jsx';
@@ -125,6 +135,55 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('ClerkAuthProvider browser telemetry contract (task e89db27f)', () => {
+  it('exports an unknown-identifier sign-in failure instead of returning before the report', async () => {
+    mocks.signIn.create.mockResolvedValue({
+      error: { errors: [{ code: 'identifier_not_found' }], status: 404 }
+    });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign in' }));
+
+    expect(await screen.findByText('Sign-in failed.')).toBeVisible();
+    expect(mocks.signIn.password).not.toHaveBeenCalled();
+    expect(telemetry.reportAuthError).toHaveBeenCalledTimes(1);
+    const call = telemetry.reportAuthError.mock.calls[0];
+    // Context-only: the envelope must not be handed to the telemetry layer.
+    expect(call).toHaveLength(1);
+    const [context] = call;
+    expect(context).toMatchObject({
+      provider: 'clerk',
+      operation: 'signin_identify',
+      errorCode: 'identifier_not_found',
+      status: '404'
+    });
+    expect(Object.keys(context).sort()).toEqual(
+      ['errorCode', 'operation', 'provider', 'status'].sort()
+    );
+  });
+
+  it('exports a password-step sign-in failure', async () => {
+    mocks.signIn.password.mockResolvedValue({
+      error: { errors: [{ code: 'form_password_incorrect' }], status: 422 }
+    });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign in' }));
+
+    expect(await screen.findByText('Sign-in failed.')).toBeVisible();
+    expect(telemetry.reportAuthError).toHaveBeenCalledTimes(1);
+    const call = telemetry.reportAuthError.mock.calls[0];
+    expect(call).toHaveLength(1);
+    const [context] = call;
+    expect(context).toMatchObject({
+      provider: 'clerk',
+      operation: 'signin',
+      errorCode: 'form_password_incorrect',
+      status: '422'
+    });
+  });
 });
 
 describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {

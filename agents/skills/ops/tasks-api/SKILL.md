@@ -44,7 +44,10 @@ The client is a **single file at the skill root** — not inside `scripts/`:
 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py
 ```
 
-`scripts/` holds only `agent_task_queue.py` and `pending_tech_design_approvals.py`. A path such as `.../tasks-api/scripts/tasks_api_client.py` does not exist and fails with `No such file or directory`.
+`scripts/` holds `agent_task_queue.py` and `pending_tech_design_approvals.py`, plus a **deprecated forwarding shim** at
+`scripts/tasks_api_client.py`. That shim execs the maintained client with the same argv and exit code and prints a
+deprecation notice on stderr, so a caller still composing the old path gets a working read instead of an opaque
+`No such file or directory` (exit 2). It will be removed; use the skill-root path above.
 
 `--id` is **required** by every single-task subcommand and must be the full task UUID:
 
@@ -90,6 +93,14 @@ GitHub reports merge conflicts. This remains actionable even when CI is green
 and review feedback is absent: rebase onto the base branch, preserve both
 sides of content conflicts, push with `--force-with-lease`, and re-request the
 original reviewer because the push dismisses the approval.
+
+That force-push path is for **genuine content conflicts**. A branch that is
+merely behind `main` (`mergeStateStatus: BEHIND`) is not a conflict: GitHub
+refuses the merge with "the head branch is not up to date with the base
+branch", and the fix is GitHub's update-branch operation, which refreshes the
+branch without rewriting the reviewed commits — see the "When the merge is
+refused because the branch is behind `main`" section of
+`agents/skills/dev/pr-process/SKILL.md`.
 
 ### Attention owners: ordered action and escalation stack
 
