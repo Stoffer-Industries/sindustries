@@ -121,7 +121,7 @@ EOF
 # Fallback path: when the per-agent token env var is unset, the shim must
 # still unset GITHUB_TOKEN/GH_TOKEN and retain the resolved agent's
 # GH_CONFIG_DIR so `gh` cannot fall through to the host-default keyring.
-out=$(bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")
+out=$(env -i HOME="$TMP_SHIM_HOME" PATH="$SHIM_STUB_DIR:/usr/bin:/bin" bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")
 printf '%s\n' "$out" | grep -q '^argv=pr view 1$'
 printf '%s\n' "$out" | grep -q '^GITHUB_TOKEN=<unset>$'
 printf '%s\n' "$out" | grep -q '^GH_TOKEN=<unset>$'
