@@ -117,7 +117,40 @@ const OPERATOR_REQUIRED_ROWS = [
     reason:
       'The per-surface health routes live in the staging preflight harness, and the production hostnames do not resolve until the DNS step; the operator records the HTTPS responses with the black-box smoke run.',
   },
+  {
+    gate: 'dns.resolution-and-tls-readback',
+    step: 'Slice D step 8',
+    owner: 'Quinn (operator)',
+    label: 'Production DNS resolution and TLS read-back',
+    reason:
+      "AC3's verification also requires the production hostnames to resolve to the production app from two resolvers and to present a valid certificate. Resolution and TLS handshakes are network-bound and time-bound, so the operator attaches the read-back; this checker sees only the Cloudflare zone records.",
+  },
 ];
+
+/**
+ * Does this DNS target name a staging deployment?
+ *
+ * The manifest's separation contract compares host labels as WORDS, so a
+ * provider-style `ep-staging-…` endpoint and a `staging-db.neon.tech` shape
+ * are both refused. The DNS gate uses the same rule: a production record
+ * that names a staging label is a separation failure, whatever the record
+ * type is.
+ *
+ * @param {unknown} content
+ * @returns {boolean}
+ */
+export function namesStagingTarget(content) {
+  if (typeof content !== 'string' || content.trim().length === 0) return false;
+  const host = content
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z]+:\/\//, '')
+    .split('/')[0]
+    .split(':')[0];
+  return host
+    .split('.')
+    .some((label) => label === 'staging' || label.split('-').includes('staging'));
+}
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -196,6 +229,7 @@ export function evaluateProvisioningState(state, options = {}) {
   const healthProbeApp = options.healthProbeApp ?? 'sindustries-health-probe-production';
   const requiredSourceNames = [...(options.requiredSourceNames ?? [])];
   const expectedSchemas = [...(options.expectedSchemas ?? [])];
+  const dnsExpectations = options.dnsExpectations ?? { zoneName: null, surfaces: [] };
 
   const rows = [];
   const failures = [];
@@ -518,6 +552,195 @@ export function evaluateProvisioningState(state, options = {}) {
     }
   }
 
+  // --- Cloudflare DNS: AC3 — production records point at the production apps
+
+  if (providerCaptured('cloudflare')) {
+    const cloudflare = providers.cloudflare;
+    const records = asArray(cloudflare.records);
+    const byName = new Map();
+    for (const record of records) {
+      const name = record?.name;
+      if (!name) continue;
+      byName.set(name, [...(byName.get(name) ?? []), record]);
+    }
+
+    const surfaces = asArray(dnsExpectations.surfaces);
+    if (surfaces.length === 0) {
+      add(
+        row('cloudflare.dns-expectations', 'unmet', {
+          step: 'Slice D step 8',
+          owner: 'Rowan',
+          label: 'Production DNS expectations',
+          reason:
+            'the hostname matrix declares no Fly-hosted production surface, so no DNS target can be verified',
+        }),
+      );
+    } else {
+      /**
+       * Why a production hostname's DNS record is not yet the one AC3 wants.
+       *
+       * @returns {string|null} null when the record is correct
+       */
+      const productionProblem = (surface) => {
+        const hostname = surface.productionHostname;
+        if (!hostname) {
+          return `the hostname matrix declares no production hostname for "${surface.id}"`;
+        }
+        const entries = byName.get(hostname) ?? [];
+        if (entries.length === 0) return `no DNS record exists for ${hostname}`;
+        const matching = entries.find(
+          (record) => record?.content === surface.productionTarget,
+        );
+        if (!matching) {
+          const observed = entries
+            .map((record) => `${record?.type ?? 'record'} → ${record?.content ?? 'no target'}`)
+            .join(', ');
+          return `${hostname} is ${observed}, expected CNAME → ${surface.productionTarget}`;
+        }
+        if (matching.proxied === true) {
+          return (
+            `${hostname} is proxied (orange cloud); the CNAME to ${surface.productionTarget} ` +
+            'must stay DNS-only for Fly to validate its certificate'
+          );
+        }
+        return null;
+      };
+
+      const apiSurfaces = surfaces.filter((surface) => surface.id !== 'health-probe');
+      const probeSurface = surfaces.find((surface) => surface.id === 'health-probe');
+
+      const apiProblems = apiSurfaces
+        .map((surface) => ({ surface, problem: productionProblem(surface) }))
+        .filter((entry) => entry.problem);
+      if (apiProblems.length > 0) {
+        add(
+          row('cloudflare.production-api-dns-records', 'unmet', {
+            step: 'Slice D step 8',
+            owner: 'Quinn (operator)',
+            label: 'Production API DNS records',
+            reason: apiProblems
+              .map((entry) => `${entry.surface.productionHostname}: ${entry.problem}`)
+              .join('; '),
+          }),
+        );
+      } else {
+        add(
+          row('cloudflare.production-api-dns-records', 'met', {
+            step: 'Slice D step 8',
+            owner: 'Quinn (operator)',
+            label: 'Production API DNS records',
+            reason: `${apiSurfaces.length} production API hostname(s) CNAME to their production app`,
+          }),
+        );
+      }
+
+      if (!probeSurface) {
+        add(
+          row('cloudflare.production-probe-dns-record', 'unmet', {
+            step: 'Slice D step 8',
+            owner: 'Rowan',
+            label: 'Production health-probe DNS record',
+            reason:
+              'the hostname matrix declares no "health-probe" surface, so the probe record cannot be verified',
+          }),
+        );
+      } else {
+        const probeProblem = productionProblem(probeSurface);
+        if (probeProblem) {
+          add(
+            row('cloudflare.production-probe-dns-record', 'unmet', {
+              step: 'Slice D step 8',
+              owner: 'Quinn (operator)',
+              label: 'Production health-probe DNS record',
+              reason: probeProblem,
+            }),
+          );
+        } else {
+          add(
+            row('cloudflare.production-probe-dns-record', 'met', {
+              step: 'Slice D step 8',
+              owner: 'Quinn (operator)',
+              label: 'Production health-probe DNS record',
+              reason: `${probeSurface.productionHostname} CNAMEs to ${probeSurface.productionTarget}`,
+            }),
+          );
+        }
+      }
+
+      // AC3 says "with staging/dev domains unaffected": a production record
+      // that names a staging deployment is a separation failure even when it
+      // also happens to carry the right record type.
+      const separationFailures = [];
+      for (const surface of surfaces) {
+        const hostname = surface.productionHostname;
+        if (!hostname) continue;
+        for (const record of byName.get(hostname) ?? []) {
+          if (!namesStagingTarget(record?.content)) continue;
+          separationFailures.push(
+            `${hostname} → ${record?.content ?? 'no target'} (a staging deployment)`,
+          );
+        }
+      }
+      if (separationFailures.length > 0) {
+        add(
+          row('cloudflare.production-dns-separation', 'unmet', {
+            step: 'Slice D step 8',
+            owner: 'Quinn (operator)',
+            label: 'Production DNS separation',
+            reason: `production hostname(s) point at a staging deployment: ${separationFailures.join('; ')}`,
+          }),
+        );
+      } else {
+        add(
+          row('cloudflare.production-dns-separation', 'met', {
+            step: 'Slice D step 8',
+            owner: 'Quinn (operator)',
+            label: 'Production DNS separation',
+            reason: `no production hostname points at a staging deployment (${surfaces.length} surface(s) checked)`,
+          }),
+        );
+      }
+
+      const stagingProblems = [];
+      for (const surface of surfaces) {
+        const hostname = surface.stagingHostname;
+        if (!hostname || !surface.stagingTarget) continue;
+        const entries = byName.get(hostname) ?? [];
+        if (entries.length === 0) {
+          stagingProblems.push(`no DNS record exists for ${hostname}`);
+          continue;
+        }
+        if (!entries.some((record) => record?.content === surface.stagingTarget)) {
+          const observed = entries
+            .map((record) => `${record?.type ?? 'record'} → ${record?.content ?? 'no target'}`)
+            .join(', ');
+          stagingProblems.push(
+            `${hostname} is ${observed}, expected it to stay on ${surface.stagingTarget}`,
+          );
+        }
+      }
+      if (stagingProblems.length > 0) {
+        add(
+          row('cloudflare.staging-dns-unchanged', 'unmet', {
+            step: 'Slice D step 8',
+            owner: 'Quinn (operator)',
+            label: 'Staging DNS unchanged',
+            reason: `AC3 requires the staging hostnames to be unaffected: ${stagingProblems.join('; ')}`,
+          }),
+        );
+      } else {
+        add(
+          row('cloudflare.staging-dns-unchanged', 'met', {
+            step: 'Slice D step 8',
+            owner: 'Quinn (operator)',
+            label: 'Staging DNS unchanged',
+            reason: 'every staging hostname still resolves to its staging deployment',
+          }),
+        );
+      }
+    }
+  }
+
   for (const entry of OPERATOR_REQUIRED_ROWS) {
     rows.push(
       row(entry.gate, 'operator-required', {
@@ -544,11 +767,37 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
   ).href;
   const manifest = await import(manifestUrl);
   const environment = manifest.getPlatformEnvironment('production');
+
+  // The hostname matrix owns the stable hostnames and their CNAME targets, so
+  // the DNS expectations are read from it rather than restated here: a
+  // checker that carries its own copy of the expected targets can agree with
+  // a drifted matrix.
+  const matrix = JSON.parse(
+    readFileSync(join(repoRoot, 'infra/cloud/hostname-matrix.json'), 'utf8'),
+  );
+  const dnsSurfaces = (matrix.surfaces ?? [])
+    .filter(
+      (surface) =>
+        typeof surface?.cnameTargets?.production === 'string' &&
+        surface.cnameTargets.production.endsWith('.fly.dev'),
+    )
+    .map((surface) => ({
+      id: surface.id,
+      productionHostname: surface.production ?? null,
+      productionTarget: surface.cnameTargets.production,
+      stagingHostname: surface.staging ?? null,
+      stagingTarget: surface.cnameTargets.staging ?? null,
+    }));
+
   return {
     platformApp: environment.platformApp,
     healthProbeApp: environment.healthProbeApp,
     requiredSourceNames: manifest.requiredSourceNames(environment),
     expectedSchemas: Object.values(environment.schemas ?? {}),
+    dnsExpectations: {
+      zoneName: matrix.apexDomain ?? null,
+      surfaces: dnsSurfaces,
+    },
   };
 }
 

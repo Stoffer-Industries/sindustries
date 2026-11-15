@@ -73,6 +73,60 @@
         "sindustries-content-scheduler-production"
       ],
       "databaseTypes": ["free", "free"]
+    },
+    "cloudflare": {
+      "captured": true,
+      "zoneName": "sindustries.co.nz",
+      "records": [
+        {
+          "name": "tasks-api.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-platform-production.fly.dev",
+          "proxied": false
+        },
+        {
+          "name": "budget-api.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-platform-production.fly.dev",
+          "proxied": false
+        },
+        {
+          "name": "content-scheduler-api.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-platform-production.fly.dev",
+          "proxied": false
+        },
+        {
+          "name": "health-probe.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-health-probe-production.fly.dev",
+          "proxied": false
+        },
+        {
+          "name": "tasks-api.staging.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-platform-staging.fly.dev",
+          "proxied": false
+        },
+        {
+          "name": "budget-api.staging.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-platform-staging.fly.dev",
+          "proxied": false
+        },
+        {
+          "name": "content-scheduler-api.staging.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-platform-staging.fly.dev",
+          "proxied": false
+        },
+        {
+          "name": "health-probe.staging.sindustries.co.nz",
+          "type": "CNAME",
+          "content": "sindustries-health-probe-staging.fly.dev",
+          "proxied": false
+        }
+      ]
     }
   }
 }
