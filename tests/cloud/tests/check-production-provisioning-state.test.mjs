@@ -691,6 +691,34 @@ test('a deployed probe pointed at another environment database fails', () => {
   );
 });
 
+test('a production branch that exposes no endpoint host fails the database target gate', () => {
+  // The expectation set names no host, so the gate cannot compare
+  // anything. It must NOT pass vacuously — a gate that compares against
+  // an empty set is satisfied by any target at all.
+  assertFails(
+    mutate((state) => {
+      state.providers.neon.branch.endpointHostFingerprints = [];
+    }),
+    'health.production-probe-database-targets',
+  );
+});
+
+test('an endpoint host read that failed fails the database target gate and says why', () => {
+  // An unreadable read is not an empty list. The failure must name the
+  // capture as the owner, because the operator cannot fix a read the
+  // repository never managed.
+  const state = mutate((mutated) => {
+    mutated.providers.neon.branch.endpointHostFingerprints = [];
+    mutated.providers.neon.branch.endpointHostsReadError = 'HTTP 401';
+  });
+  assertFails(state, 'health.production-probe-database-targets');
+
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const row = rows.find((entry) => entry.gate === 'health.production-probe-database-targets');
+  assert.equal(row.owner, 'Rowan');
+  assert.match(row.reason, /HTTP 401/);
+});
+
 test('a deployed probe pointed at the staging Redis fails', () => {
   assertFails(
     mutate((state) => {
