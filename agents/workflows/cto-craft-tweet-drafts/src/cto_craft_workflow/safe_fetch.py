@@ -316,6 +316,12 @@ class CurlTransport:
                     body = handle.read(max_bytes + 1)
             except FileNotFoundError:
                 body = b""
+            if len(body) > max_bytes:
+                raise FetchError(
+                    "RESPONSE_TOO_LARGE",
+                    f"response body exceeds {max_bytes} cap",
+                    url=_safe_label(url),
+                )
 
             status_text = completed.stdout.decode("ascii", errors="ignore").strip()
             try:
