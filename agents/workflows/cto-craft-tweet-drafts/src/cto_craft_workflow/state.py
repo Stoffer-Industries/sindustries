@@ -116,6 +116,7 @@ class Diagnostic(TypedDict):
     url: str | None
     code: str
     message: str
+    attempts: list[dict]
 
 
 class PipelineState(TypedDict, total=False):
@@ -148,9 +149,11 @@ class PipelineState(TypedDict, total=False):
     selected_angles: list[SelectedAngle]
     import_result: ImportResult | None
     outcome: Outcome | None
+    outcome_reason: str | None
     notification: str | None
 
     diagnostics: list[Diagnostic]
+    fetch_attempts: list[dict]
 
 
 def make_initial_state(
@@ -174,8 +177,10 @@ def make_initial_state(
         selected_angles=[],
         import_result=None,
         outcome=None,
+        outcome_reason=None,
         notification=None,
         diagnostics=[],
+        fetch_attempts=[],
     )
 
 

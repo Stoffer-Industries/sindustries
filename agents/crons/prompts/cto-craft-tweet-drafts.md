@@ -60,12 +60,12 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
    - **`created`**: announce the `notification` field verbatim to Tom's
      Telegram direct chat. Do not edit, summarise, or append text.
    - **`noop`**: return `NO_REPLY`. A no-op is the expected outcome for
-     runs where the latest Tech Manager Weekly issue has already been
-     processed, no new issue has been published, or a transient source
-     fetch failed before article processing could continue. It is not a
-     failure. Diagnostics in `errors` or `diagnostics` do not change this:
-     do not announce them, invoke `notify-soft-fail`, or escalate them to
-     Lox when `outcome` is `noop`.
+     runs where the source was fetched successfully but there is no new
+     publishable issue content since the last run. It is not a failure.
+     Diagnostics in `errors` or `diagnostics` do not change this: do not
+     announce them, invoke `notify-soft-fail`, or escalate them to Lox when
+     `outcome` is `noop`. An exhausted source-fetch failure is `failed`, not
+     `noop`.
    - **`failed`**: do not announce to Tom. Read
      `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md`
      and follow it. The workflow's `errors` and `diagnostics` fields are

@@ -85,6 +85,30 @@ class GraphDeps:
     parse_issue_links_fn: Callable[[str, bytes], list[dict]] | None = None
 
 
+def _attempt_dicts(attempts: object) -> list[dict]:
+    """Normalize FetchAttempt-like values to JSON-serializable dictionaries."""
+
+    result: list[dict] = []
+    for attempt in attempts or ():
+        if isinstance(attempt, dict):
+            result.append(dict(attempt))
+            continue
+        as_dict = getattr(attempt, "as_dict", None)
+        if callable(as_dict):
+            result.append(as_dict())
+            continue
+        result.append(
+            {
+                "request": getattr(attempt, "request", None),
+                "transport": getattr(attempt, "transport", None),
+                "code": getattr(attempt, "code", None),
+                "status": getattr(attempt, "status", None),
+                "delay_ms": getattr(attempt, "delay_ms", 0),
+            }
+        )
+    return result
+
+
 def _emit_diagnostic(
     state: PipelineState,
     *,
@@ -92,29 +116,16 @@ def _emit_diagnostic(
     code: str,
     message: str,
     url: str | None = None,
+    attempts: object = (),
 ) -> None:
-    diag = {"node": node, "code": code, "message": message, "url": url}
+    diag = {
+        "node": node,
+        "code": code,
+        "message": message,
+        "url": url,
+        "attempts": _attempt_dicts(attempts),
+    }
     state.setdefault("diagnostics", []).append(diag)
-
-
-def _is_transient_fetch_error(exc: FetchError) -> bool:
-    """Return whether a source fetch failure should produce a silent no-op.
-
-    A CDN/origin can briefly return a 5xx or rate-limit response. Those
-    failures are safe to skip because the workflow has no write to retry at
-    this point. Permanent fetch failures (unsafe URLs, unsupported content,
-    and similar configuration/source-shape problems) remain visible failures.
-    """
-
-    if exc.code in {"TIMEOUT", "TRANSPORT_ERROR"}:
-        return True
-    if exc.code != "HTTP_ERROR":
-        return False
-    match = _HTTP_STATUS_RE.fullmatch(exc.message)
-    if match is None:
-        return False
-    status = int(match.group("status"))
-    return status == 429 or status >= 500
 
 
 # ---------------------------------------------------------------------------
@@ -124,17 +135,28 @@ def _is_transient_fetch_error(exc: FetchError) -> bool:
 def discover_latest_issue(state: PipelineState, deps: GraphDeps) -> dict:
     """Fetch the TMW archive and resolve the latest issue URL.
 
-    A transient source fetch failure is recorded and treated as a no-op. There
-    is no article list to continue with when archive discovery is unavailable,
-    and retrying the whole workflow would only repeat the external GET. Parse
-    failures remain visible operational failures.
+    Source fetch failures are retried inside SafeFetcher. An exhausted fetch
+    budget is a visible failed outcome, never a no-op. Parse failures remain
+    visible operational failures.
     """
 
     try:
         resource = deps.fetcher.fetch(deps.archive_url, kind="issue")
     except FetchError as exc:
-        _emit_diagnostic(state, node="discover_latest_issue", code=exc.code, message=exc.message, url=exc.url)
-        return {"outcome": "noop" if _is_transient_fetch_error(exc) else "failed"}
+        attempts = _attempt_dicts(getattr(exc, "attempts", ()))
+        _emit_diagnostic(
+            state,
+            node="discover_latest_issue",
+            code=exc.code,
+            message=exc.message,
+            url=exc.url,
+            attempts=attempts,
+        )
+        return {
+            "outcome": "failed",
+            "outcome_reason": f"source archive fetch failed: {exc.message}",
+            "fetch_attempts": attempts,
+        }
 
     try:
         latest: LatestIssue = parse_archive(deps.archive_url, resource.body)
@@ -146,6 +168,7 @@ def discover_latest_issue(state: PipelineState, deps: GraphDeps) -> dict:
         "issue_url": latest.issue_url,
         "issue_title": latest.issue_title,
         "issue_published_at": latest.issue_published_at,
+        "fetch_attempts": _attempt_dicts(getattr(resource, "attempts", ())),
     }
 
 
@@ -160,8 +183,20 @@ def extract_public_links(state: PipelineState, deps: GraphDeps) -> dict:
     try:
         resource = deps.fetcher.fetch(issue_url, kind="issue")
     except FetchError as exc:
-        _emit_diagnostic(state, node="extract_public_links", code=exc.code, message=exc.message, url=exc.url)
-        return {"outcome": "noop" if _is_transient_fetch_error(exc) else "failed"}
+        attempts = _attempt_dicts(getattr(exc, "attempts", ()))
+        _emit_diagnostic(
+            state,
+            node="extract_public_links",
+            code=exc.code,
+            message=exc.message,
+            url=exc.url,
+            attempts=attempts,
+        )
+        return {
+            "outcome": "failed",
+            "outcome_reason": f"source issue fetch failed: {exc.message}",
+            "fetch_attempts": attempts,
+        }
 
     parse_fn = deps.parse_issue_links_fn or parse_issue_links
     try:
@@ -173,7 +208,10 @@ def extract_public_links(state: PipelineState, deps: GraphDeps) -> dict:
     if not links:
         return {"outcome": "noop"}
 
-    return {"article_links": links[:MAX_ELIGIBLE_LINKS]}
+    return {
+        "article_links": links[:MAX_ELIGIBLE_LINKS],
+        "fetch_attempts": _attempt_dicts(getattr(resource, "attempts", ())),
+    }
 
 
 def _build_angle_user_message(extracted: ExtractedArticle) -> str:
@@ -207,8 +245,21 @@ def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dic
     try:
         resource = fetch_article(url)
     except FetchError as exc:
-        _emit_diagnostic(state, node="fetch_and_score_article", code=exc.code, message=exc.message, url=exc.url)
+        attempts = _attempt_dicts(getattr(exc, "attempts", ()))
+        _emit_diagnostic(
+            state,
+            node="fetch_and_score_article",
+            code=exc.code,
+            message=exc.message,
+            url=exc.url,
+            attempts=attempts,
+        )
+        state.setdefault("fetch_attempts", []).extend(attempts)
         return None
+
+    state.setdefault("fetch_attempts", []).extend(
+        _attempt_dicts(getattr(resource, "attempts", ()))
+    )
 
     try:
         extracted = extract_article(resource.url, resource.body, fallback_title=link.get("title"))
@@ -298,7 +349,11 @@ def collect_candidates(state: PipelineState, deps: GraphDeps) -> dict:
         cleaned.append(candidate)
 
     if len(cleaned) < MIN_QUALIFIED_CANDIDATES:
-        return {"deduped_candidates": cleaned, "outcome": "noop"}
+        return {
+            "deduped_candidates": cleaned,
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     return {"deduped_candidates": cleaned}
 
@@ -319,7 +374,11 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
 
     candidates = list(state.get("deduped_candidates", []) or state.get("candidates", []) or [])
     if not candidates:
-        return {"selected_angles": [], "outcome": "noop"}
+        return {
+            "selected_angles": [],
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     above_threshold = [
         c for c in candidates
@@ -407,7 +466,10 @@ def import_drafts(state: PipelineState, deps: GraphDeps) -> dict:
 
     selected = list(state.get("selected_angles", []) or [])
     if not selected:
-        return {"outcome": "noop"}
+        return {
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     if deps.import_fn is None:
         _emit_diagnostic(state, node="import_drafts", code="NO_IMPORT_FN", message="no import function configured")
@@ -448,7 +510,11 @@ def import_drafts(state: PipelineState, deps: GraphDeps) -> dict:
 
     created = int(response.get("createdCount", 0))
     if created <= 0:
-        return {"import_result": response, "outcome": "noop"}
+        return {
+            "import_result": response,
+            "outcome": "noop",
+            "outcome_reason": "no new issue content since last run",
+        }
 
     return {"import_result": response, "outcome": "created"}
 
