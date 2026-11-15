@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "environment": "production",
   "capturedAt": "2026-11-16T00:30:00.000Z",
   "providers": {
@@ -21,7 +21,8 @@
         "id": "br-long-haze-a7wrd3ci",
         "name": "production",
         "state": "ready",
-        "protected": false
+        "protected": false,
+        "hostFingerprint": "38cdae44aebc8b7a"
       },
       "roleNames": [
         "neondb_owner",
@@ -86,6 +87,32 @@
         },
         "conflictingKeys": [],
         "machineCount": 1
+      },
+      "healthProbeTargets": {
+        "captured": true,
+        "targets": {
+          "HEALTH_PROBE_FLY_APPS": [
+            {
+              "label": "platform",
+              "hostFingerprint": "8e5be93c4184c91f"
+            }
+          ],
+          "HEALTH_PROBE_DATABASES": [
+            {
+              "label": "tasks_api",
+              "hostFingerprint": "38cdae44aebc8b7a"
+            }
+          ],
+          "HEALTH_PROBE_REDIS": [
+            {
+              "label": "content_scheduler",
+              "hostFingerprint": "1cbe53b22532c7d0"
+            }
+          ]
+        },
+        "conflictingKeys": [],
+        "malformedTargets": 0,
+        "machineCount": 1
       }
     },
     "github": {
@@ -106,13 +133,17 @@
     },
     "upstash": {
       "captured": true,
-      "databaseNames": [
-        "sindustries-content-scheduler-staging",
-        "sindustries-content-scheduler-production"
-      ],
-      "databaseTypes": [
-        "free",
-        "free"
+      "databases": [
+        {
+          "name": "sindustries-content-scheduler-staging",
+          "type": "free",
+          "endpointHostFingerprint": "356d21d35ee6b7ec"
+        },
+        {
+          "name": "sindustries-content-scheduler-production",
+          "type": "free",
+          "endpointHostFingerprint": "1cbe53b22532c7d0"
+        }
       ]
     },
     "cloudflare": {

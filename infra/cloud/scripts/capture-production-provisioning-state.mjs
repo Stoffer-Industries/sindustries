@@ -46,6 +46,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+  PROBE_TARGET_KEYS,
+  fingerprintProbeTargets,
+  hostFingerprint,
+} from '../platform/probe-target-facts.mjs';
+
 const REPO_ROOT_DEFAULT = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
   return join(here, '..', '..', '..');
@@ -215,6 +221,12 @@ async function captureNeon({ projectName }) {
         name: productionBranch.name,
         state: branch.current_state ?? productionBranch.current_state ?? 'unknown',
         protected: branch.protected === true,
+        // The production branch's host, as a FINGERPRINT. The host itself is
+        // a production database endpoint and must not reach an artifact
+        // that is committed and pasted into task comments — but the
+        // fingerprint is what proves the deployed probe points at THIS
+        // branch and not at another environment's database.
+        hostFingerprint: hostFingerprint(branch.host ?? productionBranch.host ?? null),
       },
       roleNames: (rolesResponse?.roles ?? []).map((role) => role?.name).filter(Boolean),
     };
@@ -471,6 +483,107 @@ export async function readFlyAppEnv(app, apiToken, keys) {
   }
 }
 
+/**
+ * Read the DEPLOYED probe's targets as fingerprints, never as values.
+ *
+ * AC6 says the production health probe must be "pointed at the new
+ * production targets". The capture can prove the deployed cadence; it
+ * could not prove where the probe looks. A production probe carrying the
+ * production cadence while still pointed at the staging database and the
+ * staging Redis passes every check the repository owns while watching the
+ * wrong environment — the same false green the cadence gate exists to
+ * remove.
+ *
+ * The target values are secrets (a Postgres DSN, a Redis URL), so only
+ * the LABEL of each target and a fingerprint of the service it names are
+ * kept. The raw value never leaves this function, and the artifact never
+ * carries a host.
+ *
+ * The failure modes are kept apart, because they name different owners: an
+ * app that does not exist (the operator has not created it), a read that
+ * failed (the provider could not be looked at), and an app with no Machine
+ * (there is nothing deployed to read a target from).
+ *
+ * @param {string} app
+ * @param {string} apiToken
+ * @returns {Promise<{captured: boolean, targets?: object, conflictingKeys?: string[], malformedTargets?: number, error?: string}>}
+ */
+export async function readFlyAppProbeTargets(app, apiToken) {
+  if (!app) {
+    return {
+      captured: false,
+      error: 'no Fly app name was supplied, so no probe target could be read',
+    };
+  }
+  const inventory = await fetchFlyMachines(app, apiToken);
+  if (!inventory.read) {
+    return { captured: false, error: inventory.error };
+  }
+  if (inventory.machines.length === 0) {
+    return {
+      captured: false,
+      error: `the Fly app ${app} carries no Machine, so its deployed targets cannot be read`,
+    };
+  }
+
+  try {
+    // key -> label -> the set of fingerprints seen for that label
+    const byKey = new Map();
+    let malformed = 0;
+
+    for (const machine of inventory.machines) {
+      const env = machine?.config?.env;
+      if (!env || typeof env !== 'object') continue;
+      for (const key of PROBE_TARGET_KEYS) {
+        const raw = env[key];
+        if (typeof raw !== 'string' || raw.length === 0) continue;
+        const parsed = fingerprintProbeTargets(raw);
+        malformed += parsed.malformed;
+        const byLabel = byKey.get(key) ?? new Map();
+        for (const target of parsed.targets) {
+          const seen = byLabel.get(target.label) ?? new Set();
+          seen.add(target.hostFingerprint);
+          byLabel.set(target.label, seen);
+        }
+        byKey.set(key, byLabel);
+      }
+    }
+
+    const targets = {};
+    const conflictingKeys = new Set();
+    for (const key of PROBE_TARGET_KEYS) {
+      const byLabel = byKey.get(key);
+      // An absent key stays absent: "the probe carries no target list" is a
+      // different fact from "the read could not look".
+      if (!byLabel) continue;
+      const rows = [];
+      for (const [label, seen] of byLabel.entries()) {
+        // Machines that disagree are a real state (a rolling deploy with
+        // two generations) and the gate must not pick a winner.
+        if (seen.size > 1) {
+          conflictingKeys.add(key);
+          continue;
+        }
+        rows.push({ label, hostFingerprint: [...seen][0] });
+      }
+      targets[key] = rows;
+    }
+
+    return {
+      captured: true,
+      targets,
+      conflictingKeys: [...conflictingKeys],
+      malformedTargets: malformed,
+      machineCount: inventory.machines.length,
+    };
+  } catch (error) {
+    return {
+      captured: false,
+      error: `the deployed targets of the Fly app ${app} could not be read (${error.message})`,
+    };
+  }
+}
+
 async function captureFly({ platformApp, healthProbeApp }) {
   const apiToken = process.env.FLY_API_TOKEN;
   if (!apiToken) return failure('FLY_API_TOKEN is not set');
@@ -585,12 +698,18 @@ async function captureFly({ platformApp, healthProbeApp }) {
     PROBE_CADENCE_KEYS,
   );
 
+  // The probe's TARGETS are read separately from its cadence: the cadence
+  // is a number and is safe to record, the targets are secrets and are
+  // reduced to labels and fingerprints at the read.
+  const healthProbeTargets = await readFlyAppProbeTargets(healthProbeApp, apiToken);
+
   return {
     captured: true,
     organization: organizations.map((organization) => organization?.name).filter(Boolean),
     apps,
     secretNamesCaptured: apps.length > 0 && apps.every((app) => Array.isArray(app.secretNames)),
     healthProbeEnv,
+    healthProbeTargets,
   };
 }
 
@@ -651,8 +770,14 @@ async function captureUpstash() {
     const rows = Array.isArray(databases) ? databases : (databases?.databases ?? []);
     return {
       captured: true,
-      databaseNames: rows.map((row) => row?.database_name).filter(Boolean),
-      databaseTypes: rows.map((row) => row?.database_type ?? row?.type ?? 'unknown'),
+      // Each database is recorded by name, type and the FINGERPRINT of its
+      // endpoint host. The fingerprint is what proves the deployed probe
+      // points at THIS production Redis and not at staging's.
+      databases: rows.map((row) => ({
+        name: row?.database_name ?? null,
+        type: row?.database_type ?? row?.type ?? 'unknown',
+        endpointHostFingerprint: hostFingerprint(row?.host ?? row?.endpoint ?? null),
+      })),
     };
   } catch (error) {
     return failure(error.message);
@@ -767,12 +892,14 @@ async function main(argv) {
   ]);
 
   const artifact = {
-    // Version 2: the Fly app entries carry an authoritative existence
-    // fact (`exists`), the Machine count, and a separate reason for an
-    // unreadable read. Version 1 recorded presence only as a side effect
-    // of the organisation listing, so an artifact from a v1 capture can
-    // no longer be read as proof that an app exists.
-    schemaVersion: 2,
+    // Version 3: the probe's deployed TARGETS are recorded as labels and
+    // fingerprints, so AC6's "pointed at the new production targets" half
+    // can be decided, and the Neon branch and the Upstash databases carry
+    // the fingerprints the deployed targets are compared against. Version 2
+    // recorded the probe's cadence but not where the probe looked, so a v2
+    // artifact cannot prove that the production probe is pointed at
+    // production.
+    schemaVersion: 3,
     environment: 'production',
     capturedAt: new Date().toISOString(),
     providers: { neon, fly, github, upstash, cloudflare },

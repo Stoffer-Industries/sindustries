@@ -53,6 +53,13 @@
 //  39. An app entry with no existence fact fails rather than passing.
 //  40. A health-probe app with no existence fact fails rather than passing.
 //  41. A reason field does not trip the redaction guard.
+//  42. A deployed probe pointed at a staging Fly app fails.
+//  43. A deployed probe pointed at another environment's database fails.
+//  44. A deployed probe pointed at the staging Redis fails.
+//  45. A deployed probe that carries no target list for a key fails.
+//  46. Machines that disagree on a target fail.
+//  47. An unreadable deployed probe target capture fails.
+//  48. An expectation set with no production host fails the probe target gate.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -319,7 +326,9 @@ test('a missing production Environment source secret fails', () => {
 test('no production Redis database fails', () => {
   assertFails(
     mutate((state) => {
-      state.providers.upstash.databaseNames = ['sindustries-content-scheduler-staging'];
+      state.providers.upstash.databases = [
+        { name: 'sindustries-content-scheduler-staging', type: 'free', endpointHostFingerprint: '356d21d35ee6b7ec' },
+      ];
     }),
     'upstash.production-redis-database',
   );
@@ -585,6 +594,7 @@ test('the checker restates no production app name of its own', async () => {
     'github.production-environment-sources',
     'neon.service-roles',
     'health.production-probe-cadence',
+    'health.production-probe-fly-targets',
   ]) {
     assert.ok(failed.includes(gate), `expected gate ${gate} to fail without expectations`);
   }
@@ -650,6 +660,91 @@ test('an expectation set with no expected cadence fails the cadence gate', () =>
     loadFixture(),
     { ...EXPECTATIONS, expectedProbeCadence: {} },
     'health.production-probe-cadence',
+  );
+});
+
+// --- AC6: the DEPLOYED production probe is pointed at production targets --
+
+test('a deployed probe pointed at a staging Fly app fails', () => {
+  // The cadence gate proves the probe runs the production cadence; this
+  // gate proves it WATCHES production. A probe with the right cadence and
+  // a staging target passes every other check the repository owns while
+  // watching the wrong environment.
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeTargets.targets.HEALTH_PROBE_FLY_APPS = [
+        { label: 'platform', hostFingerprint: '5a8612fe623fef6d' },
+      ];
+    }),
+    'health.production-probe-fly-targets',
+  );
+});
+
+test('a deployed probe pointed at another environment database fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeTargets.targets.HEALTH_PROBE_DATABASES = [
+        { label: 'tasks_api', hostFingerprint: '7475ba14c306eada' },
+      ];
+    }),
+    'health.production-probe-database-targets',
+  );
+});
+
+test('a deployed probe pointed at the staging Redis fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeTargets.targets.HEALTH_PROBE_REDIS = [
+        { label: 'content_scheduler', hostFingerprint: '356d21d35ee6b7ec' },
+      ];
+    }),
+    'health.production-probe-redis-targets',
+  );
+});
+
+test('a deployed probe that carries no target list for a key fails', () => {
+  // A probe that watches no database watches nothing: the absence of a
+  // target list is not the absence of a problem.
+  assertFails(
+    mutate((state) => {
+      delete state.providers.fly.healthProbeTargets.targets.HEALTH_PROBE_DATABASES;
+    }),
+    'health.production-probe-database-targets',
+  );
+});
+
+test('machines that disagree on a probe target fail', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeTargets.conflictingKeys = ['HEALTH_PROBE_REDIS'];
+    }),
+    'health.production-probe-redis-targets',
+  );
+});
+
+test('an unreadable deployed probe target capture fails', () => {
+  // "The targets could not be read" is not "the probe carries no targets":
+  // an unreadable read leaves the gate open.
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeTargets = {
+        captured: false,
+        error: 'the Fly app sindustries-health-probe-production does not exist',
+      };
+    }),
+    'health.production-probe-fly-targets',
+  );
+});
+
+test('an expectation set with no production host fails the probe target gate', () => {
+  // The expected production hosts are derived from the environment
+  // manifest. If the checker is given none, the comparison would be
+  // vacuous, and that is a missing repository fact rather than an operator
+  // failure.
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, expectedProductionHostFingerprints: [] },
+    'health.production-probe-fly-targets',
   );
 });
 

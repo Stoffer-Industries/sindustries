@@ -22,6 +22,7 @@ import { strict as assert } from 'node:assert';
 import {
   readFlyAppEnv,
   readFlyAppMachines,
+  readFlyAppProbeTargets,
   readFlySecretNames,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
 
@@ -497,4 +498,226 @@ test('a transport failure is reported as unreadable and never throws', async () 
   assert.equal(result.exists, null);
   assert.match(result.error, /could not be read/);
   assert.match(result.error, /ENOTFOUND/);
+});
+
+// --- AC6: the DEPLOYED probe's TARGETS, read as fingerprints -------------
+
+test('the deployed probe targets are recorded as labels and fingerprints', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'lively-frog-6651',
+          state: 'started',
+          config: {
+            env: {
+              HEALTH_PROBE_FLY_APPS:
+                'platform=https://sindustries-platform-production.fly.dev',
+              HEALTH_PROBE_DATABASES:
+                'tasks_api=postgresql://user:secret@ep-abc12345.us-east-2.aws.neon.tech/tasks_api',
+              HEALTH_PROBE_REDIS:
+                'content_scheduler=rediss://default:secret@loud-otter-22222.upstash.io:6379',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.conflictingKeys, []);
+  assert.deepEqual(
+    result.targets.HEALTH_PROBE_FLY_APPS.map((target) => target.label),
+    ['platform'],
+  );
+  assert.deepEqual(
+    result.targets.HEALTH_PROBE_DATABASES.map((target) => target.label),
+    ['tasks_api'],
+  );
+  assert.deepEqual(
+    result.targets.HEALTH_PROBE_REDIS.map((target) => target.label),
+    ['content_scheduler'],
+  );
+  for (const rows of Object.values(result.targets)) {
+    for (const row of rows) {
+      assert.match(row.hostFingerprint, /^[0-9a-f]{16}$/);
+    }
+  }
+});
+
+test('no target value, host or credential survives the read', async () => {
+  // The artifact is committed, compared between runs and pasted into task
+  // comments. A Postgres DSN or a Redis URL in it would publish a
+  // production credential, so the read must reduce every target to a
+  // fingerprint at the source.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'lively-frog-6651',
+          config: {
+            env: {
+              HEALTH_PROBE_DATABASES:
+                'tasks_api=postgresql://user:hunter2@ep-abc12345.us-east-2.aws.neon.tech/tasks_api',
+              HEALTH_PROBE_REDIS:
+                'content_scheduler=rediss://default:hunter2@loud-otter-22222.upstash.io:6379',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes('hunter2'), false);
+  assert.equal(serialized.includes('neon.tech'), false);
+  assert.equal(serialized.includes('upstash.io'), false);
+  assert.equal(serialized.includes('postgresql'), false);
+});
+
+test('the Neon pooler endpoint and the direct endpoint share one fingerprint', async () => {
+  // Neon serves one database on two hostnames. A probe configured with
+  // either must compare equal to the production branch the capture read,
+  // and a different Neon database must not.
+  const direct = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'm1',
+          config: {
+            env: {
+              HEALTH_PROBE_DATABASES:
+                'tasks_api=postgresql://u:p@ep-abc12345.us-east-2.aws.neon.tech/tasks_api',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+  const pooled = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'm1',
+          config: {
+            env: {
+              HEALTH_PROBE_DATABASES:
+                'tasks_api=postgresql://u:p@ep-abc12345-pooler.us-east-2.aws.neon.tech/tasks_api',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+  const other = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'm1',
+          config: {
+            env: {
+              HEALTH_PROBE_DATABASES:
+                'tasks_api=postgresql://u:p@ep-zzz99999.us-east-2.aws.neon.tech/tasks_api',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+
+  const fingerprintOf = (read) => read.targets.HEALTH_PROBE_DATABASES[0].hostFingerprint;
+  assert.equal(fingerprintOf(direct), fingerprintOf(pooled));
+  assert.notEqual(fingerprintOf(direct), fingerprintOf(other));
+});
+
+test('a probe app that does not exist is reported as unreadable, not as no targets', async () => {
+  const result = await withFetch(
+    () => jsonResponse(404, { error: 'app not found' }),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, false);
+  assert.match(result.error, /does not exist/);
+  assert.equal(result.targets, undefined);
+});
+
+test('machines that disagree on a target are a conflict and no winner is picked', async () => {
+  // A rolling deploy with two generations is a real state; the gate must
+  // not choose one of the two targets for it.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'm1',
+          config: {
+            env: {
+              HEALTH_PROBE_REDIS:
+                'content_scheduler=rediss://default:p@first-database.upstash.io:6379',
+            },
+          },
+        },
+        {
+          name: 'm2',
+          config: {
+            env: {
+              HEALTH_PROBE_REDIS:
+                'content_scheduler=rediss://default:p@second-database.upstash.io:6379',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.conflictingKeys, ['HEALTH_PROBE_REDIS']);
+  assert.deepEqual(result.targets.HEALTH_PROBE_REDIS, []);
+});
+
+test('a target entry the probe itself would ignore is counted, not dropped', async () => {
+  // The health probe skips an entry with no label or no value, so a probe
+  // carrying one is watching less than it appears to. The count is what
+  // lets the gate say so.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'm1',
+          config: {
+            env: {
+              HEALTH_PROBE_FLY_APPS: '=https://sindustries-platform-production.fly.dev',
+              HEALTH_PROBE_REDIS: 'content_scheduler=rediss://default:p@loud-otter-22222.upstash.io:6379',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+
+  assert.equal(result.malformedTargets, 1);
+  assert.deepEqual(result.targets.HEALTH_PROBE_FLY_APPS, []);
+  assert.equal(result.targets.HEALTH_PROBE_REDIS.length, 1);
+});
+
+test('a target key the deployed app does not carry stays absent', async () => {
+  // "The app carries no target list" is a different fact from "the read
+  // could not look", and the gate names the owner differently for each.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'm1',
+          config: {
+            env: {
+              HEALTH_PROBE_FLY_APPS: 'platform=https://sindustries-platform-production.fly.dev',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppProbeTargets('sindustries-health-probe-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.targets.HEALTH_PROBE_DATABASES, undefined);
+  assert.deepEqual(result.targets.HEALTH_PROBE_REDIS, undefined);
 });
