@@ -65,7 +65,6 @@ SELECT = "select_distinct_angles"
 IMPORT = "import_drafts"
 NOTIFY = "format_notification"
 _URL_RE = re.compile(r"https?://[^\s]+")
-_HTTP_STATUS_RE = re.compile(r"^HTTP (?P<status>\d{3})$")
 
 
 @dataclass(frozen=True)
