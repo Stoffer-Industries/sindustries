@@ -39,6 +39,12 @@
 //  27. An expectation set with no expected schema fails.
 //  28. An expectation set with no production app name fails.
 //  29. The checker restates no production app name of its own.
+//  30. A deployed probe cadence that differs from the declared production
+//      cadence fails.
+//  31. A deployed health-probe app that carries no cadence key fails.
+//  32. An unreadable deployed probe environment fails.
+//  33. Machines that disagree on the cadence fail.
+//  34. An expectation set with no expected cadence fails.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -476,9 +482,73 @@ test('the checker restates no production app name of its own', async () => {
     'fly.production-health-probe-app',
     'github.production-environment-sources',
     'neon.service-roles',
+    'health.production-probe-cadence',
   ]) {
     assert.ok(failed.includes(gate), `expected gate ${gate} to fail without expectations`);
   }
+});
+
+// --- AC6: the deployed production probe cadence --------------------------
+
+test('a deployed probe cadence that differs from the declared cadence fails', () => {
+  // The staging cadence (86400s) is the value a production probe must not
+  // keep: it would pass every check the repository owns while watching
+  // nothing. The declared production cadence lives in the production
+  // health-probe overlay, so a deployed value that differs from it is a
+  // real disagreement, not a style difference.
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeEnv.env.FLY_APP_PROBE_INTERVAL_SECONDS = '86400';
+    }),
+    'health.production-probe-cadence',
+  );
+});
+
+test('a deployed health-probe app that carries no cadence key fails', () => {
+  assertFails(
+    mutate((state) => {
+      delete state.providers.fly.healthProbeEnv.env.DB_PROBE_INTERVAL_SECONDS;
+    }),
+    'health.production-probe-cadence',
+  );
+});
+
+test('an unreadable deployed probe environment fails', () => {
+  // "The environment could not be read" is not "the environment carried no
+  // cadence": an unreadable read leaves the AC6 gate open, owned by the
+  // operator rather than by the checker.
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeEnv = {
+        captured: false,
+        error: 'the Fly app sindustries-health-probe-production does not exist',
+      };
+    }),
+    'health.production-probe-cadence',
+  );
+});
+
+test('machines that disagree on the cadence fail', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.healthProbeEnv.conflictingKeys = [
+        'FLY_APP_PROBE_INTERVAL_SECONDS',
+      ];
+    }),
+    'health.production-probe-cadence',
+  );
+});
+
+test('an expectation set with no expected cadence fails the cadence gate', () => {
+  // The expected cadence is read from the production health-probe overlay
+  // — the file Fly deploys — so the checker carries no copy of its own. If
+  // it is given no expected cadence, the gate cannot be proven, and that is
+  // a missing repository fact rather than an operator failure.
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, expectedProbeCadence: {} },
+    'health.production-probe-cadence',
+  );
 });
 
 test('the command line exits 0 on the passing artifact and 1 on a failing one', async () => {
