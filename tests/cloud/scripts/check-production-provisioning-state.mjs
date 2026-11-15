@@ -59,7 +59,7 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 3;
+export const SUPPORTED_SCHEMA_VERSION = 4;
 
 /** Neon's four default roles — they are not service roles. */
 const NEON_DEFAULT_ROLES = new Set([
@@ -850,7 +850,16 @@ export function evaluateProvisioningState(state, options = {}) {
     const probeTargets = providers.fly.healthProbeTargets ?? null;
     const conflicting = new Set(asArray(probeTargets?.conflictingKeys));
 
-    const neonBranchFingerprint = providers.neon?.branch?.hostFingerprint ?? null;
+    // The production branch's serving hosts, as FINGERPRINTS. A v3 artifact
+    // carried a single `branch.hostFingerprint`, but the Neon v2 branch
+    // resource has no `host` field — the host lives on the branch's
+    // ENDPOINTS — so that value was always null and this expectation set
+    // was always empty. The AC6 database-target gate was therefore
+    // unsatisfiable no matter how correctly production was provisioned.
+    const neonBranchFingerprints = asArray(providers.neon?.branch?.endpointHostFingerprints)
+      .filter((fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0);
+    const neonEndpointHostsReadError =
+      providers.neon?.branch?.endpointHostsReadError ?? null;
     const productionRedisFingerprints = asArray(providers.upstash?.databases)
       .filter((database) => /production/i.test(String(database?.name ?? '')))
       .map((database) => database?.endpointHostFingerprint)
@@ -870,10 +879,11 @@ export function evaluateProvisioningState(state, options = {}) {
         key: 'HEALTH_PROBE_DATABASES',
         gate: 'health.production-probe-database-targets',
         label: 'Deployed production probe database targets',
-        expected: new Set(neonBranchFingerprint ? [neonBranchFingerprint] : []),
+        expected: new Set(neonBranchFingerprints),
         expectationOwner: 'Rowan',
-        expectationReason:
-          'the production Neon branch host could not be read, so the deployed probe targets cannot be proven',
+        expectationReason: neonEndpointHostsReadError
+          ? `the production Neon branch's endpoint hosts could not be read (${neonEndpointHostsReadError}), so the deployed probe targets cannot be proven`
+          : 'the production Neon branch exposes no endpoint host, so the deployed probe targets cannot be proven',
       },
       {
         key: 'HEALTH_PROBE_REDIS',

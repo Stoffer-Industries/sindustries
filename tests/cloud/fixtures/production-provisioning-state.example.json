@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "environment": "production",
   "capturedAt": "2026-11-16T00:30:00.000Z",
   "providers": {
@@ -22,7 +22,10 @@
         "name": "production",
         "state": "ready",
         "protected": false,
-        "hostFingerprint": "38cdae44aebc8b7a"
+        "endpointHostFingerprints": [
+          "38cdae44aebc8b7a"
+        ],
+        "endpointHostsReadError": null
       },
       "roleNames": [
         "neondb_owner",

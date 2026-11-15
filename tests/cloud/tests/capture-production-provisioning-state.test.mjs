@@ -24,6 +24,7 @@ import {
   readFlyAppMachines,
   readFlyAppProbeTargets,
   readFlySecretNames,
+  readNeonBranchEndpointFingerprints,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
 
 /**
@@ -720,4 +721,137 @@ test('a target key the deployed app does not carry stays absent', async () => {
   assert.equal(result.captured, true);
   assert.deepEqual(result.targets.HEALTH_PROBE_DATABASES, undefined);
   assert.deepEqual(result.targets.HEALTH_PROBE_REDIS, undefined);
+});
+
+// --- The Neon branch's serving hosts (AC6, the database target) ---
+//
+// The Neon v2 API does not put a branch's host on the BRANCH: it puts it
+// on the branch's ENDPOINTS, a separate resource. A capture that reads
+// `branch.host` reads a field the API never sends, so its fingerprint is
+// always null and the AC6 "the deployed probe points at the production
+// database" gate carries an empty expectation set — permanently
+// unsatisfiable, and indistinguishable from a real deployment failure.
+// These cases pin the read to the resource that actually carries the
+// host.
+
+test('the branch host is read from the branch ENDPOINTS, not from the branch', async () => {
+  const calls = [];
+  const result = await withFetch(
+    (url) => {
+      calls.push(url);
+      return jsonResponse(200, {
+        endpoints: [
+          {
+            type: 'read_write',
+            host: 'ep-abc12345.ap-southeast-2.aws.neon.tech',
+            hosts: {
+              read_write_host: 'ep-abc12345.ap-southeast-2.aws.neon.tech',
+              read_write_pooled_host: 'ep-abc12345-pooler.ap-southeast-2.aws.neon.tech',
+            },
+          },
+        ],
+      });
+    },
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.equal(result.hostFingerprints.length, 1);
+  assert.match(result.hostFingerprints[0], /^[0-9a-f]{16}$/);
+  assert.ok(
+    calls.some((url) => url.endsWith('/projects/proj-1/branches/br-1/endpoints')),
+    `the endpoints resource is read, got: ${calls.join(', ')}`,
+  );
+});
+
+test('the pooled and the direct host of one Neon endpoint share one fingerprint', async () => {
+  // The probe may be configured with either hostname for the same
+  // database, so both must compare equal to the production branch.
+  const direct = await withFetch(
+    () =>
+      jsonResponse(200, {
+        endpoints: [{ type: 'read_write', host: 'ep-abc12345.ap-southeast-2.aws.neon.tech' }],
+      }),
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+  const pooled = await withFetch(
+    () =>
+      jsonResponse(200, {
+        endpoints: [
+          {
+            type: 'read_write',
+            host: 'ep-abc12345-pooler.ap-southeast-2.aws.neon.tech',
+          },
+        ],
+      }),
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+  const other = await withFetch(
+    () =>
+      jsonResponse(200, {
+        endpoints: [{ type: 'read_write', host: 'ep-zzz99999.ap-southeast-2.aws.neon.tech' }],
+      }),
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+
+  assert.equal(direct.hostFingerprints[0], pooled.hostFingerprints[0]);
+  assert.notEqual(direct.hostFingerprints[0], other.hostFingerprints[0]);
+});
+
+test('a branch that serves no endpoint is reported as an empty list, not as an error', async () => {
+  // "The branch serves nothing" is a real fact about the environment and
+  // names the operator; "the read could not look" names the capture.
+  const result = await withFetch(
+    () => jsonResponse(200, { endpoints: [] }),
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.hostFingerprints, []);
+  assert.equal(result.error, undefined);
+});
+
+test('an unreadable endpoint read is reported as an error, not as an empty list', async () => {
+  // An empty list would silently become "the branch serves no endpoint",
+  // which blames the operator for a read the capture never managed.
+  const result = await withFetch(
+    () => jsonResponse(401, { message: 'unauthorized' }),
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+
+  assert.equal(result.captured, false);
+  assert.ok(result.error.length > 0, 'the failure carries a reason');
+  assert.equal(result.hostFingerprints, undefined);
+});
+
+test('a transport failure is reported as unreadable and never throws', async () => {
+  const result = await withFetch(
+    () => {
+      throw new Error('socket hang up');
+    },
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+
+  assert.equal(result.captured, false);
+  assert.match(result.error, /socket hang up/);
+});
+
+test('no host ever reaches the artifact from the Neon endpoint read', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, {
+        endpoints: [
+          {
+            type: 'read_write',
+            host: 'ep-abc12345.ap-southeast-2.aws.neon.tech',
+            password: 'super-secret-value',
+          },
+        ],
+      }),
+    () => readNeonBranchEndpointFingerprints('proj-1', 'br-1', 'neon-key'),
+  );
+
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes('neon.tech'), false);
+  assert.equal(serialized.includes('super-secret-value'), false);
 });

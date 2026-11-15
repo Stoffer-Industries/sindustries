@@ -142,6 +142,71 @@ async function fetchJson(url, init = {}) {
   return response.json();
 }
 
+/**
+ * Read the FINGERPRINTS of the hosts that serve the named Neon branch.
+ *
+ * WHY THIS EXISTS
+ *
+ * The Neon v2 API does not put a branch's host on the BRANCH. It puts it
+ * on the branch's ENDPOINTS — a separate resource, reached at
+ * `/projects/{id}/branches/{branch_id}/endpoints`, which answers with
+ * `host` and `hosts.read_write_host`. The branch resource answers with
+ * ids, state, compute and protection fields and NO `host` at all.
+ *
+ * A capture that reads `branch.host` therefore reads a field the API
+ * never sends: the value is always undefined, so the branch's host
+ * fingerprint is always null, so the AC6 "the deployed probe points at
+ * the production database" gate carries an empty expectation set and can
+ * never be met — not because the environment is wrong, but because the
+ * capture read the wrong resource. Nothing in the repository can tell
+ * that apart from a real deployment failure, because a missing field and
+ * a missing database look exactly the same in the artifact.
+ *
+ * The fingerprints are what the artifact carries: the host itself is a
+ * production database endpoint and must not reach an artifact that is
+ * committed and pasted into task comments.
+ *
+ * The read failures are kept apart, because they name different owners:
+ * a read that failed (the provider could not be looked at) and a branch
+ * that serves no endpoint (there is nothing serving it). Collapsing them
+ * would blame the operator for a read the capture never managed.
+ *
+ * @param {string} projectId
+ * @param {string} branchId
+ * @param {string} apiKey
+ * @returns {Promise<{captured: boolean, hostFingerprints?: string[], error?: string}>}
+ */
+export async function readNeonBranchEndpointFingerprints(projectId, branchId, apiKey) {
+  if (!projectId || !branchId) {
+    return {
+      captured: false,
+      error: 'no Neon project or branch id was supplied, so no endpoint host could be read',
+    };
+  }
+  const headers = { Authorization: `Bearer ${apiKey}` };
+  let response;
+  try {
+    response = await fetchJson(
+      `${NEON_API_BASE}/projects/${projectId}/branches/${branchId}/endpoints`,
+      { headers },
+    );
+  } catch (error) {
+    return { captured: false, error: error.message };
+  }
+  const endpoints = Array.isArray(response?.endpoints) ? response.endpoints : [];
+  const hostFingerprints = [];
+  for (const endpoint of endpoints) {
+    const host = endpoint?.host ?? endpoint?.hosts?.read_write_host ?? null;
+    const fingerprint = hostFingerprint(host);
+    // The direct and the pooled host of one endpoint are the same
+    // database, so they share one fingerprint; a branch serving several
+    // endpoints contributes each of them, because the probe may target
+    // any endpoint of the production branch.
+    if (fingerprint && !hostFingerprints.includes(fingerprint)) hostFingerprints.push(fingerprint);
+  }
+  return { captured: true, hostFingerprints };
+}
+
 async function captureNeon({ projectName }) {
   const apiKey = process.env.NEON_API_KEY;
   if (!apiKey) return failure('NEON_API_KEY is not set');
@@ -202,6 +267,12 @@ async function captureNeon({ projectName }) {
       { headers },
     );
 
+    const endpointHosts = await readNeonBranchEndpointFingerprints(
+      project.id,
+      productionBranch.id,
+      apiKey,
+    );
+
     return {
       captured: true,
       organization: {
@@ -221,12 +292,24 @@ async function captureNeon({ projectName }) {
         name: productionBranch.name,
         state: branch.current_state ?? productionBranch.current_state ?? 'unknown',
         protected: branch.protected === true,
-        // The production branch's host, as a FINGERPRINT. The host itself is
-        // a production database endpoint and must not reach an artifact
-        // that is committed and pasted into task comments — but the
-        // fingerprint is what proves the deployed probe points at THIS
-        // branch and not at another environment's database.
-        hostFingerprint: hostFingerprint(branch.host ?? productionBranch.host ?? null),
+        // The hosts that SERVE the production branch, as FINGERPRINTS. The
+        // host itself is a production database endpoint and must not reach
+        // an artifact that is committed and pasted into task comments —
+        // but the fingerprint is what proves the deployed probe points at
+        // THIS branch and not at another environment's database.
+        //
+        // The hosts come from the branch's ENDPOINTS resource, not from the
+        // branch: the Neon v2 branch resource carries no `host` field, so
+        // reading it yields a null fingerprint that no amount of correct
+        // provisioning could ever change.
+        endpointHostFingerprints: endpointHosts.captured
+          ? endpointHosts.hostFingerprints
+          : [],
+        // A read that failed is recorded as a REASON, never as an empty
+        // list: "the endpoint hosts could not be read" and "the branch
+        // serves no endpoint" name different owners, and an empty list
+        // would silently become the second one.
+        endpointHostsReadError: endpointHosts.captured ? null : endpointHosts.error,
       },
       roleNames: (rolesResponse?.roles ?? []).map((role) => role?.name).filter(Boolean),
     };
@@ -892,14 +975,17 @@ async function main(argv) {
   ]);
 
   const artifact = {
-    // Version 3: the probe's deployed TARGETS are recorded as labels and
-    // fingerprints, so AC6's "pointed at the new production targets" half
-    // can be decided, and the Neon branch and the Upstash databases carry
-    // the fingerprints the deployed targets are compared against. Version 2
-    // recorded the probe's cadence but not where the probe looked, so a v2
-    // artifact cannot prove that the production probe is pointed at
-    // production.
-    schemaVersion: 3,
+    // Version 4: the production Neon branch carries the FINGERPRINTS of the
+    // hosts that serve it, read from the branch's ENDPOINTS resource, plus
+    // the reason when that read failed. Version 3 carried a single
+    // `branch.hostFingerprint` read from the BRANCH resource — but the Neon
+    // v2 branch resource has no `host` field (the host lives on the
+    // endpoints), so that value was always null, the AC6 database-target
+    // expectation set was always empty, and the gate could never be met no
+    // matter how correctly production was provisioned. Version 3 also
+    // recorded the probe's deployed TARGETS, so AC6's "pointed at the new
+    // production targets" half can be decided.
+    schemaVersion: 4,
     environment: 'production',
     capturedAt: new Date().toISOString(),
     providers: { neon, fly, github, upstash, cloudflare },
