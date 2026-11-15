@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from cto_craft_workflow.safe_fetch import FetchError, SafeFetcher
+from cto_craft_workflow.safe_fetch import FetchError, SafeFetcher, TransportResponse
 
 
 def _client(transport: httpx.BaseTransport) -> httpx.Client:
@@ -369,3 +369,184 @@ def test_safe_fetch_blocks_dns_rebinding_attempt() -> None:
         or parsed.is_reserved
         or parsed.is_unspecified
     )
+
+
+def _fetcher_with_transport(
+    transport,
+    *,
+    max_requests=3,
+    sleep_fn=None,
+    random_fn=None,
+    httpx_status=502,
+    httpx_responses=None,
+):
+    kwargs = {}
+    if sleep_fn is not None:
+        kwargs["sleep_fn"] = sleep_fn
+    if random_fn is not None:
+        kwargs["random_fn"] = random_fn
+    if httpx_responses is None:
+        httpx_responses = [httpx_status]
+    remaining_httpx = list(httpx_responses)
+
+    def httpx_handler(req):
+        value = remaining_httpx.pop(0) if len(remaining_httpx) > 1 else remaining_httpx[0]
+        if isinstance(value, httpx.Response):
+            return value
+        return httpx.Response(int(value), headers={"content-type": "text/html"})
+
+    return SafeFetcher(
+        user_agent="test",
+        max_issue_bytes=1_000_000,
+        max_article_bytes=2_000_000,
+        max_redirects=5,
+        timeout_seconds=5.0,
+        client=_client(httpx.MockTransport(httpx_handler)),
+        curl_transport=transport,
+        max_requests=max_requests,
+        **kwargs,
+    )
+
+
+class _StubTransport:
+    def __init__(self, name, responses):
+        self.name = name
+        self._responses = list(responses)
+        self.calls = []
+
+    def fetch(self, **kwargs):
+        self.calls.append(kwargs)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        if isinstance(response, httpx.Response):
+            return TransportResponse(
+                status_code=response.status_code,
+                headers={key.lower(): value for key, value in response.headers.items()},
+                body=response.content,
+            )
+        return response
+
+
+def test_fetch_stops_at_three_network_requests() -> None:
+    transport = _StubTransport(
+        "curl",
+        [
+            httpx.Response(502, content=b"", headers={"content-type": "text/html"}),
+            httpx.Response(502, content=b"", headers={"content-type": "text/html"}),
+            httpx.Response(502, content=b"", headers={"content-type": "text/html"}),
+        ],
+    )
+    fetcher = _fetcher_with_transport(transport, sleep_fn=lambda _: None, random_fn=lambda: 0.0)
+
+    with pytest.raises(FetchError) as exc_info:
+        fetcher.fetch("https://example.com/archive", kind="issue")
+
+    assert exc_info.value.code == "HTTP_ERROR"
+    assert exc_info.value.status == 502
+    assert len(exc_info.value.attempts) == 3
+    assert [attempt.request for attempt in exc_info.value.attempts] == [1, 2, 3]
+
+
+def test_httpx_502_then_curl_success_uses_two_requests() -> None:
+    curl = _StubTransport(
+        "curl",
+        [httpx.Response(200, content=b"ok", headers={"content-type": "text/html"})],
+    )
+    fetcher = _fetcher_with_transport(curl, sleep_fn=lambda _: None, random_fn=lambda: 0.0)
+
+    resource = fetcher.fetch("https://example.com/archive", kind="issue")
+
+    assert resource.body == b"ok"
+    assert len(resource.attempts) == 2
+    assert [(a.request, a.transport, a.status) for a in resource.attempts] == [
+        (1, "httpx", 502),
+        (2, "curl", 200),
+    ]
+    assert len(curl.calls) == 1
+
+
+def test_attempt_records_include_bounded_backoff() -> None:
+    transport = _StubTransport(
+        "curl",
+        [
+            httpx.Response(502, content=b"", headers={"content-type": "text/html"}),
+            httpx.Response(502, content=b"", headers={"content-type": "text/html"}),
+        ],
+    )
+    delays = []
+    fetcher = _fetcher_with_transport(
+        transport,
+        sleep_fn=delays.append,
+        random_fn=lambda: 0.0,
+    )
+
+    with pytest.raises(FetchError) as exc_info:
+        fetcher.fetch("https://example.com/archive", kind="issue")
+
+    assert [a.delay_ms for a in exc_info.value.attempts] == [1000, 4000, 0]
+    assert delays == [1.0, 4.0]
+
+
+def test_retry_after_header_is_honoured_and_capped(monkeypatch) -> None:
+    transport = _StubTransport(
+        "curl",
+        [httpx.Response(200, content=b"ok", headers={"content-type": "text/html"})],
+    )
+    delays = []
+    fetcher = _fetcher_with_transport(
+        transport,
+        sleep_fn=delays.append,
+        random_fn=lambda: 0.0,
+        httpx_responses=[
+            httpx.Response(429, headers={"content-type": "text/html", "retry-after": "120"}),
+            httpx.Response(200, content=b"ok", headers={"content-type": "text/html"}),
+        ],
+    )
+    monkeypatch.setattr(
+        "cto_craft_workflow.safe_fetch._retry_after_seconds",
+        lambda value: 120.0,
+    )
+
+    resource = fetcher.fetch("https://example.com/archive", kind="issue")
+
+    assert delays == [30.0]
+    assert resource.attempts[0].delay_ms == 30_000
+
+
+def test_non_transient_http_error_is_not_retried() -> None:
+    transport = _StubTransport(
+        "curl",
+        [httpx.Response(404, content=b"", headers={"content-type": "text/html"})],
+    )
+    fetcher = _fetcher_with_transport(
+        transport,
+        sleep_fn=lambda _: None,
+        httpx_status=404,
+    )
+
+    with pytest.raises(FetchError) as exc_info:
+        fetcher.fetch("https://example.com/archive", kind="issue")
+
+    assert exc_info.value.code == "HTTP_ERROR"
+    assert len(exc_info.value.attempts) == 1
+    assert transport.calls == []
+
+
+def test_curl_unavailable_falls_back_without_consuming_request() -> None:
+    unavailable = _StubTransport(
+        "curl",
+        [
+            FetchError("TRANSPORT_UNAVAILABLE", "missing"),
+            FetchError("TRANSPORT_UNAVAILABLE", "missing"),
+        ],
+    )
+    fetcher = _fetcher_with_transport(unavailable, sleep_fn=lambda _: None)
+
+    with pytest.raises(FetchError) as exc_info:
+        fetcher.fetch("https://example.com/archive", kind="issue")
+
+    assert exc_info.value.code == "HTTP_ERROR"
+    assert len(exc_info.value.attempts) == 3
+    assert len(unavailable.calls) == 1
+    assert all(call["pinned_ip"] for call in unavailable.calls)

@@ -91,6 +91,8 @@ def _build_graph(
         max_article_bytes=2_000_000,
         max_redirects=5,
         timeout_seconds=5.0,
+        max_requests=1,
+        sleep_fn=lambda _: None,
         client=httpx.Client(
             timeout=httpx.Timeout(5.0),
             transport=_transport(archive_html, issue_html, article_routes, status_by_url),
@@ -365,7 +367,7 @@ def test_archive_parse_failure_is_failed(
         (ISSUE_URL, "extract_public_links"),
     ],
 )
-def test_source_fetch_502_is_noop_with_diagnostic(
+def test_source_fetch_502_is_failed_with_diagnostic(
     archive_html, issue_html, article_routes, failing_url, diagnostic_node
 ) -> None:
     graph = _build_graph(
@@ -383,8 +385,9 @@ def test_source_fetch_502_is_noop_with_diagnostic(
     )
     final = graph.invoke(initial)
 
-    assert final["outcome"] == "noop"
+    assert final["outcome"] == "failed"
     assert final["notification"] is None
+    assert final["outcome_reason"].startswith("source ")
     assert any(
         diagnostic["code"] == "HTTP_ERROR"
         and diagnostic["node"] == diagnostic_node
