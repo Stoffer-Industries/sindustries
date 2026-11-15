@@ -26,11 +26,11 @@
  * command) and quietly fork the platform.
  *
  * The `[env]` allow-list is KEY-level, not table-level: the overlay may
- * set only the five environment-owned values (the three CORS allow-lists
- * and the two probe cadences), and only those the shared config already
- * defines. A table-level allow-list would have let an overlay set
- * `NODE_ENV` or a new variable — the same class of fork the table
- * allow-list exists to prevent.
+ * set only the environment-owned values (the platform environment id, the
+ * three CORS allow-lists and the two probe cadences), and only those the
+ * shared config already defines. A table-level allow-list would have let
+ * an overlay set `NODE_ENV` or a new variable — the same class of fork
+ * the table allow-list exists to prevent.
  *
  * The app name in the overlay is BOUND TO THE MANIFEST: when the
  * environment is known, the overlay's `app` must name the app that its
@@ -86,6 +86,15 @@ const ALLOWED_OVERLAY_ENV_KEYS = new Set([
   'FLY_APP_PROBE_INTERVAL_SECONDS',
   'DB_PROBE_INTERVAL_SECONDS',
 ]);
+
+/**
+ * The environment id is special: it is a TOPIC value, not a topology
+ * value, and it must be present in the shared platform config so the
+ * supervisor can select the environment-owned router hostnames at
+ * runtime. The production overlay replaces it with `production`; the
+ * health-probe config does not use it.
+ */
+const PLATFORM_ENVIRONMENT_ID_KEY = 'PLATFORM_ENVIRONMENT_ID';
 
 /**
  * Parse a single TOML assignment line.
@@ -153,11 +162,15 @@ export function parseOverlay(text) {
       continue;
     }
 
-    if (!ALLOWED_OVERLAY_ENV_KEYS.has(assignment.key)) {
+    if (
+      assignment.key !== PLATFORM_ENVIRONMENT_ID_KEY &&
+      !ALLOWED_OVERLAY_ENV_KEYS.has(assignment.key)
+    ) {
       throw new Error(
         `overlay may not set the [env] key \`${assignment.key}\` — an overlay may set only ` +
-          `${[...ALLOWED_OVERLAY_ENV_KEYS].map((k) => `\`${k}\``).join(', ')}; every other ` +
-          '[env] value belongs to the shared config',
+          `${[...ALLOWED_OVERLAY_ENV_KEYS, PLATFORM_ENVIRONMENT_ID_KEY]
+            .map((k) => `\`${k}\``)
+            .join(', ')}; every other [env] value belongs to the shared config`,
       );
     }
 
@@ -348,6 +361,35 @@ export function assertOverlayAppMatchesEnvironment(app, environmentId, sharedPat
 }
 
 /**
+ * Bind the overlay's environment id to the requested environment.
+ *
+ * The router renders its hostnames from the environment manifest at
+ * runtime. If the overlay selects a different environment, the app can
+ * carry the production app name while serving the staging hostnames (or
+ * the reverse), so the two values must agree.
+ *
+ * @param {string|null} environmentId
+ * @param {string} requestedEnvironmentId
+ */
+export function assertOverlayEnvironmentMatchesEnvironment(
+  environmentId,
+  requestedEnvironmentId,
+) {
+  if (environmentId === null) {
+    throw new Error(
+      `the ${requestedEnvironmentId} render does not carry PLATFORM_ENVIRONMENT_ID — ` +
+        'the router cannot be bound to the environment manifest',
+    );
+  }
+  if (environmentId !== requestedEnvironmentId) {
+    throw new Error(
+      `overlay selects PLATFORM_ENVIRONMENT_ID "${environmentId}", but the render is for ` +
+        `"${requestedEnvironmentId}"`,
+    );
+  }
+}
+
+/**
  * Render the effective Fly config for one environment.
  *
  * @param {{sharedPath: string, overlayPath?: string|null, outPath?: string|null,
@@ -366,7 +408,21 @@ export function renderFlyConfig({
     ? parseOverlay(readFileSync(resolve(overlayPath), 'utf8'))
     : { app: null, env: {} };
 
-  if (environment) assertOverlayAppMatchesEnvironment(overlay.app, environment, sharedPath);
+  if (environment) {
+    assertOverlayAppMatchesEnvironment(overlay.app, environment, sharedPath);
+
+    // The environment id binds the platform router to the environment
+    // manifest at runtime. It belongs only to the platform config: the
+    // health probe has no nginx router and no such environment variable.
+    const expectedApp = expectedAppForSharedConfig(environment, sharedPath);
+    const platformApp = getPlatformEnvironment(environment).platformApp;
+    if (expectedApp === platformApp) {
+      assertOverlayEnvironmentMatchesEnvironment(
+        overlay.env[PLATFORM_ENVIRONMENT_ID_KEY] ?? null,
+        environment,
+      );
+    }
+  }
 
   const merged = mergeFlyConfig(sharedText, overlay);
   const rendered = stampHeader

@@ -107,4 +107,4 @@ The evidence artifact is captured at step 2 and attached to the task as AC2 evid
 
 - No credential, DSN, password or token — this repository is public.
 - No Fly app, spend limit, DNS record or health-probe configuration. Those belong to the other Slice D steps.
-- No production resource. As of this writing the production branch exists but carries only the `auth` and `public` schemas: no `tasks_api`, `budget_api` or `content_scheduler`, no service roles, and an empty IP allowlist.
+- No production resource. Re-read live from the provider on 2026-11-15: the production branch exists (`current_state=ready`) but carries only the `auth` and `public` schemas — no `tasks_api`, `budget_api` or `content_scheduler` — its only roles are Neon's four defaults (`neondb_owner`, `authenticator`, `anonymous`, `authenticated`), and the project restriction is unset (`allowed_ips.ips` empty, `block_public_connections` false).

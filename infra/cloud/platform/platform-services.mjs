@@ -80,6 +80,16 @@ export function platformAppFor(environmentId) {
 /** Port the in-container nginx router listens on. */
 export const ROUTER_PORT = 8080;
 
+/**
+ * Absolute path of the rendered nginx configuration.
+ *
+ * The supervisor writes this file from nginx.conf.template before it
+ * starts the router. The path must be absolute because nginx resolves a
+ * relative -c path against its compiled-in prefix rather than the
+ * process working directory.
+ */
+export const ROUTER_CONFIG_PATH = '/tmp/sindustries-platform/nginx.conf';
+
 /** Port the supervisor's status endpoint listens on (loopback only). */
 export const STATUS_PORT = 8081;
 
@@ -215,17 +225,7 @@ export const CHILDREN = [
 export const ROUTER = {
   name: 'nginx',
   role: 'router',
-  // The config path is ABSOLUTE on purpose.
-  //
-  // nginx resolves a relative `-c` path against its own compile-time
-  // prefix (`/var/lib/nginx` on alpine), NOT against the child's cwd --
-  // so the relative form failed on the live platform Machine with
-  // `nginx: [emerg] open() "/var/lib/nginx/infra/cloud/platform/nginx.conf"
-  // failed (2: No such file or directory)` and the router crash-looped.
-  // The image puts this file at /app/infra/cloud/platform/nginx.conf
-  // (platform.Dockerfile: WORKDIR /app, then COPY infra/cloud/platform
-  // ./infra/cloud/platform), so the absolute path is the one that exists.
-  command: ['nginx', '-c', '/app/infra/cloud/platform/nginx.conf', '-g', 'daemon off;'],
+  command: ['nginx', '-c', ROUTER_CONFIG_PATH, '-g', 'daemon off;'],
   port: ROUTER_PORT,
 };
 

@@ -216,14 +216,28 @@ credential boundary.
   Slice D of
   `docs/specs/production-environment-provisioning-tech-design.md` and is
   still to be captured.
-- The production Neon **branch** does exist (observed 2026-11-14 on the Neon
-  project `sindustries`; re-verify in the Neon console before creating
-  anything, because a later provider read was blocked by an egress-proxy
-  error): it carries only the `auth` and `public` schemas — none of
-  `tasks_api`, `budget_api` or `content_scheduler` — no service roles, and
-  an empty IP allowlist. The treatment it needs is contracted in
+- The production Neon **branch** does exist and was re-read live from the
+  provider on 2026-11-15 (project `sindustries`, branch `production`,
+  `current_state=ready`, primary/default branch): it carries only the
+  `auth` and `public` schemas — none of `tasks_api`, `budget_api` or
+  `content_scheduler` — and it has **no service roles**: the branch's only
+  roles are Neon's four defaults (`neondb_owner`, `authenticator`,
+  `anonymous`, `authenticated`). The project-level connectivity
+  restriction is also unset: `allowed_ips.ips` is empty and
+  `block_public_connections` is false, so the branch still accepts
+  connections from anywhere. The treatment it needs is contracted in
   `docs/cloud/production-neon-contract.md`, and the AC2 evidence gate is
   `tests/cloud/scripts/check-production-neon-evidence.mjs`.
+  - **How to read the provider:** the live Neon API base is
+    `https://console.neon.tech/api/v2` — `api.neon.tech` has no address
+    records at all, so a request to it fails at DNS and looks like a
+    provider outage. The API also requires an `org_id`
+    (`org-dry-grass-92330972`, "Stoffer Industries"), which
+    `GET /users/me/organizations` returns; `/projects` without it answers
+    `org_id is required`. From an agent shell the read must bypass the
+    egress proxy (`urllib` `build_opener(ProxyHandler({}))`, `curl
+    --noproxy '*'`): Python 3.14 rejects the proxy's MITM leaf under
+    `VERIFY_X509_STRICT`, while curl and Node succeed.
 
 ### 6. Production deploy workflows (task `fb1240c0`)
 

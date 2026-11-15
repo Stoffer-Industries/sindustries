@@ -25,7 +25,7 @@ infra/cloud/
 │   ├── platform-services.mjs   # service registry + env mapping (single source of truth)
 │   ├── platform-supervisor.mjs # entrypoint: spawns the children + the router
 │   ├── platform-migrate.mjs    # release_command: the three per-service migrations
-│   ├── nginx.conf              # in-container Host router
+│   ├── nginx.conf.template     # in-container Host router template
 │   └── tests/                  # supervisor unit tests
 ├── env/                        # Env-var contracts (no live values — owner-supplied)
 │   ├── .env.example            # cross-service env contract + per-service reference index
@@ -268,8 +268,8 @@ Production-specific properties, all enforced before anything is written:
   variable. The migrations carry their own gate, because they change the
   database.
 - The effective Fly config is the shared topology plus a small overlay
-  (app name, CORS origins, probe cadence). An overlay may set `app` and
-  the five environment-owned `[env]` keys and nothing else, so it cannot
+  (app name, environment id, CORS origins, probe cadence). An overlay may set `app` and
+  the six environment-owned `[env]` keys and nothing else, so it cannot
   fork the platform topology; and the overlay's app name must be one of
   the environment's own apps, so a stale overlay cannot deploy
   production to staging.

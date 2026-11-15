@@ -29,7 +29,7 @@
 # claimed once per app, and all three surfaces are consumed over plain
 # https://<host>/... on 443. So this app exposes ONE service — 443 -> 8080 —
 # and the in-container nginx router dispatches on the Host header to the
-# three loopback listeners (infra/cloud/platform/nginx.conf).
+# three loopback listeners (infra/cloud/platform/nginx.conf.template).
 #
 # WHY ONE PROCESS GROUP
 # ---------------------
@@ -75,6 +75,10 @@ kill_timeout = '30s'
 
 [env]
   NODE_ENV = 'production'
+  # Selects the environment-owned router hostnames rendered from the
+  # environment manifest before nginx starts. Production overrides this
+  # in platform.production.overlay.toml.
+  PLATFORM_ENVIRONMENT_ID = 'staging'
   # The router listens here; Fly's 443 maps to it.
   PLATFORM_ROUTER_PORT = '8080'
   # The supervisor's status endpoint. Loopback-only inside the Machine and

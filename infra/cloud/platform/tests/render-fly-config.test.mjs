@@ -393,6 +393,64 @@ describe('the production platform overlay matches the manifest', () => {
       production.corsAllowedOrigins.contentSchedulerApi.join(','),
     );
   });
+
+  it('binds the router to the production environment', () => {
+    assert.equal(overlay.env.PLATFORM_ENVIRONMENT_ID, production.id);
+  });
+});
+
+describe('the platform router environment is bound to the requested render', () => {
+  it('refuses a production render whose overlay selects staging', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'render-fly-config-'));
+    const overlayPath = join(directory, 'platform.staging-environment.overlay.toml');
+    writeFileSync(
+      overlayPath,
+      [
+        "app = 'sindustries-platform-production'",
+        '',
+        '[env]',
+        "  PLATFORM_ENVIRONMENT_ID = 'staging'",
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    try {
+      assert.throws(
+        () =>
+          renderFlyConfig({
+            sharedPath: repoUrl(PLATFORM_SHARED).pathname,
+            overlayPath,
+            environment: 'production',
+          }).rendered,
+        /overlay selects PLATFORM_ENVIRONMENT_ID "staging".*render is for "production"/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a production render whose overlay omits the environment', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'render-fly-config-'));
+    const overlayPath = join(directory, 'platform.missing-environment.overlay.toml');
+    writeFileSync(
+      overlayPath,
+      "app = 'sindustries-platform-production'\n",
+      'utf8',
+    );
+    try {
+      assert.throws(
+        () =>
+          renderFlyConfig({
+            sharedPath: repoUrl(PLATFORM_SHARED).pathname,
+            overlayPath,
+            environment: 'production',
+          }).rendered,
+        /does not carry PLATFORM_ENVIRONMENT_ID/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('the rendered production platform config', () => {
@@ -440,6 +498,10 @@ describe('the rendered production platform config', () => {
       assert.doesNotMatch(value, /sindustries-platform-staging/);
     }
     assert.equal(valueOf(rendered, 'app'), 'sindustries-platform-production');
+  });
+
+  it('binds the deployed router to production', () => {
+    assert.equal(valueOf(rendered, 'PLATFORM_ENVIRONMENT_ID'), 'production');
   });
 
   it('stamps the provenance of the rendered file', () => {

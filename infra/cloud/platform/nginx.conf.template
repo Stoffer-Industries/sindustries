@@ -1,5 +1,8 @@
-# nginx.conf — in-container router for the consolidated Fly staging platform
-# (task 219fb673).
+# nginx.conf.template — in-container router for the consolidated Fly
+# platform (task 219fb673; environment-aware for task fb1240c0).
+#
+# The supervisor renders this template from the environment manifest before
+# nginx starts. The topology is shared; the stable hostnames are not.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -14,11 +17,10 @@
 # The application code of all three services is untouched; only the traffic
 # entry point moved.
 #
-# The stable staging hostnames do not resolve yet (they need a Cloudflare
-# Zone:DNS:Edit token that only Tom holds — task 5cb4a8fe), so the router
-# ALSO exposes path-prefix routes on the provider hostname. That keeps the
-# platform usable and testable while DNS is blocked, and it is the interim
-# proof path used by the AC2 verification matrix.
+# The stable hostnames may not resolve yet, so the router ALSO exposes
+# path-prefix routes on the provider hostname. That keeps the platform
+# usable and testable while DNS is blocked, and it is the proof path used
+# by the hostname verification matrix.
 #
 # Host-routing is matched on the Host header, which nginx sees regardless of
 # whether the hostname resolves in DNS — so these blocks work the moment the
@@ -50,8 +52,8 @@ http {
     access_log stdout;
     include /etc/nginx/mime.types;
 
-    # The server names below reach 47 characters
-    # ("content-scheduler-api.staging.sindustries.co.nz"). nginx's default
+    # The server names below can exceed nginx's default 64-character
+    # server-name hash bucket. nginx's default
     # server_names_hash_bucket_size of 64 cannot hold them, and the router
     # then refuses to start with
     #   nginx: [emerg] could not build server_names_hash, you should
@@ -100,7 +102,7 @@ http {
     # ------------------------------------------------------------------
     server {
         listen 8080;
-        server_name tasks-api.staging.sindustries.co.nz;
+        server_name __TASKS_API_HOST__;
 
         location = /__status {
             proxy_pass http://platform_supervisor/status;
@@ -121,7 +123,7 @@ http {
 
     server {
         listen 8080;
-        server_name budget-api.staging.sindustries.co.nz;
+        server_name __BUDGET_API_HOST__;
 
         location = /__status {
             proxy_pass http://platform_supervisor/status;
@@ -142,7 +144,7 @@ http {
 
     server {
         listen 8080;
-        server_name content-scheduler-api.staging.sindustries.co.nz;
+        server_name __CONTENT_SCHEDULER_API_HOST__;
 
         location = /__status {
             proxy_pass http://platform_supervisor/status;
@@ -173,7 +175,7 @@ http {
     # ------------------------------------------------------------------
     server {
         listen 8080 default_server;
-        server_name sindustries-platform-staging.fly.dev;
+        server_name __PLATFORM_PROVIDER_HOST__;
 
         location = /__status {
             proxy_pass http://platform_supervisor/status;
@@ -230,7 +232,7 @@ http {
         # must never fall through to a service.
         location / {
             default_type application/json;
-            return 404 '{"error":"not_found","platform":"sindustries-platform-staging","hint":"use /tasks-api/, /budget-api/ or /content-scheduler-api/"}';
+            return 404 '{"error":"not_found","platform":"__PLATFORM_APP__","hint":"use /tasks-api/, /budget-api/ or /content-scheduler-api/"}';
         }
     }
 }

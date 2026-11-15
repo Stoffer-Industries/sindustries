@@ -27,7 +27,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | -------------------------------- | -------------------------------------------------------- | ------ | ------------------------------------------------------------- |
 | Compute                          | Fly.io (managed VMs, regional)                           | Quinn  | `infra/cloud/fly/*.fly.toml`                                  |
 | Application packaging            | Dockerfiles, per service                                 | Rowan  | `infra/cloud/docker/*.Dockerfile`                             |
-| HTTP services (tasks-api, budget-api, content-scheduler-api) | One Fly app, four child processes behind the nginx router's path-prefix routes; `http_checks` on the platform app | Rowan | `infra/cloud/fly/platform.fly.toml` (+ `infra/cloud/platform/nginx.conf`) |
+| HTTP services (tasks-api, budget-api, content-scheduler-api) | One Fly app, four child processes behind the nginx router's path-prefix routes; `http_checks` on the platform app | Rowan | `infra/cloud/fly/platform.fly.toml` (+ `infra/cloud/platform/nginx.conf.template`) |
 | Long-running worker              | Child process inside the platform app (no HTTP listener) | Rowan  | `infra/cloud/platform/platform-services.mjs`                 |
 | Primary database                 | Neon managed Postgres (syd region, branch-per-env)       | Quinn  | Neon dashboard (URLs in `infra/cloud/env/*.env.example`)      |
 | Queue + cache                    | Upstash managed Redis (TLS, pay-per-request)             | Quinn  | Upstash dashboard (URLs in `infra/cloud/env/*.env.example`)   |
@@ -399,13 +399,20 @@ names and a non-reproducible change hint, not values, so this step cannot
 prove the stored value. The authoritative proof remains a healthy
 Machine plus its supervisor logs.
 
-**The router's config path is absolute.** `nginx -c <path>` resolves a
-relative path against nginx's own compile-time prefix
-(`/var/lib/nginx` on alpine), not against the child's working directory,
-so the relative form failed with `nginx: [emerg] open()
-"/var/lib/nginx/infra/cloud/platform/nginx.conf" failed`. The image holds
-the file at `/app/infra/cloud/platform/nginx.conf`, so that is the path the
-router is given.
+**The router's config path is absolute, and the config is rendered from the
+environment manifest.** `nginx -c <path>` resolves a relative path against
+nginx's own compile-time prefix (`/var/lib/nginx` on alpine), not against
+the child's working directory, so the relative form failed with `nginx:
+[emerg] open() "/var/lib/nginx/infra/cloud/platform/nginx.conf" failed`.
+The image now carries the topology as
+`/app/infra/cloud/platform/nginx.conf.template`; before spawning nginx, the
+supervisor renders the environment-owned hostnames into
+`/tmp/sindustries-platform/nginx.conf` and passes that absolute path to
+nginx. Staging renders the staging stable hostnames and production renders
+the production stable hostnames from
+`infra/cloud/platform/platform-environments.mjs`. This removes the previous
+production hazard where one static staging-only nginx file would have made
+the production app route production traffic by staging hostnames.
 
 **The router logs on the inherited fd, not on a device node.** The
 supervisor spawns every child — the router included — with PIPED stdio. In
@@ -524,7 +531,7 @@ Asserting `providerFallback` against a staging hostname demands a CNAME to the *
 
 The static checks `tests/cloud/scripts/check-stable-hostname-matrix.mjs` and `tests/cloud/scripts/check-stable-url-fallbacks.mjs` enforce the matrix on every CI run; both pass on the committed tree at the time of writing.
 
-Until the stable CNAMEs land, staging is reached on the one consolidated platform app, one path prefix per API surface. The four per-service staging Fly apps (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`, `sindustries-content-scheduler-api-staging`, `sindustries-auto-post-worker-staging`) were destroyed by the 2026-11-07 cutover (task `219fb673`); the three API services and the auto-post worker now run as supervisor children of the platform app, and the in-container nginx router strips the matched path prefix before proxying (`infra/cloud/platform/nginx.conf`).
+Until the stable CNAMEs land, staging is reached on the one consolidated platform app, one path prefix per API surface. The four per-service staging Fly apps (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`, `sindustries-content-scheduler-api-staging`, `sindustries-auto-post-worker-staging`) were destroyed by the 2026-11-07 cutover (task `219fb673`); the three API services and the auto-post worker now run as supervisor children of the platform app, and the in-container nginx router strips the matched path prefix before proxying. The shared router topology lives in `infra/cloud/platform/nginx.conf.template`; the supervisor renders the environment-specific hostnames from the environment manifest at boot.
 
 - `https://sindustries-platform-staging.fly.dev/tasks-api/health` <!-- stable-fallback: documented-migration; superseded by https://tasks-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
 - `https://sindustries-platform-staging.fly.dev/budget-api/health` <!-- stable-fallback: documented-migration; superseded by https://budget-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->

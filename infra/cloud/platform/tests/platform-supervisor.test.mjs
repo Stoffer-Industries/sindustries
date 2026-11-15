@@ -16,7 +16,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, it } from 'node:test';
 
@@ -28,7 +30,8 @@ import {
   invalidRequiredSources,
   missingRequiredSources,
 } from '../platform-services.mjs';
-import { Child, createSupervisor } from '../platform-supervisor.mjs';
+import { assertSafeHostValue, renderRouterConfig } from '../platform-router-config.mjs';
+import { Child, createSupervisor, renderRouterConfigForEnvironment } from '../platform-supervisor.mjs';
 
 /**
  * A fake child process: an EventEmitter with the surface the supervisor
@@ -147,7 +150,7 @@ describe('the nginx router', () => {
 });
 
 describe('the nginx router config', () => {
-  const config = readFileSync(new URL('../nginx.conf', import.meta.url), 'utf8');
+  const config = readFileSync(new URL('../nginx.conf.template', import.meta.url), 'utf8');
   // Directives only: the comments in this file name the failing forms on
   // purpose, so a raw text scan would match its own explanation.
   const directives = config
@@ -200,6 +203,113 @@ describe('the nginx router config', () => {
       size >= longest * 2,
       `the bucket size must hold the longest server name (${longest} chars) with room to spare, got ${size}`,
     );
+  });
+});
+
+describe('the environment-aware nginx router', () => {
+  const template = readFileSync(new URL('../nginx.conf.template', import.meta.url), 'utf8');
+
+  it('renders the staging stable hostnames for staging', () => {
+    const rendered = renderRouterConfig('staging', template);
+    assert.match(rendered, /server_name tasks-api\.staging\.sindustries\.co\.nz;/);
+    assert.match(rendered, /server_name budget-api\.staging\.sindustries\.co\.nz;/);
+    assert.match(rendered, /server_name content-scheduler-api\.staging\.sindustries\.co\.nz;/);
+    assert.match(rendered, /server_name sindustries-platform-staging\.fly\.dev;/);
+    assert.doesNotMatch(rendered, /server_name tasks-api\.sindustries\.co\.nz;/);
+  });
+
+  it('renders the production stable hostnames for production', () => {
+    const rendered = renderRouterConfig('production', template);
+    assert.match(rendered, /server_name tasks-api\.sindustries\.co\.nz;/);
+    assert.match(rendered, /server_name budget-api\.sindustries\.co\.nz;/);
+    assert.match(rendered, /server_name content-scheduler-api\.sindustries\.co\.nz;/);
+    assert.match(rendered, /server_name sindustries-platform-production\.fly\.dev;/);
+    assert.doesNotMatch(rendered, /\.staging\.sindustries\.co\.nz/);
+  });
+
+  it('leaves no unresolved placeholder behind', () => {
+    const rendered = renderRouterConfig('production', template);
+    assert.doesNotMatch(rendered, /__[A-Z0-9_]+__/);
+  });
+});
+
+describe('the router the runtime renders', () => {
+  const templatePath = new URL('../nginx.conf.template', import.meta.url);
+
+  const renderFor = (env) => {
+    const directory = mkdtempSync(join(tmpdir(), 'platform-router-'));
+    const outputPath = join(directory, 'nginx.conf');
+    const environmentId = renderRouterConfigForEnvironment(env, { templatePath, outputPath });
+    return { environmentId, rendered: readFileSync(outputPath, 'utf8') };
+  };
+
+  it('renders the production hostnames when the Machine runs the production app', () => {
+    const { environmentId, rendered } = renderFor({
+      FLY_APP_NAME: 'sindustries-platform-production',
+      PLATFORM_ENVIRONMENT_ID: 'production',
+    });
+    assert.equal(environmentId, 'production');
+    assert.match(rendered, /server_name tasks-api\.sindustries\.co\.nz;/);
+    assert.match(rendered, /server_name sindustries-platform-production\.fly\.dev;/);
+    assert.doesNotMatch(rendered, /\.staging\.sindustries\.co\.nz/);
+  });
+
+  it('renders the staging hostnames when the Machine runs the staging app', () => {
+    const { environmentId, rendered } = renderFor({
+      FLY_APP_NAME: 'sindustries-platform-staging',
+      PLATFORM_ENVIRONMENT_ID: 'staging',
+    });
+    assert.equal(environmentId, 'staging');
+    assert.match(rendered, /server_name tasks-api\.staging\.sindustries\.co\.nz;/);
+    assert.doesNotMatch(rendered, /server_name tasks-api\.sindustries\.co\.nz;/);
+  });
+
+  it('refuses to render when the app and the declared environment disagree', () => {
+    assert.throws(
+      () =>
+        renderFor({
+          FLY_APP_NAME: 'sindustries-platform-production',
+          PLATFORM_ENVIRONMENT_ID: 'staging',
+        }),
+      /refusing to start/,
+    );
+  });
+
+  it('refuses to render for an app that owns no platform environment', () => {
+    assert.throws(
+      () => renderFor({ FLY_APP_NAME: 'sindustries-platform-stagin' }),
+      /not a known platform app/,
+    );
+  });
+
+  it('leaves no partial config behind when the render is refused', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'platform-router-'));
+    const outputPath = join(directory, 'nginx.conf');
+    assert.throws(
+      () =>
+        renderRouterConfigForEnvironment(
+          { FLY_APP_NAME: 'sindustries-platform-production', PLATFORM_ENVIRONMENT_ID: 'staging' },
+          { templatePath, outputPath },
+        ),
+      /refusing to start/,
+    );
+    // The render is refused BEFORE the write, so nginx can never read a
+    // half-written config.
+    assert.equal(existsSync(outputPath), false);
+  });
+});
+
+describe('the nginx router render boundary', () => {
+  it('refuses a value that is not a plain hostname', () => {
+    assert.throws(
+      () => assertSafeHostValue('tasks-api.example.com"; server_name evil', 'the tasks API hostname'),
+      /is not a plain hostname/,
+    );
+  });
+
+  it('refuses a value carrying nginx punctuation or whitespace', () => {
+    assert.throws(() => assertSafeHostValue('a b', 'the app name'), /is not a plain hostname/);
+    assert.throws(() => assertSafeHostValue('app;rm -rf /', 'the app name'), /is not a plain hostname/);
   });
 });
 
