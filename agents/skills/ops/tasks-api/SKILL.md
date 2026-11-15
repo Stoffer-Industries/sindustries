@@ -102,6 +102,40 @@ branch without rewriting the reviewed commits — see the "When the merge is
 refused because the branch is behind `main`" section of
 `agents/skills/dev/pr-process/SKILL.md`.
 
+### Draft PRs are never merge candidates
+
+The unified queue excludes **draft** PRs from `mergeCandidates`. GitHub refuses
+to merge a draft, and the draft flag is the author's own signal that the work
+is not ready to land, so a draft PR is never a merge candidate regardless of
+its approval, CI or mergeability state.
+
+A draft is not silently dropped. Drafts authored by the agent are reported in
+the dedicated `authoredDraftPrs` collection, which carries the PR's draft
+state, the reason it is not a merge candidate, and the next action:
+
+```jsonc
+{
+  "id": "Stoffer-Industries/sindustries#979",
+  "number": 979,
+  "isDraft": true,
+  "eligibleExceptDraft": true,   // every other merge precondition is met
+  "reason": "authored PR is a draft; GitHub refuses to merge a draft PR",
+  "nextAction": "convert the PR to ready-for-review once the implementation is complete, then merge after the blocking approval and green CI"
+}
+```
+
+`eligibleExceptDraft` is `true` when the draft satisfies every other merge
+precondition — blocking approval present, CI green, `mergeable`, no
+outstanding changes requested — so the only thing standing between it and a
+merge is the draft flag itself.
+
+`authoredDraftPrs` is **visibility only**: its entries are emitted into the
+`queue` list with `actionable: false`, so a draft can never become the
+queue's `topCandidate`. A deliberate draft must not displace real work — task
+`c2e3a106` tracked the defect where PR #979 was ranked as the top merge
+candidate on every heartbeat despite being a draft that was explicitly meant
+to stay a draft.
+
 ### Attention owners: ordered action and escalation stack
 
 Use `agents/skills/ops/attention-owner-routing/SKILL.md` for the complete

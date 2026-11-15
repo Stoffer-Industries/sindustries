@@ -379,11 +379,19 @@ PR numbers are repo-scoped, so every emitted PR item carries its repository:
 }
 ```
 
-`id` is `<owner>/<name>#<number>` on all four PR collections
+`id` is `<owner>/<name>#<number>` on all five PR collections
 (`reviewRequests`, `authoredPrConflicts`, `authoredPrFeedback`,
-`mergeCandidates`), so `workspace#83` and `sindustries#83` coexist without
-overwriting each other. A delivery link is fetched from the repo named by its
-own URL, never from a constant.
+`mergeCandidates`, `authoredDraftPrs`), so `workspace#83` and
+`sindustries#83` coexist without overwriting each other. A delivery link is
+fetched from the repo named by its own URL, never from a constant.
+
+Draft PRs are excluded from `mergeCandidates` — GitHub refuses to merge a
+draft, and the draft flag is the author's signal that the work is not ready to
+land. A draft is not dropped from the queue's GitHub surface: it is reported
+in `authoredDraftPrs` with its draft state, the reason it is not a merge
+candidate, and the next action. Those entries are emitted into the `queue`
+list with `actionable: false`, so a deliberate draft never becomes the
+queue's `topCandidate` and never displaces real work.
 
 The JSON envelope reports the projection coverage of each repository, so an
 empty PR collection is never ambiguous:

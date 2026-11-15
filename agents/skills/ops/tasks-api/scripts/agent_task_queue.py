@@ -109,6 +109,7 @@ QUEUE_KIND_ORDER = {
     "task": 5,
     "workflowGate": 6,
     "attentionPage": 7,
+    "authoredDraftPr": 8,
 }
 TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
 # Per-call budget for `_gh_api`. Down from `safe_run`'s 25s default; bounded so
@@ -806,6 +807,7 @@ def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list
     authored_conflicts = []
     authored_feedback = []
     merge_candidates = []
+    authored_drafts = []
 
     for pr in prs:
         author = str((pr.get("user") or {}).get("login") or "").lower()
@@ -858,19 +860,57 @@ def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list
         approvals_present = bool(blocking) and all(
             latest.get(reviewer) == "APPROVED" for reviewer in blocking
         )
-        if (
+        # A draft PR is never mergeable: GitHub refuses to merge a draft, and
+        # the draft flag is the author's own signal that the work is not ready
+        # to land. This predicate used to ignore `draft`, so a deliberately
+        # draft PR with a blocking approval and green CI was ranked as the top
+        # merge candidate on every heartbeat while being impossible to merge
+        # (task c2e3a106; retro pattern
+        # `merge-candidate-path-ignores-draft-state`).
+        merge_preconditions_met = (
             approvals_present
             and ci_green
             and pr.get("mergeable") is True
             and not changes_requested_by
-        ):
+        )
+        if merge_preconditions_met and not pr.get("draft"):
             merge_candidates.append({**summary, "approvedBy": blocking})
+        elif pr.get("draft") and str(pr.get("state") or "").lower() == "open":
+            # Keep the PR visible instead of silently dropping it from the
+            # queue's GitHub surface: the draft state, why it is not a merge
+            # candidate, and the next action all travel with the item.
+            missing = []
+            if not approvals_present:
+                missing.append("blocking approval")
+            if not ci_green:
+                missing.append("green CI")
+            if pr.get("mergeable") is not True:
+                missing.append("a mergeable head")
+            if changes_requested_by:
+                missing.append("no outstanding change requests")
+            authored_drafts.append(
+                {
+                    **summary,
+                    "isDraft": True,
+                    "eligibleExceptDraft": merge_preconditions_met,
+                    "reason": (
+                        "authored PR is a draft; GitHub refuses to merge a draft PR"
+                        + (f" (also missing: {', '.join(missing)})" if missing else "")
+                    ),
+                    "nextAction": (
+                        "convert the PR to ready-for-review once the implementation "
+                        "is complete, then merge after the blocking approval and "
+                        "green CI"
+                    ),
+                }
+            )
 
     return {
         "reviewRequests": review_requests,
         "authoredPrConflicts": authored_conflicts,
         "authoredPrFeedback": authored_feedback,
         "mergeCandidates": merge_candidates,
+        "authoredDraftPrs": authored_drafts,
     }
 
 
@@ -1273,6 +1313,11 @@ def build_unified_queue(
         items.append({"kind": "authoredPrFeedback", "actionable": True, **item})
     for item in github_queue["mergeCandidates"]:
         items.append({"kind": "mergeCandidate", "actionable": True, **item})
+    # Authored drafts are surfaced for visibility only. A draft PR is
+    # deliberately not ready to land, so it must never outrank real work and
+    # never become the queue's topCandidate (task c2e3a106 AC1).
+    for item in github_queue.get("authoredDraftPrs", []):
+        items.append({"kind": "authoredDraftPr", "actionable": False, **item})
     for item in github_queue["reviewRequests"]:
         items.append({"kind": "reviewRequest", "actionable": True, **item})
     for item in tech_design_approvals:
@@ -1505,6 +1550,9 @@ def main() -> None:
         print(f"Merge candidates: {len(queue['mergeCandidates'])}")
         for item in queue["mergeCandidates"]:
             print(f"  - {item.get('id')} {item.get('title')}")
+        print(f"Authored draft PRs (not merge candidates): {len(queue['authoredDraftPrs'])}")
+        for item in queue["authoredDraftPrs"]:
+            print(f"  - {item.get('id')} {item.get('title')} — {item.get('reason')}")
         print(f"Scanned repos: {', '.join(queue.get('scannedRepos') or [])}")
         for row in queue.get("repoCoverage") or []:
             detail = f"open={row.get('openPrCount')} hydrated={row.get('detailPrsHydrated')}"
