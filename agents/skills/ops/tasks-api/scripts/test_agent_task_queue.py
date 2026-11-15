@@ -432,6 +432,7 @@ class AgentTaskQueueTest(unittest.TestCase):
                 "authoredPrConflicts",
                 "authoredPrFeedback",
                 "mergeCandidates",
+                "authoredDraftPrs",
                 "attentionOwner",
                 "attentionPages",
                 "workflowGateOwner",
@@ -607,6 +608,102 @@ class AgentTaskQueueTest(unittest.TestCase):
             [],
             agent_task_queue.classify_github_prs("Rowan", [approved])["mergeCandidates"],
         )
+
+    # ---- draft PRs are never merge candidates (task c2e3a106) ----
+
+    def test_draft_pr_is_never_a_merge_candidate(self):
+        # GitHub refuses to merge a draft, so a draft PR that satisfies every
+        # other merge precondition (blocking approval, green CI, mergeable,
+        # no outstanding changes requested) must not be ranked as a merge
+        # candidate. Regression: PR #979 was returned as the queue's
+        # topCandidate on every heartbeat despite being a deliberate draft.
+        draft = pull_request(
+            draft=True,
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        queue = agent_task_queue.classify_github_prs("Rowan", [draft])
+        self.assertEqual([], queue["mergeCandidates"])
+
+    def test_draft_pr_stays_visible_with_its_reason_and_next_action(self):
+        # Excluding a draft from mergeCandidates must not silently drop it
+        # from the queue's GitHub surface: it still appears in the dedicated
+        # collection with its draft state, the reason it is not a merge
+        # candidate, and the next action.
+        draft = pull_request(
+            draft=True,
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        drafts = agent_task_queue.classify_github_prs("Rowan", [draft])["authoredDraftPrs"]
+        self.assertEqual(1, len(drafts))
+        item = drafts[0]
+        self.assertEqual(42, item["number"])
+        self.assertTrue(item["isDraft"])
+        self.assertTrue(item["eligibleExceptDraft"])
+        self.assertIn("draft", item["reason"])
+        self.assertIn("ready-for-review", item["nextAction"])
+
+    def test_non_draft_pr_with_the_same_approvals_and_ci_is_still_a_merge_candidate(self):
+        # The non-draft merge path must be unchanged by the draft rule.
+        non_draft = pull_request(
+            draft=False,
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        queue = agent_task_queue.classify_github_prs("Rowan", [non_draft])
+        self.assertEqual([42], [item["number"] for item in queue["mergeCandidates"]])
+        self.assertEqual([], queue["authoredDraftPrs"])
+
+    def test_draft_pr_missing_other_preconditions_is_still_visible_with_them_named(self):
+        # A draft that is also missing CI is still surfaced, and the reason
+        # names what else is outstanding so the next action is unambiguous.
+        draft = pull_request(
+            draft=True,
+            reviews=[],
+        )
+        draft["check_runs"][0]["conclusion"] = "failure"
+        drafts = agent_task_queue.classify_github_prs("Rowan", [draft])["authoredDraftPrs"]
+        self.assertEqual(1, len(drafts))
+        self.assertFalse(drafts[0]["eligibleExceptDraft"])
+        self.assertIn("blocking approval", drafts[0]["reason"])
+        self.assertIn("green CI", drafts[0]["reason"])
+
+    def test_draft_pr_never_becomes_the_queue_top_candidate(self):
+        # Even when the draft is the only PR in the queue, it must not be
+        # surfaced as the actionable top candidate.
+        draft = pull_request(
+            draft=True,
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        queue = agent_task_queue.build_work_queue([], "Rowan", [draft], [])
+        self.assertIsNone(queue["topCandidate"])
+        draft_items = [
+            item for item in queue["queue"] if item.get("kind") == "authoredDraftPr"
+        ]
+        self.assertEqual(1, len(draft_items))
+        self.assertFalse(draft_items[0]["actionable"])
 
     def test_ivy_merge_candidate_uses_pr_specific_blocking_reviewer(self):
         pr = pull_request(
@@ -1751,6 +1848,7 @@ class MultiRepoScanTest(unittest.TestCase):
             "authoredPrConflicts",
             "authoredPrFeedback",
             "mergeCandidates",
+            "authoredDraftPrs",
         ):
             for item in queue[collection]:
                 self.assertTrue(item["repo"], item)
