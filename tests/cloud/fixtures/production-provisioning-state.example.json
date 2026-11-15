@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "environment": "production",
   "capturedAt": "2026-11-16T00:30:00.000Z",
   "operatorEvidence": {
@@ -7,27 +7,49 @@
       "recorded": true,
       "readBackAt": "2026-11-15T22:05:00.000Z",
       "scope": "personal organization - production app scope",
-      "evidenceRef": "operator-evidence/fly-spend-limit-readback.txt"
+      "evidenceRef": "operator-evidence/fly-spend-limit-readback.txt",
+      "targets": [
+        "sindustries-platform-production"
+      ]
     },
     "neonSeparationDenialProof": {
       "recorded": true,
       "readBackAt": "2026-11-15T22:10:00.000Z",
-      "evidenceRef": "operator-evidence/neon-separation-denial.txt"
+      "evidenceRef": "operator-evidence/neon-separation-denial.txt",
+      "targets": [
+        "production",
+        "staging",
+        "dev"
+      ]
     },
     "productionProbeInterval": {
       "recorded": true,
       "readBackAt": "2026-11-15T23:00:00.000Z",
-      "evidenceRef": "operator-evidence/production-probe-interval.txt"
+      "evidenceRef": "operator-evidence/production-probe-interval.txt",
+      "targets": [
+        "sindustries-health-probe-production"
+      ]
     },
     "productionApiHealthResponses": {
       "recorded": true,
       "readBackAt": "2026-11-15T23:10:00.000Z",
-      "evidenceRef": "operator-evidence/production-api-health.txt"
+      "evidenceRef": "operator-evidence/production-api-health.txt",
+      "targets": [
+        "tasks-api.sindustries.co.nz",
+        "budget-api.sindustries.co.nz",
+        "content-scheduler-api.sindustries.co.nz"
+      ]
     },
     "dnsResolutionAndTlsReadback": {
       "recorded": true,
       "readBackAt": "2026-11-15T23:20:00.000Z",
-      "evidenceRef": "operator-evidence/production-dns-tls.txt"
+      "evidenceRef": "operator-evidence/production-dns-tls.txt",
+      "targets": [
+        "tasks-api.sindustries.co.nz",
+        "budget-api.sindustries.co.nz",
+        "content-scheduler-api.sindustries.co.nz",
+        "health-probe.sindustries.co.nz"
+      ]
     }
   },
   "providers": {

@@ -22,12 +22,32 @@
 //
 // THE RECORD IS VALUE-FREE
 //
-// A slot carries a boolean, an ISO-8601 read-back time and a POINTER to
-// the read-back (a file name or path). A value must never reach the
+// A slot carries a boolean, an ISO-8601 read-back time, a POINTER to
+// the read-back (a file name or path) and the LIST of production
+// surfaces the read-back covered. A value must never reach the
 // artifact: the artifact is committed and pasted into public task
 // comments. The checker scans the whole artifact for credential-shaped
 // values, and this module keeps the operator section to shapes that
 // cannot carry one.
+//
+// THE RECORD MUST BE BOUND TO WHAT IT PROVES
+//
+// A boolean on its own proves only that a statement was made. It says
+// nothing about WHAT was read back: a recorded `true` with the scope
+// "done" would close the DNS resolution read-back while no production
+// hostname resolved at all. So a recorded slot also names the
+// production surfaces the read-back covered, and the checker compares
+// that list against the surfaces the repository expects for THAT slot —
+// the production app scope for the spend limit, the production
+// health-probe app for the probe interval, the three production API
+// hostnames for the health responses, the production hostnames for the
+// DNS/TLS read-back, and the production branch with the staging and dev
+// credentials for the Neon denial proof.
+//
+// An expectation set that names nothing cannot prove anything, so the
+// same rule applies here in both directions: a record that names none
+// of the expected surfaces, or names a surface the repository does not
+// expect, leaves the obligation open.
 //
 // Usage:
 //   import { validateOperatorEvidence, operatorEvidenceRecorded } from
@@ -38,6 +58,7 @@ export const OPERATOR_EVIDENCE_SLOTS = [
   {
     slot: 'flySpendLimit',
     gate: 'fly.spend-limit-readback',
+    coverage: 'platformAppScope',
     label: 'Fly organization spend limit',
     step: 'Slice D step 6',
     owner: 'Quinn / Tom',
@@ -47,6 +68,7 @@ export const OPERATOR_EVIDENCE_SLOTS = [
   {
     slot: 'neonSeparationDenialProof',
     gate: 'neon.separation-denial-proof',
+    coverage: 'neonSeparation',
     label: 'Staging/dev denial proof',
     step: 'Slice D step 2',
     owner: 'Quinn (operator)',
@@ -56,6 +78,7 @@ export const OPERATOR_EVIDENCE_SLOTS = [
   {
     slot: 'productionProbeInterval',
     gate: 'health.production-probe-interval',
+    coverage: 'healthProbeApp',
     label: 'One successful production probe interval',
     step: 'Slice D step 7',
     owner: 'Quinn (operator)',
@@ -64,6 +87,7 @@ export const OPERATOR_EVIDENCE_SLOTS = [
   {
     slot: 'productionApiHealthResponses',
     gate: 'health.production-api-responses',
+    coverage: 'productionApiHostnames',
     label: 'Production API health responses',
     step: 'Slice D step 9',
     owner: 'Quinn (operator)',
@@ -72,6 +96,7 @@ export const OPERATOR_EVIDENCE_SLOTS = [
   {
     slot: 'dnsResolutionAndTlsReadback',
     gate: 'dns.resolution-and-tls-readback',
+    coverage: 'productionHostnames',
     label: 'Production DNS resolution and TLS read-back',
     step: 'Slice D step 8',
     owner: 'Quinn (operator)',
@@ -86,7 +111,7 @@ export const OPERATOR_EVIDENCE_SLOT_NAMES = OPERATOR_EVIDENCE_SLOTS.map(
 );
 
 /** The fields a slot may carry. */
-const SLOT_FIELDS = ['recorded', 'readBackAt', 'scope', 'evidenceRef'];
+const SLOT_FIELDS = ['recorded', 'readBackAt', 'scope', 'evidenceRef', 'targets'];
 
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
@@ -96,6 +121,15 @@ const SAFE_SCOPE = /^[A-Za-z0-9 ._:/-]{1,120}$/;
 
 /** A pointer to a read-back: a file name or path, never the value itself. */
 const SAFE_EVIDENCE_REF = /^[A-Za-z0-9._/-]{1,200}$/;
+
+/**
+ * A covered surface: a hostname, an app name or a credential kind.
+ *
+ * The targets are identifiers, never values — a hostname and an app name
+ * are names the repository already publishes, and a credential kind is a
+ * word, not a credential.
+ */
+const SAFE_TARGET = /^[A-Za-z0-9._:-]{1,200}$/;
 
 /**
  * Is this an ISO-8601 date-time with an explicit timezone?
@@ -168,6 +202,25 @@ export function validateOperatorEvidence(value) {
         `the operator evidence slot "${slot}" carries an unusable "evidenceRef" — it must point at the read-back, not carry it`,
       );
     }
+    if (!Array.isArray(entry.targets)) {
+      problems.push(`the operator evidence slot "${slot}" must carry a "targets" array`);
+    } else if (entry.targets.length === 0) {
+      problems.push(
+        `the operator evidence slot "${slot}" must name at least one production surface in "targets"`,
+      );
+    } else {
+      for (const target of entry.targets) {
+        if (typeof target !== 'string' || !SAFE_TARGET.test(target)) {
+          problems.push(
+            `the operator evidence slot "${slot}" carries an unusable target — a target names a surface, it is never a value`,
+          );
+          break;
+        }
+      }
+      if (new Set(entry.targets).size !== entry.targets.length) {
+        problems.push(`the operator evidence slot "${slot}" repeats a target`);
+      }
+    }
   }
 
   return { ok: problems.length === 0, present: true, problems };
@@ -183,6 +236,53 @@ export function validateOperatorEvidence(value) {
 export function operatorEvidenceRecorded(evidence, slot) {
   const entry = evidence?.[slot];
   return Boolean(entry && typeof entry === 'object' && entry.recorded === true);
+}
+
+/**
+ * How well a recorded slot covers the surfaces it must prove.
+ *
+ * The expected set is the surfaces the REPOSITORY expects for this slot
+ * — derived by the checker from the environment manifest and the
+ * hostname matrix, never from the artifact. A slot is covered only when
+ * it names EVERY expected surface and nothing else:
+ *
+ * - a slot that names none of them proves nothing and stays open;
+ * - a slot that names only some of them proves only part of the
+ *   obligation and stays open;
+ * - a slot that names a surface the repository does not expect has
+ *   proved something else, so it stays open.
+ *
+ * An EMPTY expected set never counts as covered: there would be nothing
+ * to compare, and "all 0 required surfaces are covered" is not evidence.
+ *
+ * @param {unknown} evidence
+ * @param {string} slot
+ * @param {string[]} expectedTargets
+ * @returns {{recorded: boolean, targets: string[], expected: string[], missing: string[], extra: string[], covered: boolean}}
+ */
+export function operatorEvidenceCoverage(evidence, slot, expectedTargets) {
+  const expected = [...new Set((Array.isArray(expectedTargets) ? expectedTargets : []).filter(
+    (target) => typeof target === 'string' && target.length > 0,
+  ))];
+  const entry = evidence?.[slot];
+  const recorded = Boolean(entry && typeof entry === 'object' && entry.recorded === true);
+  if (!recorded) {
+    return { recorded: false, targets: [], expected, missing: expected, extra: [], covered: false };
+  }
+  const targets = Array.isArray(entry.targets)
+    ? entry.targets.filter((target) => typeof target === 'string')
+    : [];
+  const targetSet = new Set(targets);
+  const missing = expected.filter((target) => !targetSet.has(target));
+  const extra = [...targetSet].filter((target) => !expected.includes(target));
+  return {
+    recorded: true,
+    targets,
+    expected,
+    missing,
+    extra,
+    covered: expected.length > 0 && missing.length === 0 && extra.length === 0,
+  };
 }
 
 /**

@@ -207,11 +207,80 @@ credential boundary.
   resolution/TLS read-back — are closed by an OPERATOR READ-BACK recorded
   in the provisioning-state artifact's `operatorEvidence` section
   (`capture-production-provisioning-state.mjs --operator-evidence <file>`).
-  The record carries a boolean, a read-back time and a pointer to the
-  read-back, never a value. The `fly.spend-limit-before-public-exposure`
+  The record carries a boolean, a read-back time, a pointer to the
+  read-back and the production surfaces it covered, never a value. The
+  `fly.spend-limit-before-public-exposure`
   gate enforces the order the approved design makes a hard gate: while a
   production hostname is published or the production health-probe app is
   running, an artifact with no recorded spend-limit read-back fails.
+- A recorded read-back must also name the production surfaces it covered,
+  in `targets`. A boolean on its own proves only that a statement was
+  made: a record with the scope "done" would otherwise close the DNS
+  read-back while no production hostname resolved at all. The checker
+  compares `targets` against the surfaces the repository expects for that
+  slot and leaves the obligation open when the record names none of them,
+  names only some of them, or names a surface production does not use.
+  The app names and hostnames are derived from the environment manifest
+  and the hostname matrix; the Neon credential kinds are fixed by the
+  Neon contract. The expected sets therefore cannot drift with the
+  deployed topology:
+
+  | Slot | `targets` must name |
+  | --- | --- |
+  | flySpendLimit | `sindustries-platform-production` — the production app scope the limit is set on |
+  | productionProbeInterval | `sindustries-health-probe-production` — the app the interval must be observed on |
+  | productionApiHealthResponses | `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz`, `content-scheduler-api.sindustries.co.nz` — the three production APIs, served by `sindustries-platform-production` |
+  | dnsResolutionAndTlsReadback | `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz`, `content-scheduler-api.sindustries.co.nz` — served by `sindustries-platform-production` |
+  | dnsResolutionAndTlsReadback | `health-probe.sindustries.co.nz` — served by `sindustries-health-probe-production` |
+  | neonSeparationDenialProof | `production`, `staging`, `dev` — the production branch and BOTH refused credentials |
+
+  The operator evidence file therefore looks like this (the timestamps and
+  pointers are the operator's own):
+
+  ```json
+  {
+    "flySpendLimit": {
+      "recorded": true,
+      "readBackAt": "2026-11-16T09:00:00.000Z",
+      "scope": "personal organization - production app scope",
+      "evidenceRef": "operator-evidence/fly-spend-limit-readback.txt",
+      "targets": ["sindustries-platform-production"]
+    },
+    "neonSeparationDenialProof": {
+      "recorded": true,
+      "readBackAt": "2026-11-16T09:10:00.000Z",
+      "evidenceRef": "operator-evidence/neon-separation-denial.txt",
+      "targets": ["production", "staging", "dev"]
+    },
+    "productionProbeInterval": {
+      "recorded": true,
+      "readBackAt": "2026-11-16T09:20:00.000Z",
+      "evidenceRef": "operator-evidence/production-probe-interval.txt",
+      "targets": ["sindustries-health-probe-production"]
+    },
+    "productionApiHealthResponses": {
+      "recorded": true,
+      "readBackAt": "2026-11-16T09:30:00.000Z",
+      "evidenceRef": "operator-evidence/production-api-health.txt",
+      "targets": [
+        "tasks-api.sindustries.co.nz",
+        "budget-api.sindustries.co.nz",
+        "content-scheduler-api.sindustries.co.nz"
+      ]
+    },
+    "dnsResolutionAndTlsReadback": {
+      "recorded": true,
+      "readBackAt": "2026-11-16T09:40:00.000Z",
+      "evidenceRef": "operator-evidence/production-dns-tls.txt",
+      "targets": [
+        "tasks-api.sindustries.co.nz",
+        "budget-api.sindustries.co.nz",
+        "content-scheduler-api.sindustries.co.nz",
+        "health-probe.sindustries.co.nz"
+      ]
+    }
+  }
+  ```
 - `platform-provision-secrets.mjs --environment production` derives the
   production app name and the `PRODUCTION_*` secret source names from the
   environment manifest

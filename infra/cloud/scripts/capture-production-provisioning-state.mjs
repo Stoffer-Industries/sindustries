@@ -37,8 +37,8 @@
 // The operator read-backs (the five obligations no machine can prove) are
 // merged into the artifact from an operator-owned JSON file. The capture
 // performs no read for them: they are facts only the operator can observe.
-// The file carries a boolean, a read-back time and a POINTER to the
-// read-back — never a value.
+// The file carries a boolean, a read-back time, a POINTER to the
+// read-back and the production surfaces it covered — never a value.
 // Credentials (read from the environment, never from a file in the repo):
 //   NEON_API_KEY          Neon management API
 //   FLY_API_TOKEN         Fly GraphQL API
@@ -190,7 +190,8 @@ function parseArgs(argv) {
  * Read the operator's read-backs from a file.
  *
  * The file is operator-owned and holds NO values: a boolean, a read-back
- * time and a pointer to the read-back. A file that cannot be read, or that
+ * time, a pointer to the read-back and the production surfaces it covered.
+ * A file that cannot be read, or that
  * carries a shape the checker would reject, is REFUSED rather than
  * dropped: a silently dropped read-back turns a recorded spend limit into
  * an unrecorded one and flips the ordering gate red with no explanation.
@@ -1218,7 +1219,7 @@ async function main(argv) {
     // AC5 could not be satisfied even after the operator had set the
     // limit. Version 6 carries the operator's value-free read-backs, and
     // the checker binds them to the obligations they close.
-    schemaVersion: 6,
+    schemaVersion: 7,
     environment: 'production',
     capturedAt: new Date().toISOString(),
     providers: { neon, fly, github, upstash, cloudflare },
