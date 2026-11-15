@@ -47,13 +47,19 @@ import { exit, stderr, stdout } from 'node:process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+  PROBE_TARGET_KEYS,
+  hostFingerprint,
+  hostOfTargetValue,
+} from '../../../infra/cloud/platform/probe-target-facts.mjs';
+
 const DEFAULTS = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
   return join(here, '..', '..', '..');
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 2;
+export const SUPPORTED_SCHEMA_VERSION = 3;
 
 /** Neon's four default roles — they are not service roles. */
 const NEON_DEFAULT_ROLES = new Set([
@@ -239,6 +245,9 @@ export function evaluateProvisioningState(state, options = {}) {
   const expectedSchemas = [...(options.expectedSchemas ?? [])];
   const expectedPlatformSecretNames = [...(options.expectedPlatformSecretNames ?? [])];
   const expectedProbeCadence = { ...(options.expectedProbeCadence ?? {}) };
+  const expectedProductionHostFingerprints = [
+    ...(options.expectedProductionHostFingerprints ?? []),
+  ].filter((fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0);
   const dnsExpectations = options.dnsExpectations ?? { zoneName: null, surfaces: [] };
 
   const rows = [];
@@ -617,7 +626,9 @@ export function evaluateProvisioningState(state, options = {}) {
   // --- Upstash: AC4 — a production Redis database -------------------------
 
   if (providerCaptured('upstash')) {
-    const databaseNames = asArray(providers.upstash.databaseNames);
+    const databaseNames = asArray(providers.upstash.databases)
+      .map((database) => database?.name)
+      .filter(Boolean);
     const productionDatabases = databaseNames.filter((name) =>
       /production/i.test(String(name)),
     );
@@ -818,6 +829,148 @@ export function evaluateProvisioningState(state, options = {}) {
           );
         }
       }
+    }
+  }
+
+  // --- AC6: the DEPLOYED production probe is pointed at production targets
+
+  //
+  // AC6 has two halves: the probe must run the production cadence, and it
+  // must be pointed at the NEW PRODUCTION TARGETS. The cadence gate above
+  // proves the first. Nothing proved the second: a production probe
+  // carrying the production cadence while still pointed at the staging
+  // database and the staging Redis passes every check the repository owns
+  // while watching the wrong environment.
+  //
+  // The comparison runs on a FINGERPRINT of the target's host, so the
+  // artifact never carries a DSN, a Redis URL or a database hostname — only
+  // the fact that the deployed probe points at the same service the capture
+  // read.
+  if (providerCaptured('fly')) {
+    const probeTargets = providers.fly.healthProbeTargets ?? null;
+    const conflicting = new Set(asArray(probeTargets?.conflictingKeys));
+
+    const neonBranchFingerprint = providers.neon?.branch?.hostFingerprint ?? null;
+    const productionRedisFingerprints = asArray(providers.upstash?.databases)
+      .filter((database) => /production/i.test(String(database?.name ?? '')))
+      .map((database) => database?.endpointHostFingerprint)
+      .filter((fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0);
+
+    const targetSpecs = [
+      {
+        key: 'HEALTH_PROBE_FLY_APPS',
+        gate: 'health.production-probe-fly-targets',
+        label: 'Deployed production probe Fly targets',
+        expected: new Set(expectedProductionHostFingerprints),
+        expectationOwner: 'Rowan',
+        expectationReason:
+          'the environment manifest names no production host, so the deployed probe targets cannot be proven',
+      },
+      {
+        key: 'HEALTH_PROBE_DATABASES',
+        gate: 'health.production-probe-database-targets',
+        label: 'Deployed production probe database targets',
+        expected: new Set(neonBranchFingerprint ? [neonBranchFingerprint] : []),
+        expectationOwner: 'Rowan',
+        expectationReason:
+          'the production Neon branch host could not be read, so the deployed probe targets cannot be proven',
+      },
+      {
+        key: 'HEALTH_PROBE_REDIS',
+        gate: 'health.production-probe-redis-targets',
+        label: 'Deployed production probe Redis targets',
+        expected: new Set(productionRedisFingerprints),
+        expectationOwner: 'Quinn (operator)',
+        expectationReason:
+          'no production Redis database was found, so the deployed probe targets cannot be proven',
+      },
+    ];
+
+    for (const spec of targetSpecs) {
+      const captureFailure =
+        !probeTargets || probeTargets.captured !== true
+          ? (probeTargets?.error ??
+            'the deployed production health-probe targets were not captured')
+          : null;
+
+      if (captureFailure) {
+        add(
+          row(spec.gate, 'unmet', {
+            step: 'Slice D step 7',
+            owner: 'Quinn (operator)',
+            label: spec.label,
+            reason: captureFailure,
+          }),
+        );
+        continue;
+      }
+
+      const targetRows = asArray(probeTargets.targets?.[spec.key]);
+      if (targetRows.length === 0) {
+        add(
+          row(spec.gate, 'unmet', {
+            step: 'Slice D step 7',
+            owner: 'Quinn (operator)',
+            label: spec.label,
+            reason: `the deployed production health-probe app carries no ${spec.key} target`,
+          }),
+        );
+        continue;
+      }
+
+      if (conflicting.has(spec.key)) {
+        add(
+          row(spec.gate, 'unmet', {
+            step: 'Slice D step 7',
+            owner: 'Quinn (operator)',
+            label: spec.label,
+            reason: `the deployed production health-probe app carries different ${spec.key} targets on different Machines`,
+          }),
+        );
+        continue;
+      }
+
+      if (spec.expected.size === 0) {
+        // An expectation set that names nothing cannot prove anything: this
+        // is a missing repository or provider fact, and it is owned here
+        // rather than by the operator.
+        add(
+          row(spec.gate, 'unmet', {
+            step: 'Slice D step 7',
+            owner: spec.expectationOwner,
+            label: spec.label,
+            reason: spec.expectationReason,
+          }),
+        );
+        continue;
+      }
+
+      const offTarget = targetRows.filter(
+        (target) => !spec.expected.has(target?.hostFingerprint),
+      );
+      if (offTarget.length > 0) {
+        add(
+          row(spec.gate, 'unmet', {
+            step: 'Slice D step 7',
+            owner: 'Quinn (operator)',
+            label: spec.label,
+            reason:
+              `the deployed production health-probe app points ${offTarget.length} of its ` +
+              `${spec.key} target(s) somewhere other than production: ` +
+              offTarget.map((target) => target?.label ?? 'an unlabelled target').join(', '),
+          }),
+        );
+        continue;
+      }
+
+      add(
+        row(spec.gate, 'met', {
+          step: 'Slice D step 7',
+          owner: 'Quinn (operator)',
+          label: spec.label,
+          reason: `the deployed production health-probe app points its ${targetRows.length} ${spec.key} target(s) at production`,
+        }),
+      );
     }
   }
 
@@ -1100,6 +1253,21 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     expectedProbeCadence = {};
   }
 
+  // The production hosts a deployed probe is allowed to point at: the
+  // consolidated production app's own hostname and the stable production
+  // API hostnames the manifest publishes. They are derived from the
+  // manifest rather than restated here — a checker that carries its own
+  // copy of the expected hosts can agree with a drifted manifest.
+  const productionTargetHosts = [
+    `${environment.platformApp}.fly.dev`,
+    ...Object.values(environment.apiBaseUrls ?? {}).map((url) => hostOfTargetValue(url)),
+  ].filter((host) => typeof host === 'string' && host.length > 0);
+  const expectedProductionHostFingerprints = [
+    ...new Set(
+      productionTargetHosts.map((host) => hostFingerprint(host)).filter(Boolean),
+    ),
+  ];
+
   return {
     platformApp: environment.platformApp,
     healthProbeApp: environment.healthProbeApp,
@@ -1107,6 +1275,7 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     expectedSchemas: Object.values(environment.schemas ?? {}),
     expectedPlatformSecretNames: [...provisioner.PLATFORM_SECRET_NAMES],
     expectedProbeCadence,
+    expectedProductionHostFingerprints,
     dnsExpectations: {
       zoneName: matrix.apexDomain ?? null,
       surfaces: dnsSurfaces,
