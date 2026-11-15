@@ -1,6 +1,6 @@
 # Production Neon contract — consolidated platform
 
-**Status:** **proposal for Quinn's review** (task `fb1240c0`, Slice D preparation). Nothing here is provisioned; nothing here is live.
+**Status:** **approved repository contract; live provisioning is blocked on the Neon account plan** (task `fb1240c0`, Slice D preparation). Nothing here is provisioned; nothing here is live.
 **Scope:** the production Neon database — its branch, its three schemas, the service roles that carry the DSNs, and the connectivity restriction.
 **Why this file exists:** AC2 asks for a production Neon branch that is "separated from staging/dev data, with connectivity restricted to production services", and the approved design's Slice D step 2 asks the operator to "prove staging/dev roles cannot connect to production". Until this pass, the repository owned the schema *names* (the environment manifest) and the secret *names* (the source contract) but owned **neither the roles nor the restriction**. Slice D steps 1–2 therefore had no reviewable shape: the operator would improvise, and the reviewer would read prose.
 
@@ -53,7 +53,28 @@ AC2's "connectivity restricted to production services" is two obligations:
 1. **The branch's IP allowlist is configured and non-empty.** A production branch with an empty allowlist accepts connections from anywhere, and the live read-back on 2026-11-14 found exactly that: the allowlist was empty and public connections were not blocked.
 2. **Staging and dev credentials cannot reach production.** A staging role that can connect to the production branch is the separation failure AC2 names, so the evidence must include a *denied* connection attempt from a staging credential and from a dev credential — not merely the absence of an allowlist.
 
-> **Open question (Quinn):** which egress addresses the allowlist carries. Fly's shared egress ranges are not a fixed set of addresses, so an allowlist built from "the current Fly ranges" drifts. If the production platform uses dedicated Fly egress IPs, those addresses are the allowlist; otherwise the allowlist has to be maintained as a named set with an owner. This contract does not invent an answer — it requires the allowlist to be non-empty and recorded.
+### Provider capability gate — observed 2026-11-16
+
+The repository contract cannot be executed on the current Neon account plan:
+
+- The Neon organization `Stoffer Industries` is on the **Free** plan. Neon currently makes **IP Allow a Scale-plan feature**; Free projects cannot carry the non-empty allowlist AC2 requires.
+- **Protected branches are a paid-plan feature**. A protected-branches-only allowlist would require both a paid plan and a protected production branch. The live production branch currently reports `protected=false`.
+- The live project still reports `allowed_ips.ips=[]`, `protected_branches_only=false`, and `block_public_connections=false`.
+
+This is a hard preflight failure, not a value to work around: the AC2 evidence gate remains red until the organization has a plan that supports the selected mechanism, the production branch is protected if the allowlist is scoped that way, and the allowlist is populated. The repository does not authorize a paid-plan change; the account owner must make that spend decision.
+
+### Fly source addresses
+
+Fly's shared egress ranges are not a fixed set of addresses, so an allowlist built from "the current shared ranges" drifts. Fly now supports **app-scoped static egress IPs**:
+
+```bash
+fly ips allocate-egress --app sindustries-platform-production --region syd
+fly ips allocate-egress --app sindustries-health-probe-production --region syd
+```
+
+Each allocation persists across Machine replacement and supplies a paired IPv4/IPv6 address. The IPv4 address is currently priced at **$3.60/month**; each pair supports up to 64 Machines. Both production apps connect to Neon, so each needs its own app-scoped pair and every resulting address belongs in the Neon allowlist. The operator records the count and the owning Fly app, not a guessed shared range.
+
+> **Decision still open:** the Neon account is Free, while the selected IP Allow mechanism requires Scale. Quinn/Tom must approve the plan change (or an explicitly re-specified AC2 mechanism) before this contract can be executed. The contract itself stays fail-closed.
 
 ---
 
@@ -107,4 +128,4 @@ The evidence artifact is captured at step 2 and attached to the task as AC2 evid
 
 - No credential, DSN, password or token — this repository is public.
 - No Fly app, spend limit, DNS record or health-probe configuration. Those belong to the other Slice D steps.
-- No production resource. Re-read live from the provider on 2026-11-15: the production branch exists (`current_state=ready`) but carries only the `auth` and `public` schemas — no `tasks_api`, `budget_api` or `content_scheduler` — its only roles are Neon's four defaults (`neondb_owner`, `authenticator`, `anonymous`, `authenticated`), and the project restriction is unset (`allowed_ips.ips` empty, `block_public_connections` false).
+- No production resource. Re-read live from the provider on 2026-11-16: the organization is on the Free plan; the production branch exists (`current_state=ready`) but carries only the `auth` and `public` schemas — no `tasks_api`, `budget_api` or `content_scheduler` — its only roles are Neon's four defaults (`neondb_owner`, `authenticator`, `anonymous`, `authenticated`), the branch is not protected, and the project restriction is unset (`allowed_ips.ips` empty, `protected_branches_only` false, `block_public_connections` false).

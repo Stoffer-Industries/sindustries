@@ -22,11 +22,16 @@ on every CI run).
 
 For the **per-service deploy procedure** see [Cloud Platform](../systems/cloud-platform.md).
 
-**Last live verification:** 2026-11-13 — see
+**Last full live verification:** 2026-11-13 — see
 [§9 — Observed state](#9-observed-state-live-verification-2026-11-13) for
 what the DNS, TLS and Vercel control planes actually looked like on that
 date, including the places where they disagree with the contract recorded
 in sections 1–4.
+
+**Targeted Slice D live re-read:** 2026-11-16 — Neon organization/plan,
+project allowlist, production branch, Fly app inventory, Upstash database
+inventory, GitHub `production` Environment inventory, Cloudflare DNS, and
+production hostname resolution. The findings are recorded in §5 below.
 
 ---
 
@@ -228,6 +233,24 @@ credential boundary.
   connections from anywhere. The treatment it needs is contracted in
   `docs/cloud/production-neon-contract.md`, and the AC2 evidence gate is
   `tests/cloud/scripts/check-production-neon-evidence.mjs`.
+  - **Provider-plan blocker (re-read 2026-11-16):** the Neon organization
+    `Stoffer Industries` reports `plan=free`. Neon currently makes IP Allow
+    a **Scale-plan** feature, while protected branches are available only
+    on paid plans (Launch supports up to two protected branches per
+    project; Scale up to five). The production branch still reports
+    `protected=false`, `allowed_ips.ips=[]`,
+    `protected_branches_only=false`, and
+    `block_public_connections=false`. AC2 therefore cannot be truthfully
+    closed until the account owner approves a plan/mechanism change. The
+    repository does not silently substitute role-only isolation for the
+    approved network restriction.
+  - **Fly allowlist source:** Fly's shared egress ranges are not a fixed
+    allowlist. The production platform and health probe each need an
+    app-scoped static egress pair in `syd`
+    (`fly ips allocate-egress --app <app> --region syd`); each IPv4 is
+    currently $3.60/month and each pair supports up to 64 Machines. Those
+    app-owned addresses are the allowlist inputs once Neon supports IP
+    Allow on the selected plan.
   - **How to read the provider:** the live Neon API base is
     `https://console.neon.tech/api/v2` — `api.neon.tech` has no address
     records at all, so a request to it fails at DNS and looks like a
