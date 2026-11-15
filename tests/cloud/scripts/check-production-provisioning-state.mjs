@@ -52,6 +52,12 @@ import {
   hostFingerprint,
   hostOfTargetValue,
 } from '../../../infra/cloud/platform/probe-target-facts.mjs';
+import {
+  OPERATOR_EVIDENCE_SLOTS,
+  operatorEvidenceRecorded,
+  operatorEvidenceSummary,
+  validateOperatorEvidence,
+} from '../../../infra/cloud/platform/production-operator-evidence.mjs';
 
 const DEFAULTS = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -59,7 +65,12 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 5;
+export const SUPPORTED_SCHEMA_VERSION = 6;
+
+/** The operator obligation gate → the evidence slot that closes it. */
+const OPERATOR_EVIDENCE_SLOT_BY_GATE = new Map(
+  OPERATOR_EVIDENCE_SLOTS.map((entry) => [entry.gate, entry.slot]),
+);
 
 /** Neon's four default roles — they are not service roles. */
 const NEON_DEFAULT_ROLES = new Set([
@@ -346,6 +357,42 @@ export function evaluateProvisioningState(state, options = {}) {
         owner: 'Rowan',
         label: 'Artifact redaction',
         reason: `the artifact carries credential-shaped values at: ${credentialPaths.join(', ')}`,
+      }),
+    );
+  }
+
+  // The operator evidence section is optional, but it is not optional in
+  // the shape it has when present: a read-back that cannot be read is not
+  // a read-back. Dropping a malformed section would turn a recorded spend
+  // limit into an unrecorded one and flip the ordering gate red with no
+  // explanation of why.
+  const operatorEvidenceValidation = validateOperatorEvidence(state.operatorEvidence);
+  if (!operatorEvidenceValidation.ok) {
+    add(
+      row('artifact.operator-evidence', 'unmet', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Operator evidence section',
+        reason: operatorEvidenceValidation.problems.join('; '),
+      }),
+    );
+  } else if (!operatorEvidenceValidation.present) {
+    add(
+      row('artifact.operator-evidence', 'not-applicable', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Operator evidence section',
+        reason:
+          'the artifact records no operator evidence, so every operator obligation stays open',
+      }),
+    );
+  } else {
+    add(
+      row('artifact.operator-evidence', 'met', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Operator evidence section',
+        reason: 'the operator evidence section is present and well-formed',
       }),
     );
   }
@@ -1444,13 +1491,110 @@ export function evaluateProvisioningState(state, options = {}) {
     }
   }
 
+  // --- AC5: the Fly spend limit BEFORE any public exposure --------------
+  //
+  // The approved design makes the spend limit a HARD gate: step 6 sets it
+  // and captures the read-back "before the health probe or any public
+  // hostname is enabled". Nothing in the chain enforced that ORDER. The
+  // spend-limit read-back was reported as an operator obligation — an
+  // advisory line that never blocked — so an operator could publish the
+  // production DNS records and deploy the production health probe while
+  // the limit was still unset, and every machine-verifiable gate would
+  // still be met.
+  //
+  // This gate closes the hole. Public exposure is read from the artifact
+  // (a production hostname published in DNS, or the production health-probe
+  // app running) and the recorded spend-limit read-back is required before
+  // it. Before any exposure exists the gate is not applicable — the limit
+  // is still owed, but nothing is exposed yet.
+  {
+    const gate = 'fly.spend-limit-before-public-exposure';
+    const label = 'Fly spend limit before public exposure';
+
+    const productionHostnames = new Set(
+      asArray(dnsExpectations.surfaces)
+        .map((surface) => surface?.productionHostname)
+        .filter((hostname) => typeof hostname === 'string' && hostname.length > 0),
+    );
+    const publishedHostnames = [
+      ...new Set(
+        asArray(providers.cloudflare?.records)
+          .map((record) => record?.name)
+          .filter((name) => typeof name === 'string' && productionHostnames.has(name)),
+      ),
+    ];
+
+    const probeApp = asArray(providers.fly?.apps).find(
+      (app) => app?.name === healthProbeApp,
+    );
+    const probeRunning = asArray(probeApp?.machineStates).some(
+      (machineState) => machineState === 'started',
+    );
+
+    const exposure = [];
+    if (publishedHostnames.length > 0) {
+      exposure.push(`the production hostname(s) ${publishedHostnames.join(', ')} are published`);
+    }
+    if (probeRunning) {
+      exposure.push(`the production health-probe app ${healthProbeApp ?? '(unnamed)'} is running`);
+    }
+
+    const spendLimitSummary = operatorEvidenceSummary(state.operatorEvidence, 'flySpendLimit');
+    if (exposure.length === 0) {
+      add(
+        row(gate, 'not-applicable', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason:
+            'nothing is publicly exposed yet; the Fly spend limit must be set and read back before the production health probe is deployed or a production DNS record is published',
+        }),
+      );
+    } else if (!spendLimitSummary) {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason:
+            `${exposure.join('; ')}, but no Fly spend-limit read-back is recorded. ` +
+            'The approved design makes the limit a hard gate before any public exposure, so the exposure must not stand until the read-back is recorded.',
+        }),
+      );
+    } else {
+      add(
+        row(gate, 'met', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason: `the spend limit was read back (${spendLimitSummary}) and ${exposure.join('; ')}`,
+        }),
+      );
+    }
+  }
+
   for (const entry of OPERATOR_REQUIRED_ROWS) {
-    rows.push(
+    const slot = OPERATOR_EVIDENCE_SLOT_BY_GATE.get(entry.gate);
+    const summary = slot ? operatorEvidenceSummary(state.operatorEvidence, slot) : null;
+    if (summary) {
+      add(
+        row(entry.gate, 'met', {
+          step: entry.step,
+          owner: entry.owner,
+          label: entry.label,
+          reason: `the operator recorded this read-back: ${summary}`,
+        }),
+      );
+      continue;
+    }
+    add(
       row(entry.gate, 'operator-required', {
         step: entry.step,
         owner: entry.owner,
         label: entry.label,
-        reason: entry.reason,
+        reason:
+          `${entry.reason} Record it in the artifact's operatorEvidence section` +
+          (slot ? ` (slot "${slot}").` : '.'),
       }),
     );
   }
@@ -1647,9 +1791,22 @@ async function main(argv) {
   for (const entry of rows) stdout.write(`${formatRow(entry)}\n\n`);
 
   if (ok) {
+    // An operator obligation backed by a recorded read-back is a CLOSED
+    // obligation, not a machine gate: the count has to say which is which,
+    // or "all gates are met" would hide an obligation nobody recorded.
+    const operatorGates = new Set(OPERATOR_REQUIRED_ROWS.map((entry) => entry.gate));
+    const machineMet = rows.filter(
+      (entry) => entry.status === 'met' && !operatorGates.has(entry.gate),
+    ).length;
+    const operatorBacked = rows.filter(
+      (entry) => operatorGates.has(entry.gate) && entry.status === 'met',
+    ).length;
+    const operatorOpen = rows.filter((entry) => entry.status === 'operator-required').length;
     stdout.write(
-      `All ${rows.filter((entry) => entry.status === 'met').length} machine-verifiable gate(s) are met; ` +
-        `${rows.filter((entry) => entry.status === 'operator-required').length} obligation(s) need operator evidence.\n`,
+      `All ${machineMet} machine-verifiable gate(s) are met; ` +
+        `${operatorBacked} operator obligation(s) are backed by a recorded read-back` +
+        (operatorOpen > 0 ? `; ${operatorOpen} still need operator evidence.` : '.') +
+        '\n',
     );
     return 0;
   }

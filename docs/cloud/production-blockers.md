@@ -201,6 +201,17 @@ credential boundary.
 - The credential boundary in cloud-platform.md applies unchanged: Quinn owns
   the live values; Rowan ships the environment manifest and provisioning
   contract.
+- The five Slice D obligations no machine can prove — the Fly spend-limit
+  read-back, the staging/dev Neon denial proof, one successful production
+  probe interval, the production API health responses and the DNS
+  resolution/TLS read-back — are closed by an OPERATOR READ-BACK recorded
+  in the provisioning-state artifact's `operatorEvidence` section
+  (`capture-production-provisioning-state.mjs --operator-evidence <file>`).
+  The record carries a boolean, a read-back time and a pointer to the
+  read-back, never a value. The `fly.spend-limit-before-public-exposure`
+  gate enforces the order the approved design makes a hard gate: while a
+  production hostname is published or the production health-probe app is
+  running, an artifact with no recorded spend-limit read-back fails.
 - `platform-provision-secrets.mjs --environment production` derives the
   production app name and the `PRODUCTION_*` secret source names from the
   environment manifest

@@ -231,6 +231,19 @@ what bounds the blast radius of a runaway production deploy, and the
 health probe must not go out before it either (the operator order deploys
 the platform first and the probe last).
 
+That order is enforced, not only documented. The provisioning-state checker
+decides a `fly.spend-limit-before-public-exposure` gate: while a
+production hostname is published in DNS or the production health-probe app
+is running, an artifact with no recorded spend-limit read-back fails the
+gate. The read-back itself is operator evidence — a boolean, the time it
+was read back and a pointer to the read-back, never a value — recorded in
+the artifact's `operatorEvidence` section by
+`infra/cloud/scripts/capture-production-provisioning-state.mjs
+--operator-evidence <file>`. The same section closes the other four
+obligations no machine can prove (the staging/dev Neon denial proof, one
+successful production probe interval, the production API health responses
+and the DNS resolution/TLS read-back).
+
 **Credential boundary.** The production credential path is the same rule as
 staging, with the `production` GitHub Environment instead of `staging`: the
 live values (`FLY_API_TOKEN`, the Neon production DSNs, the Upstash

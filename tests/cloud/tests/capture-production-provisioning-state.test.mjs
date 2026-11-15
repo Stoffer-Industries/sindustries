@@ -18,8 +18,12 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
+  loadOperatorEvidence,
   readFlyAppEnv,
   readFlyAppMachines,
   readFlyAppPlatformConfig,
@@ -977,4 +981,95 @@ test('machines that disagree on the environment id are reported as a conflict', 
   assert.deepEqual(result.conflictingKeys, ['PLATFORM_ENVIRONMENT_ID']);
   // The gate must not pick a winner between two generations.
   assert.equal(result.environmentId, null);
+});
+
+/**
+ * Write an operator evidence file in a temp directory.
+ *
+ * @param {unknown} contents
+ * @returns {{path: string, cleanup: () => void}}
+ */
+function writeOperatorEvidence(contents) {
+  const dir = mkdtempSync(join(tmpdir(), 'operator-evidence-'));
+  const path = join(dir, 'operator-evidence.json');
+  writeFileSync(path, typeof contents === 'string' ? contents : JSON.stringify(contents));
+  return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('a recorded operator read-back is carried into the artifact', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: {
+      recorded: true,
+      readBackAt: '2026-11-16T00:00:00.000Z',
+      scope: 'personal organization',
+      evidenceRef: 'operator-evidence/fly-spend-limit.txt',
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.deepEqual(problems, []);
+    assert.equal(evidence.flySpendLimit.recorded, true);
+    assert.equal(evidence.flySpendLimit.readBackAt, '2026-11-16T00:00:00.000Z');
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('an operator evidence file that cannot be read is refused', () => {
+  const { evidence, problems } = loadOperatorEvidence('/tmp/does-not-exist-operator-evidence.json');
+  assert.equal(evidence, null);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /cannot read the operator evidence file/);
+});
+
+test('an operator evidence file that is not JSON is refused', () => {
+  const file = writeOperatorEvidence('not json at all');
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.equal(problems.length, 1);
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('an operator evidence file that records nothing is refused', () => {
+  const file = writeOperatorEvidence(null);
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /records no operator evidence/);
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('an operator evidence slot with no read-back time is refused', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: { recorded: true, scope: 'personal organization' },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /readBackAt/);
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('an operator evidence slot with an unknown field is refused', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: {
+      recorded: true,
+      readBackAt: '2026-11-16T00:00:00.000Z',
+      monthlyLimit: '50',
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /unknown field/);
+  } finally {
+    file.cleanup();
+  }
 });
