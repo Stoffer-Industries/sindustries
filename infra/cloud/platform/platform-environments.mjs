@@ -299,6 +299,121 @@ export function getPlatformEnvironment(id = DEFAULT_ENVIRONMENT_ID) {
 }
 
 /**
+ * The environment that owns a Fly app name.
+ *
+ * The reverse of {@link getPlatformEnvironment}. Fly injects `FLY_APP_NAME`
+ * into every Machine, so the app the Machine actually runs is a fact the
+ * runtime can read independently of any configuration value — which is
+ * what makes it usable to CHECK a configuration value rather than trust
+ * it. A health-probe app name resolves to no platform environment, because
+ * the probe has no nginx router.
+ *
+ * @param {string} appName
+ * @returns {object|null} the environment entry, or null when no
+ *   environment owns that app
+ */
+export function getPlatformEnvironmentByAppName(appName) {
+  const needle = String(appName ?? '').trim();
+  if (!needle) return null;
+  for (const environment of Object.values(PLATFORM_ENVIRONMENTS)) {
+    if (environment.platformApp === needle) return environment;
+  }
+  return null;
+}
+
+/**
+ * Resolve the environment a Machine is running in, fail-closed.
+ *
+ * The router's hostnames are environment-owned, so "which environment is
+ * this?" must be answered by a fact the runtime can read, never by a
+ * default. Two independent facts are available:
+ *
+ *   - `FLY_APP_NAME` — injected by Fly into every Machine, and it names
+ *     the app the Machine is actually running, so it cannot drift from
+ *     the deployment the way a config value can;
+ *   - `PLATFORM_ENVIRONMENT_ID` — declared in the Fly config's `[env]`
+ *     table (staging in the shared config, production in the production
+ *     overlay), and bound to the render at build time.
+ *
+ * The app name WINS, because it is the deployment rather than a claim
+ * about the deployment. When both are present they must agree: a
+ * mismatch means the config and the app disagree about the environment,
+ * which is exactly the situation that would serve one environment's
+ * hostnames from another environment's app.
+ *
+ * A missing or unknown environment is an error, never a fallback to
+ * staging: a production Machine whose environment could not be resolved
+ * must not boot serving staging hostnames.
+ *
+ * @param {Record<string, string|undefined>} env
+ * @returns {object} the resolved environment entry
+ * @throws {Error} when the environment cannot be resolved, or when the
+ *   two facts disagree
+ */
+export function resolvePlatformEnvironment(env = {}) {
+  const appName = String(env.FLY_APP_NAME ?? '').trim();
+  const declaredId = String(env.PLATFORM_ENVIRONMENT_ID ?? '').trim();
+
+  // An unknown declared id throws inside getPlatformEnvironment, so the
+  // error names the bad value instead of degrading to a default.
+  const declared = declaredId ? getPlatformEnvironment(declaredId) : null;
+
+  const byApp = appName ? getPlatformEnvironmentByAppName(appName) : null;
+  if (appName && !byApp) {
+    throw new Error(
+      `FLY_APP_NAME "${appName}" is not a known platform app (expected one of: ` +
+        `${Object.values(PLATFORM_ENVIRONMENTS)
+          .map((e) => e.platformApp)
+          .join(', ')}) — refusing to start without a resolvable environment`,
+    );
+  }
+
+  if (byApp && declared && byApp.id !== declared.id) {
+    throw new Error(
+      `FLY_APP_NAME "${appName}" belongs to the ${byApp.id} environment but ` +
+        `PLATFORM_ENVIRONMENT_ID says "${declared.id}" — refusing to start, because the ` +
+        'router would serve one environment\'s hostnames from another environment\'s app',
+    );
+  }
+
+  const environment = byApp ?? declared;
+  if (!environment) {
+    throw new Error(
+      'neither FLY_APP_NAME nor PLATFORM_ENVIRONMENT_ID is set — refusing to start, ' +
+        'because the router hostnames are environment-owned and cannot be guessed',
+    );
+  }
+  return environment;
+}
+
+/**
+ * Resolve the environment the platform PROCESS runs in.
+ *
+ * On Fly, `FLY_APP_NAME` is injected into every Machine, so the strict
+ * resolution above always applies there: an unknown app name, or a
+ * declared id that disagrees with the app the Machine is actually
+ * running, refuses to start. A local run has no Fly app and therefore
+ * no other environment's traffic to serve, so when NEITHER fact is
+ * present the local default applies — the only path that can reach it.
+ *
+ * The distinction matters because the two cases are not the same risk:
+ * "a production Machine that cannot say which environment it is" would
+ * serve the wrong hostnames, while "a local run that has not declared
+ * one" has no traffic to misroute.
+ *
+ * @param {Record<string, string|undefined>} env
+ * @returns {object} the resolved environment entry
+ */
+export function resolveRuntimeEnvironment(env = {}) {
+  const appName = String(env.FLY_APP_NAME ?? '').trim();
+  const declaredId = String(env.PLATFORM_ENVIRONMENT_ID ?? '').trim();
+  if (appName || declaredId) {
+    return resolvePlatformEnvironment(env);
+  }
+  return getPlatformEnvironment(DEFAULT_ENVIRONMENT_ID);
+}
+
+/**
  * The source names of an environment that must be present.
  *
  * @param {object} environment

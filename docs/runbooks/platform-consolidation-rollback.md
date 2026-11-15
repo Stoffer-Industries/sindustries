@@ -352,7 +352,7 @@ configuration.
 | --- | --- |
 | Supervisor (entrypoint) | `infra/cloud/platform/platform-supervisor.mjs` |
 | Service registry + env mapping | `infra/cloud/platform/platform-services.mjs` |
-| Router config | `infra/cloud/platform/nginx.conf` |
+| Router template / runtime config | `infra/cloud/platform/nginx.conf.template` → `/tmp/sindustries-platform/nginx.conf` |
 | Migration chain | `infra/cloud/platform/platform-migrate.mjs` |
 | Image | `infra/cloud/docker/platform.Dockerfile` |
 | Fly app spec | `infra/cloud/fly/platform.fly.toml` |

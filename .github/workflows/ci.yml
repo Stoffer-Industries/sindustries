@@ -1163,7 +1163,7 @@ jobs:
       # per-surface staging routes the preflight validates against, and it
       # must agree with the router that actually serves them. Run the
       # checker explicitly so a route recorded in the matrix but missing
-      # from nginx.conf (or vice versa) fails on the PR that introduces it.
+      # from nginx.conf.template (or vice versa) fails on the PR that introduces it.
       - name: Run stable-hostname matrix shape check
         run: node tests/cloud/scripts/check-stable-hostname-matrix.mjs
 

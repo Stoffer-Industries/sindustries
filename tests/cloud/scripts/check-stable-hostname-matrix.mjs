@@ -391,7 +391,7 @@ function main() {
   //   - the platform host is the same string for every surface and
   //     matches the platform app's own fly.toml,
   //   - the platform path prefixes match the router's location blocks
-  //     in infra/cloud/platform/nginx.conf, so the matrix and the
+  //     in infra/cloud/platform/nginx.conf.template, so the matrix and the
   //     router cannot drift apart.
   // ------------------------------------------------------------------
   const CONSOLIDATED_API_SURFACES = ['tasks-api', 'budget-api', 'content-scheduler-api'];
@@ -445,7 +445,7 @@ function main() {
   // The matrix's platform prefixes and the router's location blocks must
   // be the same set. The router is what actually decides where a request
   // goes; a matrix that disagrees with it sends the harness to a 404.
-  const nginxPath = join(args.repoRoot, 'infra/cloud/platform/nginx.conf');
+  const nginxPath = join(args.repoRoot, 'infra/cloud/platform/nginx.conf.template');
   try {
     const nginx = readFileSync(nginxPath, 'utf8');
     const routerPrefixes = new Set();
@@ -454,8 +454,8 @@ function main() {
     }
     const missing = [...matrixPlatformPrefixes].filter((p) => !routerPrefixes.has(p)).sort();
     const extra = [...routerPrefixes].filter((p) => !matrixPlatformPrefixes.has(p)).sort();
-    expect(missing.length === 0, `nginx.conf has no location block for the matrix platform prefix(es): ${missing.join(', ')}`);
-    expect(extra.length === 0, `the matrix records no platform prefix for the nginx.conf location block(s): ${extra.join(', ')}`);
+    expect(missing.length === 0, `nginx.conf.template has no location block for the matrix platform prefix(es): ${missing.join(', ')}`);
+    expect(extra.length === 0, `the matrix records no platform prefix for the nginx.conf.template location block(s): ${extra.join(', ')}`);
   } catch (err) {
     fail(`could not read ${nginxPath}: ${err.message}`);
   }

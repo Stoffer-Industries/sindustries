@@ -32,6 +32,8 @@ import {
   findForbiddenValues,
   getPlatformEnvironment,
   requiredDatabaseSourceNames,
+  resolvePlatformEnvironment,
+  resolveRuntimeEnvironment,
 } from '../platform-environments.mjs';
 import { buildPlatformSecretPayload, main } from '../platform-provision-secrets.mjs';
 
@@ -677,5 +679,67 @@ describe('the provisioning CLI with an environment', () => {
       /PLATFORM_TASKS_API_DATABASE_URL <- PRODUCTION_TASKS_API_DATABASE_URL/,
     );
     assert.ok(!output.includes(PRODUCTION_TASKS_DSN));
+  });
+});
+
+describe('resolvePlatformEnvironment', () => {
+  it('resolves the environment from the Fly app name the Machine is running', () => {
+    assert.equal(
+      resolvePlatformEnvironment({ FLY_APP_NAME: 'sindustries-platform-production' }).id,
+      'production',
+    );
+  });
+
+  it('resolves from the declared environment id when no app name is present', () => {
+    assert.equal(
+      resolvePlatformEnvironment({ PLATFORM_ENVIRONMENT_ID: 'production' }).id,
+      'production',
+    );
+  });
+
+  it('refuses a declared id that disagrees with the app the Machine is running', () => {
+    assert.throws(
+      () =>
+        resolvePlatformEnvironment({
+          FLY_APP_NAME: 'sindustries-platform-production',
+          PLATFORM_ENVIRONMENT_ID: 'staging',
+        }),
+      /refusing to start/,
+    );
+  });
+
+  it('refuses an app that owns no platform environment', () => {
+    assert.throws(
+      () => resolvePlatformEnvironment({ FLY_APP_NAME: 'sindustries-platform-stagin' }),
+      /not a known platform app/,
+    );
+  });
+
+  it('refuses to guess when neither fact is present', () => {
+    assert.throws(() => resolvePlatformEnvironment({}), /cannot be guessed/);
+  });
+});
+
+describe('resolveRuntimeEnvironment', () => {
+  it('never falls back to staging while running on Fly', () => {
+    assert.equal(
+      resolveRuntimeEnvironment({ FLY_APP_NAME: 'sindustries-platform-production' }).id,
+      'production',
+    );
+  });
+
+  it('uses the local default only when no runtime fact is present', () => {
+    assert.equal(resolveRuntimeEnvironment({}).id, DEFAULT_ENVIRONMENT_ID);
+  });
+
+  it('still refuses a disagreement between the app and the declared id', () => {
+    assert.throws(
+      () =>
+        resolveRuntimeEnvironment({
+          FLY_APP_NAME: 'sindustries-platform-production',
+          PLATFORM_ENVIRONMENT_ID: 'staging',
+        }),
+      /refusing to start/,
+    );
   });
 });

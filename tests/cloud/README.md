@@ -49,7 +49,7 @@ per-service staging apps (`sindustries-tasks-api-staging`,
 `sindustries-auto-post-worker-staging`) were destroyed in the 2026-11-07
 consolidation cutover, so their `*.fly.dev` hostnames no longer serve these
 APIs. `infra/cloud/hostname-matrix.json` (`stagingRoutes`) and
-`infra/cloud/platform/nginx.conf` are the sources of truth for the routes;
+`infra/cloud/platform/nginx.conf.template` are the sources of truth for the routes;
 the stable app-name hostnames (`tasks-api.staging.sindustries.co.nz` and
 siblings) land with task `5cb4a8fe`.
 

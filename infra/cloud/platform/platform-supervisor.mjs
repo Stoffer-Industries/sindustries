@@ -35,8 +35,8 @@ import process from 'node:process';
 
 import {
   CHILDREN,
-  PLATFORM_APP,
   ROUTER,
+  ROUTER_CONFIG_PATH,
   ROUTER_PORT,
   ROUTER_STATUS_PATH,
   STATUS_PATH,
@@ -46,6 +46,8 @@ import {
   invalidRequiredSources,
   missingRequiredSources,
 } from './platform-services.mjs';
+import { resolveRuntimeEnvironment } from './platform-environments.mjs';
+import { writeRouterConfig } from './platform-router-config.mjs';
 
 /**
  * How long the supervisor waits for its children to exit before it exits
@@ -284,6 +286,11 @@ class Child {
  */
 export function createSupervisor(options = {}) {
   const env = options.env ?? process.env;
+  // The environment is a fact, not a default: it is resolved from the
+  // runtime's own facts — the Fly app this Machine actually runs,
+  // cross-checked against the declared environment id — and an
+  // unresolvable one refuses to start rather than degrading to staging.
+  const environment = resolveRuntimeEnvironment(env);
   const deps = {
     env,
     cwd: env.PLATFORM_APP_DIR ?? process.cwd(),
@@ -347,7 +354,7 @@ export function createSupervisor(options = {}) {
     status() {
       const childStatus = children.map((child) => child.status());
       return {
-        app: PLATFORM_APP,
+        app: environment.platformApp,
         generatedAt: deps.now(),
         ready: childStatus.every((c) => c.state === 'running') && router.state === 'running',
         router: router.status(),
@@ -415,6 +422,33 @@ export function createSupervisor(options = {}) {
 }
 
 /**
+ * Render the router configuration for the environment this process runs in.
+ *
+ * The environment is resolved from the runtime's own facts — the Fly app
+ * name the Machine is actually running, cross-checked against the
+ * declared environment id — so a production Machine can never boot
+ * serving the staging hostnames, and a disagreement between the two
+ * facts refuses to start instead of picking one.
+ *
+ * Exported so the unit test can drive the RUNTIME path: a test that
+ * renders the template directly would still pass if this entry point
+ * hard-coded an environment.
+ *
+ * @param {Record<string, string|undefined>} env
+ * @param {{templatePath: string|URL, outputPath: string}} options
+ * @returns {string} the resolved environment id
+ */
+export function renderRouterConfigForEnvironment(env = {}, { templatePath, outputPath }) {
+  const environment = resolveRuntimeEnvironment(env);
+  writeRouterConfig({
+    environmentId: environment.id,
+    templatePath,
+    outputPath,
+  });
+  return environment.id;
+}
+
+/**
  * Entry point. Only runs when the file is executed directly, so the unit
  * test can import it without spawning anything.
  *
@@ -425,6 +459,16 @@ async function main() {
     process.stdout.write(HELP);
     return;
   }
+
+  // Render the router from the environment manifest before any child or
+  // nginx process starts. The image contains one router topology, but the
+  // stable hostnames it serves differ between staging and production, so
+  // the environment is resolved from the runtime's own facts and never
+  // from a default.
+  renderRouterConfigForEnvironment(process.env, {
+    templatePath: new URL('./nginx.conf.template', import.meta.url),
+    outputPath: ROUTER_CONFIG_PATH,
+  });
 
   const supervisor = createSupervisor();
 
