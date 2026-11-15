@@ -70,10 +70,13 @@ def _envelope(
     errors: list[str],
     started_at: str,
     durations_ms: dict[str, int] | None = None,
+    outcome_reason: str | None = None,
+    fetch_attempts: list[dict] | None = None,
 ) -> dict:
     return {
         "ok": outcome == "created",
         "outcome": outcome,
+        "outcomeReason": outcome_reason,
         "issueUrl": issue_url,
         "eligibleLinks": eligible_links,
         "candidates": candidates,
@@ -82,6 +85,7 @@ def _envelope(
         "skippedDuplicateCount": skipped_duplicate_count,
         "notification": notification,
         "errors": errors,
+        "fetchAttempts": fetch_attempts or [],
         "startedAt": started_at,
         "durationsMs": durations_ms or {},
     }
@@ -291,6 +295,8 @@ def _print_envelope_from_outcome(
             for d in (final_state.get("diagnostics") or [])
         ],
         started_at=started_at,
+        outcome_reason=final_state.get("outcome_reason"),
+        fetch_attempts=list(final_state.get("fetch_attempts") or []),
     )
     _print_envelope(envelope)
     if outcome == "failed":
