@@ -1,0 +1,614 @@
+#!/usr/bin/env node
+// check-production-provisioning-state.mjs — task fb1240c0 (Slice D)
+// Production provisioning state gate.
+//
+// WHY THIS EXISTS
+//
+// The approved design (§5, Slice D) lists the live evidence this task must
+// produce: a Fly app/release/machine inventory, a Neon branch/role/connectivity
+// proof, a secret-name inventory, a spend-limit read-back, and the health
+// responses. Until now the repository owned the *contract* for one of them
+// (the Neon AC2 evidence gate, `check-production-neon-evidence.mjs`) and
+// nothing at all for the others, so every heartbeat re-read four provider
+// APIs by hand and wrote the result into prose. A prose observation cannot
+// fail CI, cannot be compared between runs, and cannot tell the reviewer
+// which of the nine Slice D steps is still open.
+//
+// This check is the machine-verifiable half of that evidence. The operator
+// captures a REDACTED state artifact (names, flags and counts only — never a
+// value) with `infra/cloud/scripts/capture-production-provisioning-state.mjs`,
+// and this checker decides, per Slice D step, whether the gate is met. It
+// fails closed: an artifact that was not captured, a provider that could not
+// be read, a missing app, an empty IP allowlist, a missing source secret, or
+// a value-shaped credential in the artifact all fail with a named reason.
+//
+// The expected names are read from the environment manifest — the single
+// source of truth — so the state cannot be green against a production
+// topology the repository does not use.
+//
+// Three obligations are NOT machine-verifiable and are reported as
+// `operator-required` rather than silently green: the Fly spend-limit
+// read-back (Fly exposes no programmatic limit), the staging/dev separation
+// denial proof (it needs credentials the capture never touches), and one
+// successful production probe interval (it is time-based). A checker that
+// cannot distinguish "proven" from "not provable here" is a checker that
+// reports false comfort.
+//
+// Pure Node, no deps. Exits 0 when every machine-verifiable gate is met, 1
+// on any unmet gate, 2 on a usage error.
+//
+// Usage:
+//   node tests/cloud/scripts/check-production-provisioning-state.mjs <state-file> [<repo-root>]
+//
+// Default repo-root: three parents up from this script.
+
+import { readFileSync } from 'node:fs';
+import { exit, stderr, stdout } from 'node:process';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const DEFAULTS = (() => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return join(here, '..', '..', '..');
+})();
+
+/** The artifact shape this checker understands. */
+export const SUPPORTED_SCHEMA_VERSION = 1;
+
+/** Neon's four default roles — they are not service roles. */
+const NEON_DEFAULT_ROLES = new Set([
+  'neondb_owner',
+  'authenticator',
+  'anonymous',
+  'authenticated',
+]);
+
+/**
+ * Keys whose VALUE would carry a credential if it were ever populated.
+ *
+ * A `*Names` key is exempt: a list of secret NAMES is inventory, not a
+ * secret, and the artifact exists to carry that inventory.
+ */
+const SECRET_KEY_PATTERN =
+  /(password|passwd|secret|token|dsn|connection_?string|credential|private_?key|api_?key)/i;
+
+/** Value shapes that are credentials regardless of the key they sit under. */
+const SECRET_VALUE_PATTERNS = [
+  { name: 'a credential-bearing connection URL', pattern: /[a-z][a-z0-9+.-]*:\/\/[^\s]*@/i },
+  { name: 'a JWT', pattern: /eyJ[A-Za-z0-9_-]{10,}\./ },
+  { name: 'an AWS access key id', pattern: /\bAKIA[0-9A-Z]{16}\b/ },
+];
+
+/**
+ * The gates, in Slice D order. `owner` names who can close the gate; the
+ * point of naming it is that an unmet gate is never a mystery about who is
+ * holding it up.
+ */
+const OPERATOR_REQUIRED_ROWS = [
+  {
+    gate: 'fly.spend-limit-readback',
+    step: 'Slice D step 6',
+    owner: 'Quinn / Tom',
+    label: 'Fly organization spend limit',
+    reason:
+      'Fly exposes no programmatic spend-limit mutation or read-back, so AC5 cannot be machine-verified. The operator performs the Billing action and attaches the read-back.',
+  },
+  {
+    gate: 'neon.separation-denial-proof',
+    step: 'Slice D step 2',
+    owner: 'Quinn (operator)',
+    label: 'Staging/dev denial proof',
+    reason:
+      'The separation proof needs a connection attempt from a staging and a dev credential; the capture never touches credentials. The operator records it in the AC2 evidence artifact.',
+  },
+  {
+    gate: 'health.production-probe-interval',
+    step: 'Slice D step 7',
+    owner: 'Quinn (operator)',
+    label: 'One successful production probe interval',
+    reason:
+      'A successful probe interval is time-based and cannot be captured as a snapshot. The operator attaches the interval evidence.',
+  },
+  {
+    gate: 'health.production-api-responses',
+    step: 'Slice D step 9',
+    owner: 'Quinn (operator)',
+    label: 'Production API health responses',
+    reason:
+      'The per-surface health routes live in the staging preflight harness, and the production hostnames do not resolve until the DNS step; the operator records the HTTPS responses with the black-box smoke run.',
+  },
+];
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isIsoTimestamp(value) {
+  if (!isNonEmptyString(value)) return false;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/.test(value)) {
+    return false;
+  }
+  return !Number.isNaN(Date.parse(value));
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Find a credential-shaped value anywhere in the artifact.
+ *
+ * @param {unknown} node
+ * @param {string} [path]
+ * @returns {string[]} paths of offending values (paths only — never a value)
+ */
+export function findCredentialValues(node, path = '') {
+  const found = [];
+  if (typeof node === 'string') {
+    for (const { name, pattern } of SECRET_VALUE_PATTERNS) {
+      if (pattern.test(node)) {
+        found.push(`${path || '<root>'} (${name})`);
+      }
+    }
+    return found;
+  }
+  if (Array.isArray(node)) {
+    node.forEach((entry, index) => {
+      found.push(...findCredentialValues(entry, `${path}[${index}]`));
+    });
+    return found;
+  }
+  if (node && typeof node === 'object') {
+    for (const [key, value] of Object.entries(node)) {
+      const childPath = path ? `${path}.${key}` : key;
+      if (
+        SECRET_KEY_PATTERN.test(key) &&
+        !/names$/i.test(key) &&
+        isNonEmptyString(value)
+      ) {
+        found.push(`${childPath} (a credential-shaped field)`);
+        continue;
+      }
+      found.push(...findCredentialValues(value, childPath));
+    }
+  }
+  return found;
+}
+
+function row(gate, status, { step, owner, label, reason }) {
+  return { gate, status, step, owner, label, reason };
+}
+
+/**
+ * Decide whether a captured provisioning state satisfies the production
+ * provisioning gates.
+ *
+ * @param {object} state the captured artifact
+ * @param {object} [options]
+ * @param {string} [options.platformApp]
+ * @param {string} [options.healthProbeApp]
+ * @param {string[]} [options.requiredSourceNames]
+ * @param {string[]} [options.expectedSchemas]
+ * @returns {{ok: boolean, failures: object[], rows: object[]}}
+ */
+export function evaluateProvisioningState(state, options = {}) {
+  const platformApp = options.platformApp ?? 'sindustries-platform-production';
+  const healthProbeApp = options.healthProbeApp ?? 'sindustries-health-probe-production';
+  const requiredSourceNames = [...(options.requiredSourceNames ?? [])];
+  const expectedSchemas = [...(options.expectedSchemas ?? [])];
+
+  const rows = [];
+  const failures = [];
+
+  const add = (entry) => {
+    rows.push(entry);
+    if (entry.status === 'unmet') failures.push(entry);
+  };
+
+  if (!state || typeof state !== 'object') {
+    add(
+      row('artifact.shape', 'unmet', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Captured state artifact',
+        reason: 'the artifact is missing or is not an object',
+      }),
+    );
+    return { ok: false, failures, rows };
+  }
+
+  if (state.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
+    add(
+      row('artifact.schema-version', 'unmet', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Artifact schema version',
+        reason: `expected schemaVersion ${SUPPORTED_SCHEMA_VERSION}, found ${JSON.stringify(state.schemaVersion)}`,
+      }),
+    );
+  }
+
+  if (state.environment !== 'production') {
+    add(
+      row('artifact.environment', 'unmet', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Artifact environment',
+        reason: `expected environment "production", found ${JSON.stringify(state.environment)}`,
+      }),
+    );
+  }
+
+  if (!isIsoTimestamp(state.capturedAt)) {
+    add(
+      row('artifact.captured-at', 'unmet', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Capture timestamp',
+        reason: 'capturedAt must be an ISO-8601 date-time with an explicit timezone',
+      }),
+    );
+  }
+
+  const credentialPaths = findCredentialValues(state);
+  if (credentialPaths.length > 0) {
+    add(
+      row('artifact.redaction', 'unmet', {
+        step: 'Slice D evidence',
+        owner: 'Rowan',
+        label: 'Artifact redaction',
+        reason: `the artifact carries credential-shaped values at: ${credentialPaths.join(', ')}`,
+      }),
+    );
+  }
+
+  const providers = state.providers ?? {};
+
+  /**
+   * A provider that could not be read makes its gates unmet, not unknown.
+   *
+   * "Not captured" is not "fine" — an unreadable provider means the gate is
+   * unproven, and an unproven gate is an open gate.
+   */
+  const providerCaptured = (name) => {
+    const provider = providers[name];
+    if (!provider || typeof provider !== 'object') {
+      add(
+        row(`${name}.captured`, 'unmet', {
+          step: 'Slice D evidence',
+          owner: 'Rowan',
+          label: `${name} read`,
+          reason: `the ${name} section is missing from the artifact`,
+        }),
+      );
+      return false;
+    }
+    if (provider.captured !== true) {
+      add(
+        row(`${name}.captured`, 'unmet', {
+          step: 'Slice D evidence',
+          owner: 'Rowan',
+          label: `${name} read`,
+          reason: `the ${name} provider was not captured${
+            provider.error ? `: ${provider.error}` : ''
+          }`,
+        }),
+      );
+      return false;
+    }
+    return true;
+  };
+
+  // --- Neon: AC2 — branch, service roles, connectivity restriction -------
+
+  if (providerCaptured('neon')) {
+    const neon = providers.neon;
+    const branch = neon.branch ?? {};
+    if (branch.name !== 'production') {
+      add(
+        row('neon.production-branch', 'unmet', {
+          step: 'Slice D step 1',
+          owner: 'Quinn (operator)',
+          label: 'Production Neon branch',
+          reason: `expected a branch named "production", found ${JSON.stringify(branch.name ?? null)}`,
+        }),
+      );
+    } else if (branch.state !== 'ready') {
+      add(
+        row('neon.production-branch', 'unmet', {
+          step: 'Slice D step 1',
+          owner: 'Quinn (operator)',
+          label: 'Production Neon branch',
+          reason: `the production branch is not ready (state: ${JSON.stringify(branch.state ?? null)})`,
+        }),
+      );
+    } else {
+      add(
+        row('neon.production-branch', 'met', {
+          step: 'Slice D step 1',
+          owner: 'Quinn (operator)',
+          label: 'Production Neon branch',
+          reason: 'the production branch exists and is ready',
+        }),
+      );
+    }
+
+    const roleNames = asArray(neon.roleNames);
+    const serviceRoles = roleNames.filter((name) => !NEON_DEFAULT_ROLES.has(name));
+    const missingSchemas = expectedSchemas.filter(
+      (schema) =>
+        !serviceRoles.some((role) => role.toLowerCase().includes(schema.toLowerCase())),
+    );
+    if (missingSchemas.length > 0) {
+      add(
+        row('neon.service-roles', 'unmet', {
+          step: 'Slice D step 1',
+          owner: 'Quinn (operator)',
+          label: 'Production Neon service roles',
+          reason: `no service role found for schema(s): ${missingSchemas.join(', ')} (roles present: ${
+            roleNames.length > 0 ? roleNames.join(', ') : 'none'
+          })`,
+        }),
+      );
+    } else {
+      add(
+        row('neon.service-roles', 'met', {
+          step: 'Slice D step 1',
+          owner: 'Quinn (operator)',
+          label: 'Production Neon service roles',
+          reason: `one service role per schema (${expectedSchemas.join(', ')})`,
+        }),
+      );
+    }
+
+    const project = neon.project ?? {};
+    const allowedIpCount = Number(project.allowedIpCount ?? 0);
+    if (!Number.isFinite(allowedIpCount) || allowedIpCount < 1) {
+      add(
+        row('neon.ip-allowlist', 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Quinn / Tom (account plan decision)',
+          label: 'Neon IP allowlist',
+          reason:
+            `the production project carries ${allowedIpCount} allowed IP address(es); AC2 requires a non-empty allowlist` +
+            (neon.organization?.plan
+              ? ` (Neon organization plan: ${neon.organization.plan})`
+              : ''),
+        }),
+      );
+    } else {
+      add(
+        row('neon.ip-allowlist', 'met', {
+          step: 'Slice D step 2',
+          owner: 'Quinn / Tom (account plan decision)',
+          label: 'Neon IP allowlist',
+          reason: `the production project carries ${allowedIpCount} allowed IP address(es)`,
+        }),
+      );
+    }
+
+    if (project.protectedBranchesOnly === true && branch.protected !== true) {
+      add(
+        row('neon.branch-protection', 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Quinn (operator)',
+          label: 'Production branch protection',
+          reason:
+            'the project restricts the allowlist to protected branches, but the production branch is not protected',
+        }),
+      );
+    } else {
+      add(
+        row('neon.branch-protection', 'not-applicable', {
+          step: 'Slice D step 2',
+          owner: 'Quinn (operator)',
+          label: 'Production branch protection',
+          reason:
+            project.protectedBranchesOnly === true
+              ? 'the production branch is protected'
+              : 'the project does not scope the allowlist to protected branches',
+        }),
+      );
+    }
+  }
+
+  // --- Fly: AC1/AC6 — the consolidated production app and its inventory --
+
+  if (providerCaptured('fly')) {
+    const fly = providers.fly;
+    const apps = asArray(fly.apps);
+    const byName = new Map(apps.map((app) => [app?.name, app]));
+
+    for (const [gate, name, label] of [
+      ['fly.production-platform-app', platformApp, 'Consolidated production platform app'],
+      ['fly.production-health-probe-app', healthProbeApp, 'Production health-probe app'],
+    ]) {
+      const app = byName.get(name);
+      if (!app) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason: `the Fly app ${name} does not exist`,
+          }),
+        );
+        continue;
+      }
+      const machines = asArray(app.machineStates);
+      const started = machines.filter((state) => state === 'started');
+      if (!app.releaseVersion || started.length === 0) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason: `the Fly app ${name} exists but has no deployed release (${
+              app.releaseVersion ? `release ${app.releaseVersion}` : 'no release'
+            }) and no started Machine (${started.length}/${machines.length} started)`,
+          }),
+        );
+        continue;
+      }
+      add(
+        row(gate, 'met', {
+          step: 'Slice D step 3',
+          owner: 'Quinn (operator)',
+          label,
+          reason: `${name} runs release ${app.releaseVersion} on ${started.length} started Machine(s)`,
+        }),
+      );
+    }
+  }
+
+  // --- GitHub: AC4 — the production Environment source secrets ------------
+
+  if (providerCaptured('github')) {
+    const github = providers.github;
+    const secretNames = new Set(asArray(github.secretNames));
+    const missing = requiredSourceNames.filter((name) => !secretNames.has(name));
+    if (missing.length > 0) {
+      add(
+        row('github.production-environment-sources', 'unmet', {
+          step: 'Slice D step 4',
+          owner: 'Quinn (operator)',
+          label: 'Production Environment source secrets',
+          reason: `the production Environment is missing source secret(s): ${missing.join(', ')}`,
+        }),
+      );
+    } else {
+      add(
+        row('github.production-environment-sources', 'met', {
+          step: 'Slice D step 4',
+          owner: 'Quinn (operator)',
+          label: 'Production Environment source secrets',
+          reason: `all ${requiredSourceNames.length} required source secret(s) are present`,
+        }),
+      );
+    }
+  }
+
+  // --- Upstash: AC4 — a production Redis database -------------------------
+
+  if (providerCaptured('upstash')) {
+    const databaseNames = asArray(providers.upstash.databaseNames);
+    const productionDatabases = databaseNames.filter((name) =>
+      /production/i.test(String(name)),
+    );
+    if (productionDatabases.length === 0) {
+      add(
+        row('upstash.production-redis-database', 'unmet', {
+          step: 'Slice D step 4',
+          owner: 'Quinn (operator)',
+          label: 'Production Redis database',
+          reason: `no production Redis database found (databases present: ${
+            databaseNames.length > 0 ? databaseNames.join(', ') : 'none'
+          })`,
+        }),
+      );
+    } else {
+      add(
+        row('upstash.production-redis-database', 'met', {
+          step: 'Slice D step 4',
+          owner: 'Quinn (operator)',
+          label: 'Production Redis database',
+          reason: `production Redis database(s) present: ${productionDatabases.join(', ')}`,
+        }),
+      );
+    }
+  }
+
+  for (const entry of OPERATOR_REQUIRED_ROWS) {
+    rows.push(
+      row(entry.gate, 'operator-required', {
+        step: entry.step,
+        owner: entry.owner,
+        label: entry.label,
+        reason: entry.reason,
+      }),
+    );
+  }
+
+  return { ok: failures.length === 0, failures, rows };
+}
+
+/**
+ * Read the expected production facts from the environment manifest.
+ *
+ * @param {string} repoRoot
+ * @returns {Promise<{platformApp: string, healthProbeApp: string, requiredSourceNames: string[], expectedSchemas: string[]}>}
+ */
+export async function loadProductionExpectations(repoRoot = DEFAULTS) {
+  const manifestUrl = pathToFileURL(
+    join(repoRoot, 'infra/cloud/platform/platform-environments.mjs'),
+  ).href;
+  const manifest = await import(manifestUrl);
+  const environment = manifest.getPlatformEnvironment('production');
+  return {
+    platformApp: environment.platformApp,
+    healthProbeApp: environment.healthProbeApp,
+    requiredSourceNames: manifest.requiredSourceNames(environment),
+    expectedSchemas: Object.values(environment.schemas ?? {}),
+  };
+}
+
+function formatRow(entry) {
+  const marker =
+    entry.status === 'met'
+      ? 'PASS'
+      : entry.status === 'unmet'
+        ? 'FAIL'
+        : entry.status === 'operator-required'
+          ? 'OPER'
+          : 'N/A ';
+  return `${marker}  ${entry.gate}\n      ${entry.label}: ${entry.reason}`;
+}
+
+async function main(argv) {
+  const [statePath, repoRootArg] = argv;
+  if (!statePath) {
+    stderr.write(
+      'usage: node tests/cloud/scripts/check-production-provisioning-state.mjs <state-file> [<repo-root>]\n',
+    );
+    return 2;
+  }
+
+  const repoRoot = resolve(repoRootArg ?? DEFAULTS);
+  let state;
+  try {
+    state = JSON.parse(readFileSync(resolve(statePath), 'utf8'));
+  } catch (error) {
+    stderr.write(`cannot read the state artifact ${statePath}: ${error.message}\n`);
+    return 2;
+  }
+
+  const expectations = await loadProductionExpectations(repoRoot);
+  const { ok, failures, rows } = evaluateProvisioningState(state, expectations);
+
+  stdout.write(`Production provisioning state — ${state.capturedAt ?? 'no capture time'}\n\n`);
+  for (const entry of rows) stdout.write(`${formatRow(entry)}\n\n`);
+
+  if (ok) {
+    stdout.write(
+      `All ${rows.filter((entry) => entry.status === 'met').length} machine-verifiable gate(s) are met; ` +
+        `${rows.filter((entry) => entry.status === 'operator-required').length} obligation(s) need operator evidence.\n`,
+    );
+    return 0;
+  }
+
+  stdout.write(`${failures.length} gate(s) are not met:\n`);
+  for (const entry of failures) {
+    stdout.write(`  - ${entry.gate} [${entry.step}, owner: ${entry.owner}]: ${entry.reason}\n`);
+  }
+  return 1;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main(process.argv.slice(2)).then(
+    (code) => exit(code),
+    (error) => {
+      stderr.write(`${error?.stack ?? error}\n`);
+      exit(2);
+    },
+  );
+}

@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "capturedAt": "2026-11-16T00:30:00.000Z",
+  "providers": {
+    "neon": {
+      "captured": true,
+      "organization": {
+        "id": "org-dry-grass-92330972",
+        "name": "Stoffer Industries",
+        "plan": "scale"
+      },
+      "project": {
+        "id": "odd-breeze-32823209",
+        "name": "sindustries",
+        "allowedIpCount": 2,
+        "protectedBranchesOnly": false,
+        "blockPublicConnections": false
+      },
+      "branch": {
+        "id": "br-long-haze-a7wrd3ci",
+        "name": "production",
+        "state": "ready",
+        "protected": false
+      },
+      "roleNames": [
+        "neondb_owner",
+        "authenticator",
+        "anonymous",
+        "authenticated",
+        "sindustries_tasks_api",
+        "sindustries_budget_api",
+        "sindustries_content_scheduler"
+      ]
+    },
+    "fly": {
+      "captured": true,
+      "organization": ["Tom Stoffer"],
+      "apps": [
+        {
+          "name": "sindustries-platform-production",
+          "organization": "Tom Stoffer",
+          "releaseVersion": 7,
+          "machineStates": ["started"]
+        },
+        {
+          "name": "sindustries-health-probe-production",
+          "organization": "Tom Stoffer",
+          "releaseVersion": 3,
+          "machineStates": ["started"]
+        }
+      ],
+      "secretNamesCaptured": false
+    },
+    "github": {
+      "captured": true,
+      "repository": "Stoffer-Industries/sindustries",
+      "environment": "production",
+      "secretNames": [
+        "FLY_API_TOKEN",
+        "PRODUCTION_TASKS_API_DATABASE_URL",
+        "PRODUCTION_BUDGET_API_DATABASE_URL",
+        "PRODUCTION_HEALTH_PROBE_REDIS",
+        "PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN",
+        "PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN"
+      ],
+      "variableNames": ["PRODUCTION_FLY_ORG"]
+    },
+    "upstash": {
+      "captured": true,
+      "databaseNames": [
+        "sindustries-content-scheduler-staging",
+        "sindustries-content-scheduler-production"
+      ],
+      "databaseTypes": ["free", "free"]
+    }
+  }
+}
