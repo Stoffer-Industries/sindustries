@@ -21,6 +21,7 @@ import { strict as assert } from 'node:assert';
 
 import {
   readFlyAppEnv,
+  readFlyAppMachines,
   readFlySecretNames,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
 
@@ -75,7 +76,7 @@ test('the secret inventory is read from the Machines API for the named app', asy
         'PLATFORM_TASKS_API_DATABASE_URL',
         'PLATFORM_TASKS_API_REDIS_URL',
       ]);
-      assert.equal(result.secretInventoryError, undefined);
+      assert.equal(result.inventoryReadError, undefined);
     },
   );
 });
@@ -106,7 +107,7 @@ test('an app that does not exist is reported as unreadable, not as empty', async
   );
 
   assert.equal(result.secretNames, null);
-  assert.match(result.secretInventoryError, /does not exist/);
+  assert.match(result.inventoryReadError, /does not exist/);
 });
 
 test('an unreadable inventory is reported with the status that stopped it', async () => {
@@ -116,7 +117,7 @@ test('an unreadable inventory is reported with the status that stopped it', asyn
   );
 
   assert.equal(result.secretNames, null);
-  assert.match(result.secretInventoryError, /HTTP 500/);
+  assert.match(result.inventoryReadError, /HTTP 500/);
 });
 
 test('a response with no secrets array is reported as unreadable', async () => {
@@ -128,7 +129,7 @@ test('a response with no secrets array is reported as unreadable', async () => {
   );
 
   assert.equal(result.secretNames, null);
-  assert.match(result.secretInventoryError, /no secrets array/);
+  assert.match(result.inventoryReadError, /no secrets array/);
 });
 
 test('a transport failure is reported as unreadable and never throws', async () => {
@@ -140,8 +141,8 @@ test('a transport failure is reported as unreadable and never throws', async () 
   );
 
   assert.equal(result.secretNames, null);
-  assert.match(result.secretInventoryError, /could not be read/);
-  assert.match(result.secretInventoryError, /ENOTFOUND/);
+  assert.match(result.inventoryReadError, /could not be read/);
+  assert.match(result.inventoryReadError, /ENOTFOUND/);
 });
 
 // --- The deployed probe-cadence read (AC6) ---------------------------------
@@ -348,15 +349,152 @@ test('a transport failure is reported as unreadable and never throws', async () 
     () => {
       throw new Error('getaddrinfo ENOTFOUND api.machines.dev');
     },
-    () =>
-      readFlyAppEnv(
-        'sindustries-health-probe-production',
-        'token-abc',
-        ['FLY_APP_PROBE_INTERVAL_SECONDS', 'DB_PROBE_INTERVAL_SECONDS'],
-      ),
+    () => readFlyAppEnv('sindustries-health-probe-production', 'token-abc', [
+      'FLY_APP_PROBE_INTERVAL_SECONDS',
+    ]),
   );
 
   assert.equal(result.captured, false);
+  assert.match(result.error, /could not be read/);
+  assert.match(result.error, /ENOTFOUND/);
+});
+
+// --- The deployment-state read (AC1) ------------------------------------
+//
+// The AC1 gate asks whether the production Fly apps exist and carry a
+// deployed release. Until now the capture took presence from the
+// organisation listing GraphQL offers — a listing capped at 50 apps — and
+// coerced a null app to the requested name, so an app that exists could
+// be reported as one that does not, and an app that does not exist was
+// reported as one with no release.
+//
+// The Machine inventory answers the same question with a 404 for an app
+// that is not there, so the read is authoritative and uncapped. These
+// cases prove it can go red, and that the three outcomes stay apart: an
+// app that exists, an app that does not, and a read that could not be
+// made.
+
+test('the deployment-state read reports the app and its Machine states', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        { name: 'lively-frog-6651', state: 'started' },
+        { name: 'quiet-otter-1122', state: 'stopped' },
+      ]),
+    async (calls) => {
+      const read = await readFlyAppMachines('sindustries-platform-production', 'token-abc');
+
+      assert.equal(calls.length, 1);
+      assert.equal(
+        calls[0].url,
+        'https://api.machines.dev/v1/apps/sindustries-platform-production/machines',
+      );
+      assert.equal(calls[0].init.headers.Authorization, 'Bearer token-abc');
+      assert.equal(read.exists, true);
+      assert.deepEqual(read.machineStates, ['started', 'stopped']);
+      assert.equal(read.machineCount, 2);
+      assert.equal(read.error, undefined);
+    },
+  );
+});
+
+test('only the Machine states are recorded — never the deployed environment', async () => {
+  // The Machine object carries the deployed environment, which holds
+  // credential-shaped values. The artifact must not inherit them.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          name: 'lively-frog-6651',
+          state: 'started',
+          config: {
+            env: {
+              DATABASE_URL: 'postgresql://user:***@prod.neon.tech/db',
+              FLY_APP_PROBE_INTERVAL_SECONDS: '120',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppMachines('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.deepEqual(Object.keys(result).sort(), ['exists', 'machineCount', 'machineStates']);
+  assert.equal(JSON.stringify(result).includes('DATABASE_URL'), false);
+  assert.equal(JSON.stringify(result).includes('password'), false);
+});
+
+test('an app that does not exist is reported as absent, not as unreadable', async () => {
+  // "The app does not exist" and "the read could not look" name different
+  // owners: the first is the operator's to close, the second is a capture
+  // problem. Collapsing them would accuse the operator for a read that
+  // never happened.
+  const result = await withFetch(
+    () => jsonResponse(404, { error: 'app not found' }),
+    () => readFlyAppMachines('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.exists, false);
+  assert.equal(result.machineCount, 0);
+  assert.deepEqual(result.machineStates, []);
+  assert.match(result.error, /does not exist/);
+});
+
+test('an unreadable deployment-state read is reported as unreadable, not as absent', async () => {
+  const result = await withFetch(
+    () => jsonResponse(500, { error: 'boom' }),
+    () => readFlyAppMachines('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.exists, null);
+  assert.match(result.error, /HTTP 500/);
+});
+
+test('a response with no machines array is reported as unreadable, not as empty', async () => {
+  const result = await withFetch(
+    () => jsonResponse(200, { unexpected: true }),
+    () => readFlyAppMachines('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.exists, null);
+  assert.match(result.error, /no machines/);
+});
+
+test('an app that exists with no Machine is not reported as absent', async () => {
+  // An app that was created but never deployed is a real state the gate
+  // must be able to report: it exists, and nothing runs on it.
+  const result = await withFetch(
+    () => jsonResponse(200, []),
+    () => readFlyAppMachines('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.exists, true);
+  assert.equal(result.machineCount, 0);
+  assert.deepEqual(result.machineStates, []);
+  assert.equal(result.error, undefined);
+});
+
+test('the object form of the Machine list is accepted as well', async () => {
+  // The Machines API answers this path with a bare array (verified
+  // 2026-11-16 against the staging health-probe app). The object form is
+  // accepted too, so a provider change does not read as "no Machines".
+  const result = await withFetch(
+    () => jsonResponse(200, { machines: [{ name: 'lively-frog-6651', state: 'started' }] }),
+    () => readFlyAppMachines('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.exists, true);
+  assert.deepEqual(result.machineStates, ['started']);
+});
+
+test('a transport failure is reported as unreadable and never throws', async () => {
+  const result = await withFetch(
+    () => {
+      throw new Error('getaddrinfo ENOTFOUND api.machines.dev');
+    },
+    () => readFlyAppMachines('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.exists, null);
   assert.match(result.error, /could not be read/);
   assert.match(result.error, /ENOTFOUND/);
 });
