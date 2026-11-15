@@ -174,3 +174,72 @@ def test_redirect_is_revalidated_and_repins_in_python(monkeypatch) -> None:
     assert resource.body == b"ok"
     assert resolutions == ["example.com", "other.example"]
     assert requested_hosts == ["93.184.216.34", "93.184.216.35"]
+
+
+def test_curl_python_cap_rejects_oversized_chunked_body(monkeypatch) -> None:
+    def fake_run(argv, **kwargs):
+        header_path = argv[argv.index("--dump-header") + 1]
+        body_path = argv[argv.index("--output") + 1]
+        with open(header_path, "w", encoding="utf-8") as handle:
+            handle.write("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n")
+        with open(body_path, "wb") as handle:
+            handle.write(b"x" * 2048)
+        return subprocess.CompletedProcess(argv, 0, stdout=b"200", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(FetchError) as exc_info:
+        _transport().fetch(
+            url="https://example.com/chunked",
+            hostname="example.com",
+            pinned_ip="93.184.216.34",
+            max_bytes=1024,
+        )
+
+    assert exc_info.value.code == "RESPONSE_TOO_LARGE"
+
+
+def test_curl_stderr_is_not_included_in_error(monkeypatch) -> None:
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv,
+            7,
+            stdout=b"",
+            stderr=b"failed to fetch https://example.com/?secret=do-not-leak",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(FetchError) as exc_info:
+        _transport().fetch(
+            url="https://example.com/?secret=do-not-leak",
+            hostname="example.com",
+            pinned_ip="93.184.216.34",
+            max_bytes=1024,
+        )
+
+    assert exc_info.value.code == "TRANSPORT_ERROR"
+    assert "do-not-leak" not in exc_info.value.message
+    assert exc_info.value.url == "https://example.com/"
+
+
+def test_curl_does_not_accept_auth_or_cookie_flags(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, stdout=b"200", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _transport().fetch(
+        url="https://example.com/",
+        hostname="example.com",
+        pinned_ip="93.184.216.34",
+        max_bytes=1024,
+    )
+
+    argv = captured["argv"]
+    assert not {"--cookie", "-b", "-c", "-u", "--user", "--oauth2-bearer"} & set(argv)
+    header_values = [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "--header"]
+    assert all(not value.lower().startswith("authorization:") for value in header_values)
