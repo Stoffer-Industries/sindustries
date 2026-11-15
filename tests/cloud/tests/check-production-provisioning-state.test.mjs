@@ -73,6 +73,19 @@
 //      environment-id gate.
 //  58. An expectation set with no expected process group fails the
 //      process-group gate.
+//  59. An artifact with no operator evidence reports the five obligations
+//      as operator-required instead of closing them.
+//  60. A published production hostname with no spend-limit read-back fails
+//      the ordering gate.
+//  61. A running production health probe with no spend-limit read-back
+//      fails the ordering gate.
+//  62. The ordering gate is not applicable when nothing is exposed.
+//  63. A malformed operator evidence section fails.
+//  64. A recorded read-back with no read-back time fails.
+//  65. An unknown operator evidence slot fails.
+//  66. An operator evidence value that carries a credential fails both the
+//      shape gate and the redaction guard.
+//  67. A recorded read-back closes the obligation it belongs to.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -136,17 +149,133 @@ function assertFailsWithExpectations(state, options, expectedGate) {
   );
 }
 
-test('the passing artifact passes and reports the operator-only obligations', () => {
+test('the passing artifact passes and every operator obligation is backed by a read-back', () => {
   const { ok, failures, rows } = evaluateProvisioningState(loadFixture(), EXPECTATIONS);
   assert.equal(ok, true);
   assert.deepEqual(failures, []);
 
-  const operatorOnly = rows.filter((row) => row.status === 'operator-required');
-  assert.equal(operatorOnly.length, 5, 'the five operator-only obligations are reported');
-  for (const row of operatorOnly) {
+  const operatorRows = rows.filter(
+    (row) =>
+      row.gate === 'fly.spend-limit-readback' ||
+      row.gate === 'neon.separation-denial-proof' ||
+      row.gate === 'health.production-probe-interval' ||
+      row.gate === 'health.production-api-responses' ||
+      row.gate === 'dns.resolution-and-tls-readback',
+  );
+  assert.equal(operatorRows.length, 5, 'the five operator-only obligations are reported');
+  for (const row of operatorRows) {
+    assert.equal(row.status, 'met', `${row.gate} is closed by the recorded read-back`);
     assert.ok(row.reason.length > 0, `${row.gate} explains why it cannot be machine-verified`);
     assert.ok(row.owner.length > 0, `${row.gate} names an owner`);
   }
+});
+
+test('an artifact with no operator evidence reports the five obligations as operator-required', () => {
+  const state = mutate((artifact) => {
+    delete artifact.operatorEvidence;
+  });
+  const { rows, failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const operatorRequired = rows.filter((row) => row.status === 'operator-required');
+  assert.equal(operatorRequired.length, 5, 'every obligation stays open without a read-back');
+  for (const row of operatorRequired) {
+    assert.ok(row.reason.includes('operatorEvidence'), `${row.gate} says where to record it`);
+  }
+  // The example artifact publishes the production hostnames, so the
+  // ordering gate must fail closed rather than let the exposure stand.
+  assert.ok(
+    failures.map((failure) => failure.gate).includes('fly.spend-limit-before-public-exposure'),
+    'an exposure without a spend-limit read-back fails the ordering gate',
+  );
+});
+
+test('a published production hostname with no spend-limit read-back fails the ordering gate', () => {
+  assertFails(
+    mutate((state) => {
+      delete state.operatorEvidence.flySpendLimit;
+    }),
+    'fly.spend-limit-before-public-exposure',
+  );
+});
+
+test('a running production health probe with no spend-limit read-back fails the ordering gate', () => {
+  const state = mutate((artifact) => {
+    delete artifact.operatorEvidence.flySpendLimit;
+    // No DNS exposure at all: the only public surface left is the probe.
+    artifact.providers.cloudflare.records = artifact.providers.cloudflare.records.filter(
+      (record) => !record.name.endsWith('.sindustries.co.nz'),
+    );
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  assert.ok(
+    failures.map((failure) => failure.gate).includes('fly.spend-limit-before-public-exposure'),
+    'the running probe is public exposure on its own',
+  );
+});
+
+test('the ordering gate is not applicable when nothing is exposed', () => {
+  const state = mutate((artifact) => {
+    delete artifact.operatorEvidence.flySpendLimit;
+    artifact.providers.cloudflare.records = artifact.providers.cloudflare.records.filter(
+      (record) => !record.name.endsWith('.sindustries.co.nz'),
+    );
+    const probe = artifact.providers.fly.apps.find(
+      (app) => app.name === 'sindustries-health-probe-production',
+    );
+    if (probe) probe.machineStates = ['stopped'];
+  });
+  const { rows, failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const ordering = rows.find((row) => row.gate === 'fly.spend-limit-before-public-exposure');
+  assert.ok(ordering, 'the ordering gate is always reported');
+  assert.equal(ordering.status, 'not-applicable');
+  assert.ok(
+    !failures.map((failure) => failure.gate).includes('fly.spend-limit-before-public-exposure'),
+    'nothing is exposed, so the limit cannot have been skipped yet',
+  );
+});
+
+test('a malformed operator evidence section fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.flySpendLimit.recorded = 'yes';
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+test('a recorded read-back with no read-back time fails', () => {
+  assertFails(
+    mutate((state) => {
+      delete state.operatorEvidence.flySpendLimit.readBackAt;
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+test('an unknown operator evidence slot fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.somethingElse = { recorded: true, readBackAt: '2026-11-16T00:00:00.000Z' };
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+test('an operator evidence value that carries a credential fails the shape and redaction gates', () => {
+  const state = mutate((artifact) => {
+    artifact.operatorEvidence.flySpendLimit.scope =
+      'postgresql://someone:secret@db.example.neon.tech/production';
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const failed = failures.map((failure) => failure.gate);
+  assert.ok(failed.includes('artifact.operator-evidence'), 'the shape gate refuses the value');
+  assert.ok(failed.includes('artifact.redaction'), 'the redaction guard refuses the value');
+});
+
+test('a recorded read-back closes the obligation it belongs to', () => {
+  const { rows } = evaluateProvisioningState(loadFixture(), EXPECTATIONS);
+  const spendLimit = rows.find((row) => row.gate === 'fly.spend-limit-readback');
+  assert.equal(spendLimit.status, 'met');
+  assert.ok(spendLimit.reason.includes('read back'), 'the reason names the read-back');
 });
 
 test('a Neon provider that could not be read fails', () => {

@@ -32,7 +32,13 @@
 //   node infra/cloud/scripts/capture-production-provisioning-state.mjs [--out <path>]
 //        [--repo-root <path>] [--neon-project <name>]
 //        [--github-repo <owner/name>] [--github-environment <name>]
+//        [--operator-evidence <path>]
 //
+// The operator read-backs (the five obligations no machine can prove) are
+// merged into the artifact from an operator-owned JSON file. The capture
+// performs no read for them: they are facts only the operator can observe.
+// The file carries a boolean, a read-back time and a POINTER to the
+// read-back — never a value.
 // Credentials (read from the environment, never from a file in the repo):
 //   NEON_API_KEY          Neon management API
 //   FLY_API_TOKEN         Fly GraphQL API
@@ -51,6 +57,7 @@ import {
   fingerprintProbeTargets,
   hostFingerprint,
 } from '../platform/probe-target-facts.mjs';
+import { validateOperatorEvidence } from '../platform/production-operator-evidence.mjs';
 
 const REPO_ROOT_DEFAULT = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -142,6 +149,7 @@ function parseArgs(argv) {
     neonProject: null,
     githubRepo: 'Stoffer-Industries/sindustries',
     githubEnvironment: 'production',
+    operatorEvidence: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -167,11 +175,50 @@ function parseArgs(argv) {
         options.githubEnvironment = value;
         index += 1;
         break;
+      case '--operator-evidence':
+        options.operatorEvidence = value;
+        index += 1;
+        break;
       default:
         throw new Error(`unknown argument: ${arg}`);
     }
   }
   return options;
+}
+
+/**
+ * Read the operator's read-backs from a file.
+ *
+ * The file is operator-owned and holds NO values: a boolean, a read-back
+ * time and a pointer to the read-back. A file that cannot be read, or that
+ * carries a shape the checker would reject, is REFUSED rather than
+ * dropped: a silently dropped read-back turns a recorded spend limit into
+ * an unrecorded one and flips the ordering gate red with no explanation.
+ *
+ * @param {string} path
+ * @returns {{evidence: object|null, problems: string[]}}
+ */
+export function loadOperatorEvidence(path) {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    return {
+      evidence: null,
+      problems: [`cannot read the operator evidence file ${path}: ${error.message}`],
+    };
+  }
+  const validation = validateOperatorEvidence(parsed);
+  if (!validation.ok) {
+    return { evidence: null, problems: validation.problems };
+  }
+  if (!validation.present) {
+    return {
+      evidence: null,
+      problems: ['the operator evidence file records no operator evidence'],
+    };
+  }
+  return { evidence: parsed, problems: [] };
 }
 
 /**
@@ -1162,11 +1209,30 @@ async function main(argv) {
     // proved which configuration the platform app itself was deployed
     // with, so a production app deployed from the shared staging config
     // passed every gate the repository owns.
-    schemaVersion: 5,
+    // Version 6: the OPERATOR EVIDENCE section is recorded. The five
+    // obligations no machine can prove (the Fly spend-limit read-back, the
+    // Neon separation denial proof, one successful production probe
+    // interval, the production API health responses and the DNS/TLS
+    // read-back) had nowhere to be recorded, so they were reported as
+    // `operator-required` forever and the chain could never reach green —
+    // AC5 could not be satisfied even after the operator had set the
+    // limit. Version 6 carries the operator's value-free read-backs, and
+    // the checker binds them to the obligations they close.
+    schemaVersion: 6,
     environment: 'production',
     capturedAt: new Date().toISOString(),
     providers: { neon, fly, github, upstash, cloudflare },
   };
+
+  if (options.operatorEvidence) {
+    const loaded = loadOperatorEvidence(resolve(options.operatorEvidence));
+    if (loaded.problems.length > 0) {
+      throw new Error(
+        `the operator evidence file ${options.operatorEvidence} is not usable: ${loaded.problems.join('; ')}`,
+      );
+    }
+    artifact.operatorEvidence = loaded.evidence;
+  }
 
   const serialized = `${JSON.stringify(artifact, null, 2)}\n`;
   if (options.out) {
