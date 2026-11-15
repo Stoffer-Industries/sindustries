@@ -159,6 +159,47 @@ export const SCHEDULER_APPROVAL_ACTOR =
   PLATFORM_ENVIRONMENTS.staging.approvalActors.contentScheduler;
 
 /**
+ * The app-level secret names the consolidated platform app must carry.
+ *
+ * The NAMES are environment-independent — the same fifteen names on
+ * staging and on production — because the supervisor and the children
+ * read the same variables in both. Only the VALUES differ, and the values
+ * come from the environment manifest.
+ *
+ * This list exists so that the Slice D evidence gate can ask "does the
+ * production app actually carry these secrets?" without restating them.
+ * A checker that carries its own copy of the expected names can agree
+ * with a drifted provisioner, which is the defect class the DNS gates
+ * were fixed for. The list is therefore exported from the provisioner
+ * that registers them, and {@link buildPlatformSecretPayload} is bound to
+ * it: a payload may never carry a name outside this list, and a payload
+ * built from a complete set of sources must carry every name in it.
+ */
+export const PLATFORM_SECRET_NAMES = Object.freeze([
+  // Database URLs — one per schema, all write-capable.
+  'PLATFORM_TASKS_API_DATABASE_URL',
+  'PLATFORM_BUDGET_API_DATABASE_URL',
+  'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
+  // Redis — every live app shares the one value, so all six names take it.
+  'PLATFORM_TASKS_API_REDIS_URL',
+  'PLATFORM_TASKS_API_CONTENT_SCHEDULER_REDIS_URL',
+  'PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL',
+  'PLATFORM_CONTENT_SCHEDULER_API_CONTENT_SCHEDULER_REDIS_URL',
+  'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
+  'PLATFORM_AUTO_POST_WORKER_CONTENT_SCHEDULER_REDIS_URL',
+  // Approval credentials — inherited names, unchanged.
+  'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
+  'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
+  // The content-scheduler public base URL the tasks API and the
+  // auto-post worker call.
+  'PLATFORM_CONTENT_SCHEDULER_API_BASE_URL',
+  // The CORS allow-lists the supervisor requires.
+  'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+]);
+
+/**
  * Resolve the environment a payload is built for.
  *
  * Accepts an environment id (the CLI's `--environment` value) or an
@@ -490,6 +531,30 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
   // carries a staging/dev hostname, a placeholder or a localhost address
   // must never reach Fly (task fb1240c0).
   assertEnvironmentValues(environment, secrets);
+
+  // Bind this payload to the canonical name list the Slice D evidence
+  // gate reads. Two directions, because either one alone leaves a hole:
+  // a payload may never carry a name the list does not name (the list
+  // would be stale), and a payload built from a COMPLETE set of sources
+  // must carry every name in the list (a name that silently stopped
+  // being registered would leave the gate asserting a secret the app
+  // never receives). An incomplete payload is allowed to be short — that
+  // is what `missing` reports — but it may never be wrong.
+  const emitted = new Set(secrets.map((secret) => secret.name));
+  const unexpected = [...emitted].filter((name) => !PLATFORM_SECRET_NAMES.includes(name));
+  if (unexpected.length > 0) {
+    throw new Error(
+      `the payload carries secret name(s) the canonical list does not name: ${unexpected.join(', ')}`,
+    );
+  }
+  if (missing.length === 0) {
+    const absent = PLATFORM_SECRET_NAMES.filter((name) => !emitted.has(name));
+    if (absent.length > 0) {
+      throw new Error(
+        `a payload built from complete sources is missing secret name(s): ${absent.join(', ')}`,
+      );
+    }
+  }
 
   return { secrets, missing: [...new Set(missing)], notes };
 }

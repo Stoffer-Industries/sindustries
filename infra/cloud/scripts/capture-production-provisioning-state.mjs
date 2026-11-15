@@ -53,6 +53,7 @@ const REPO_ROOT_DEFAULT = (() => {
 
 const NEON_API_BASE = 'https://console.neon.tech/api/v2';
 const FLY_GRAPHQL_ENDPOINT = 'https://api.fly.io/graphql';
+const FLY_MACHINES_API_BASE = 'https://api.machines.dev';
 const UPSTASH_API_BASE = 'https://api.upstash.com/v2';
 const GITHUB_API_BASE = 'https://api.github.com';
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
@@ -202,6 +203,67 @@ async function captureNeon({ projectName }) {
   }
 }
 
+/**
+ * Read the secret NAMES registered on a Fly app.
+ *
+ * The GraphQL API cannot answer this. It replies `secrets: []` for an app
+ * that does carry secrets — verified against the staging platform app on
+ * 2026-11-16, where the Machines API lists the registered names and
+ * GraphQL lists none — so a GraphQL read would report "no secrets" for an
+ * app that has them. A capture built on it would make the Slice D step 5
+ * gate report a fact that is simply not true.
+ *
+ * The Machines API answers with the real inventory: a name, a digest and
+ * timestamps per secret. Only the NAMES are kept. Fly never returns a
+ * value, and this artifact carries names, flags and counts only — a
+ * digest is neither, so the digest read-back stays an operator step
+ * (`flyctl secrets list` prints it next to each name).
+ *
+ * The read never throws. A failure is recorded as a reason so the gate can
+ * name it; an unreadable inventory must not be reported as an empty one.
+ *
+ * @param {string} app
+ * @param {string} apiToken
+ * @returns {Promise<{secretNames: string[]|null, secretInventoryError?: string}>}
+ */
+export async function readFlySecretNames(app, apiToken) {
+  try {
+    const response = await fetch(
+      `${FLY_MACHINES_API_BASE}/v1/apps/${encodeURIComponent(app)}/secrets`,
+      { headers: { Authorization: `Bearer ${apiToken}` } },
+    );
+    if (response.status === 404) {
+      return {
+        secretNames: null,
+        secretInventoryError: 'the Fly app does not exist, so it carries no secret inventory',
+      };
+    }
+    if (!response.ok) {
+      return {
+        secretNames: null,
+        secretInventoryError: `the secret inventory could not be read (HTTP ${response.status})`,
+      };
+    }
+    const payload = await response.json();
+    if (!Array.isArray(payload?.secrets)) {
+      return {
+        secretNames: null,
+        secretInventoryError: 'the secret inventory response carried no secrets array',
+      };
+    }
+    const names = payload.secrets
+      .map((secret) => secret?.name)
+      .filter((name) => typeof name === 'string' && name.length > 0)
+      .sort();
+    return { secretNames: names };
+  } catch (error) {
+    return {
+      secretNames: null,
+      secretInventoryError: `the secret inventory could not be read (${error.message})`,
+    };
+  }
+}
+
 async function captureFly({ platformApp, healthProbeApp }) {
   const apiToken = process.env.FLY_API_TOKEN;
   if (!apiToken) return failure('FLY_API_TOKEN is not set');
@@ -239,25 +301,28 @@ async function captureFly({ platformApp, healthProbeApp }) {
           `{ app(id: ${JSON.stringify(name)}) { name currentRelease { version } machines(first: 20) { nodes { state } } } }`,
         );
         const app = detail?.app ?? {};
+        const inventory = await readFlySecretNames(app.name ?? name, apiToken);
         apps.push({
           name: app.name ?? name,
           organization: organization.name ?? null,
           releaseVersion: app.currentRelease?.version ?? null,
           machineStates: (app.machines?.nodes ?? []).map((machine) => machine?.state),
+          ...inventory,
         });
       }
     }
 
-    // Fly's GraphQL API does not list secret names for these apps, so the
-    // secret-name inventory stays with the deploy workflow (which registers
-    // them) and with `flyctl secrets list`, which the operator runs. The
-    // artifact records that the inventory was not captured rather than
-    // implying the app has no secrets.
+    // The secret inventory is read per app above, from the Machines API.
+    // It is reported per app because that is where it is true: an app that
+    // does not exist has no inventory, and an app whose inventory could
+    // not be read has an unreadable one. Collapsing either into "the
+    // provider captured no secrets" would hide the difference between an
+    // app without secrets and a capture that could not look.
     return {
       captured: true,
       organization: organizations.map((organization) => organization?.name).filter(Boolean),
       apps,
-      secretNamesCaptured: false,
+      secretNamesCaptured: apps.length > 0 && apps.every((app) => Array.isArray(app.secretNames)),
     };
   } catch (error) {
     return failure(error.message);
@@ -453,10 +518,12 @@ async function main(argv) {
   return 0;
 }
 
-main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
-  (error) => {
-    process.stderr.write(`${error?.stack ?? error}\n`);
-    process.exit(2);
-  },
-);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main(process.argv.slice(2)).then(
+    (code) => process.exit(code),
+    (error) => {
+      process.stderr.write(`${error?.stack ?? error}\n`);
+      process.exit(2);
+    },
+  );
+}

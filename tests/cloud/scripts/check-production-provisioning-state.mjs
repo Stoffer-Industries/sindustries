@@ -237,6 +237,7 @@ export function evaluateProvisioningState(state, options = {}) {
   const healthProbeApp = options.healthProbeApp ?? null;
   const requiredSourceNames = [...(options.requiredSourceNames ?? [])];
   const expectedSchemas = [...(options.expectedSchemas ?? [])];
+  const expectedPlatformSecretNames = [...(options.expectedPlatformSecretNames ?? [])];
   const dnsExpectations = options.dnsExpectations ?? { zoneName: null, surfaces: [] };
 
   const rows = [];
@@ -600,6 +601,85 @@ export function evaluateProvisioningState(state, options = {}) {
     }
   }
 
+  // --- Fly: AC4 — the secret inventory the production app actually carries --
+
+  //
+  // The design's expected live evidence names a "Fly secret-name inventory
+  // and digest read-back, not values" (Slice D step 5). Until now the
+  // repository could prove the GitHub Environment carried the SOURCE
+  // secrets, but not that those values ever landed on the production app
+  // as Fly secrets — so AC4's registration half was prose.
+  //
+  // The expected names come from the provisioner that registers them, not
+  // from a copy kept here: a checker that carries its own copy of the
+  // expected names can agree with a drifted provisioner.
+  if (providerCaptured('fly')) {
+    const fly = providers.fly;
+    const apps = asArray(fly.apps);
+    const platformAppEntry = apps.find((app) => app?.name === platformApp);
+
+    if (expectedPlatformSecretNames.length === 0) {
+      // "All 0 required secret(s) are registered" is a vacuous pass: an
+      // expectation set that names nothing cannot prove that the
+      // production app carries the credentials AC4 requires.
+      add(
+        row('fly.production-platform-app-secrets', 'unmet', {
+          step: 'Slice D step 5',
+          owner: 'Rowan',
+          label: 'Production app secret inventory',
+          reason:
+            'the provisioner supplied no expected secret name, so the production app secret inventory cannot be proven',
+        }),
+      );
+    } else if (!platformAppEntry) {
+      add(
+        row('fly.production-platform-app-secrets', 'unmet', {
+          step: 'Slice D step 5',
+          owner: 'Quinn (operator)',
+          label: 'Production app secret inventory',
+          reason:
+            'the production platform app does not exist, so its secret inventory cannot be read',
+        }),
+      );
+    } else if (!Array.isArray(platformAppEntry.secretNames)) {
+      // An unreadable inventory is not an empty inventory. Reporting "no
+      // secrets" here would name the operator for a read that never
+      // happened.
+      add(
+        row('fly.production-platform-app-secrets', 'unmet', {
+          step: 'Slice D step 5',
+          owner: 'Quinn (operator)',
+          label: 'Production app secret inventory',
+          reason: `the production platform app's secret inventory could not be read: ${
+            platformAppEntry.secretInventoryError ?? 'no reason recorded'
+          }`,
+        }),
+      );
+    } else {
+      const registered = new Set(platformAppEntry.secretNames);
+      const missing = expectedPlatformSecretNames.filter((name) => !registered.has(name));
+      if (missing.length > 0) {
+        add(
+          row('fly.production-platform-app-secrets', 'unmet', {
+            step: 'Slice D step 5',
+            owner: 'Quinn (operator)',
+            label: 'Production app secret inventory',
+            reason: `the production platform app is missing secret(s): ${missing.join(', ')}`,
+          }),
+        );
+      } else {
+        add(
+          row('fly.production-platform-app-secrets', 'met', {
+            step: 'Slice D step 5',
+            owner: 'Quinn (operator)',
+            label: 'Production app secret inventory',
+            reason: `the production platform app carries all ${expectedPlatformSecretNames.length} required secret name(s)`,
+          }),
+        );
+      }
+    }
+  }
+
   // --- Cloudflare DNS: AC3 — production records point at the production apps
 
   if (providerCaptured('cloudflare')) {
@@ -807,7 +887,7 @@ export function evaluateProvisioningState(state, options = {}) {
  * Read the expected production facts from the environment manifest.
  *
  * @param {string} repoRoot
- * @returns {Promise<{platformApp: string, healthProbeApp: string, requiredSourceNames: string[], expectedSchemas: string[]}>}
+ * @returns {Promise<{platformApp: string, healthProbeApp: string, requiredSourceNames: string[], expectedSchemas: string[], expectedPlatformSecretNames: string[]}>}
  */
 export async function loadProductionExpectations(repoRoot = DEFAULTS) {
   const manifestUrl = pathToFileURL(
@@ -815,6 +895,15 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
   ).href;
   const manifest = await import(manifestUrl);
   const environment = manifest.getPlatformEnvironment('production');
+
+  // The app-level secret names come from the provisioner that registers
+  // them. The list is not restated here: a checker that carries its own
+  // copy of the expected names can agree with a drifted provisioner, which
+  // is the same defect class the DNS gates were fixed for.
+  const provisionerUrl = pathToFileURL(
+    join(repoRoot, 'infra/cloud/platform/platform-provision-secrets.mjs'),
+  ).href;
+  const provisioner = await import(provisionerUrl);
 
   // The hostname matrix owns the stable hostnames and their CNAME targets, so
   // the DNS expectations are read from it rather than restated here: a
@@ -842,6 +931,7 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     healthProbeApp: environment.healthProbeApp,
     requiredSourceNames: manifest.requiredSourceNames(environment),
     expectedSchemas: Object.values(environment.schemas ?? {}),
+    expectedPlatformSecretNames: [...provisioner.PLATFORM_SECRET_NAMES],
     dnsExpectations: {
       zoneName: matrix.apexDomain ?? null,
       surfaces: dnsSurfaces,

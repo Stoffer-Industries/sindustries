@@ -1268,6 +1268,15 @@ jobs:
       - name: Run production provisioning state contract test
         run: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
+      # The capture's Fly secret-inventory read reaches a second API (the
+      # Machines API — GraphQL answers `secrets: []` for an app that does
+      # carry secrets), so the read itself is proved able to fail: an
+      # unreadable inventory must be reported as unreadable, never as an
+      # app with no secrets. Run by explicit path so the orphan guard sees
+      # it as executed.
+      - name: Run production provisioning capture contract test
+        run: node --test tests/cloud/tests/capture-production-provisioning-state.test.mjs
+
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
 
