@@ -26,6 +26,15 @@
 //  15. An artifact carrying a credential URL fails.
 //  16. The command line exits 0 on the passing artifact and 1 on a failing
 //      one.
+//  17. A Cloudflare provider that could not be read fails.
+//  18. A missing Cloudflare provider section fails.
+//  19. A missing production API DNS record fails.
+//  20. A production API record pointing at the wrong target fails.
+//  21. A proxied (orange cloud) production record fails.
+//  22. A missing production health-probe DNS record fails.
+//  23. A production record pointing at a staging deployment fails.
+//  24. A staging hostname moved off its staging target fails.
+//  25. A missing staging DNS record fails.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -75,7 +84,7 @@ test('the passing artifact passes and reports the operator-only obligations', ()
   assert.deepEqual(failures, []);
 
   const operatorOnly = rows.filter((row) => row.status === 'operator-required');
-  assert.equal(operatorOnly.length, 4, 'the four operator-only obligations are reported');
+  assert.equal(operatorOnly.length, 5, 'the five operator-only obligations are reported');
   for (const row of operatorOnly) {
     assert.ok(row.reason.length > 0, `${row.gate} explains why it cannot be machine-verified`);
     assert.ok(row.owner.length > 0, `${row.gate} names an owner`);
@@ -217,6 +226,105 @@ test('an artifact carrying a credential URL fails', () => {
       state.providers.neon.project.notes = 'postgres://role:password@example.neon.tech/db';
     }),
     'artifact.redaction',
+  );
+});
+
+test('a Cloudflare provider that could not be read fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.cloudflare = { captured: false, error: 'HTTP 403' };
+    }),
+    'cloudflare.captured',
+  );
+});
+
+test('a missing Cloudflare provider section fails', () => {
+  assertFails(
+    mutate((state) => {
+      delete state.providers.cloudflare;
+    }),
+    'cloudflare.captured',
+  );
+});
+
+test('a missing production API DNS record fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.cloudflare.records = state.providers.cloudflare.records.filter(
+        (record) => record.name !== 'tasks-api.sindustries.co.nz',
+      );
+    }),
+    'cloudflare.production-api-dns-records',
+  );
+});
+
+test('a production API record pointing at the wrong target fails', () => {
+  assertFails(
+    mutate((state) => {
+      const record = state.providers.cloudflare.records.find(
+        (entry) => entry.name === 'budget-api.sindustries.co.nz',
+      );
+      record.content = 'sindustries-budget-api.fly.dev';
+    }),
+    'cloudflare.production-api-dns-records',
+  );
+});
+
+test('a proxied production record fails', () => {
+  assertFails(
+    mutate((state) => {
+      const record = state.providers.cloudflare.records.find(
+        (entry) => entry.name === 'content-scheduler-api.sindustries.co.nz',
+      );
+      record.proxied = true;
+    }),
+    'cloudflare.production-api-dns-records',
+  );
+});
+
+test('a missing production health-probe DNS record fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.cloudflare.records = state.providers.cloudflare.records.filter(
+        (record) => record.name !== 'health-probe.sindustries.co.nz',
+      );
+    }),
+    'cloudflare.production-probe-dns-record',
+  );
+});
+
+test('a production record pointing at a staging deployment fails', () => {
+  assertFails(
+    mutate((state) => {
+      const record = state.providers.cloudflare.records.find(
+        (entry) => entry.name === 'tasks-api.sindustries.co.nz',
+      );
+      record.content = 'sindustries-platform-staging.fly.dev';
+    }),
+    'cloudflare.production-dns-separation',
+  );
+});
+
+test('a staging hostname moved off its staging target fails', () => {
+  assertFails(
+    mutate((state) => {
+      const record = state.providers.cloudflare.records.find(
+        (entry) => entry.name === 'tasks-api.staging.sindustries.co.nz',
+      );
+      record.content = 'sindustries-platform-production.fly.dev';
+    }),
+    'cloudflare.staging-dns-unchanged',
+  );
+});
+
+test('a missing staging DNS record fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.cloudflare.records = state.providers.cloudflare.records.filter(
+        (record) => record.name !== 'health-probe.staging.sindustries.co.nz',
+      );
+    }),
+    'cloudflare.staging-dns-unchanged',
   );
 });
 

@@ -12,9 +12,17 @@
 //
 // This script is that capture path. It performs READ-ONLY requests against
 // the production control planes — Neon, Fly, the GitHub `production`
-// Environment and Upstash — and writes a REDACTED artifact: names, flags and
-// counts only. It never writes a value. It creates nothing, changes nothing,
-// and deletes nothing; there is no mutation call anywhere in this file.
+// Environment, Upstash and Cloudflare DNS — and writes a REDACTED artifact:
+// names, flags and counts only. It never writes a value. It creates nothing,
+// changes nothing, and deletes nothing; there is no mutation call anywhere in
+// this file.
+//
+// The Cloudflare read is the AC3 read-back: the design's Slice D step 8
+// ("Create only the production API DNS records and Fly certificates") and
+// AC3's verification both rest on "the Cloudflare read-back shows only the
+// production API records changed, and the staging hostnames keep their prior
+// targets". Before this slice, AC3 was the one acceptance criterion whose
+// live evidence the repository had no way to capture.
 //
 // The artifact is then decided by
 // `tests/cloud/scripts/check-production-provisioning-state.mjs`, which fails
@@ -31,9 +39,10 @@
 //   UPSTASH_API_EMAIL     Upstash REST API (email)
 //   UPSTASH_API_KEY       Upstash REST API (key)
 //   GITHUB_TOKEN          GitHub API (falls back to `gh auth token`)
+//   CLOUDFLARE_API_TOKEN  Cloudflare DNS API (zone records read)
 
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -46,6 +55,7 @@ const NEON_API_BASE = 'https://console.neon.tech/api/v2';
 const FLY_GRAPHQL_ENDPOINT = 'https://api.fly.io/graphql';
 const UPSTASH_API_BASE = 'https://api.upstash.com/v2';
 const GITHUB_API_BASE = 'https://api.github.com';
+const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
 function parseArgs(argv) {
   const options = {
@@ -319,6 +329,93 @@ async function captureUpstash() {
   }
 }
 
+/**
+ * The DNS records this task is responsible for.
+ *
+ * The hostname matrix is the source of truth for the stable hostnames and
+ * their CNAME targets. This task owns the FLY-HOSTED surfaces only: the
+ * design's Slice D step 8 says "Create only the production API DNS records
+ * and Fly certificates. Do not move the apex or any frontend production
+ * traffic in this task", and the Vercel frontends CNAME to Vercel's shared
+ * managed target in every environment, so DNS carries no environment
+ * identity for them.
+ *
+ * The staging hostnames are read as well: AC3 requires the staging domains
+ * to be unaffected, and "unaffected" can only be evidenced by reading them.
+ *
+ * @param {string} repoRoot
+ * @returns {{zoneName: string, hostnames: string[]}}
+ */
+function readDnsScope(repoRoot) {
+  const matrix = JSON.parse(
+    readFileSync(join(repoRoot, 'infra/cloud/hostname-matrix.json'), 'utf8'),
+  );
+  const surfaces = (matrix.surfaces ?? []).filter(
+    (surface) =>
+      typeof surface?.cnameTargets?.production === 'string' &&
+      surface.cnameTargets.production.endsWith('.fly.dev'),
+  );
+  const hostnames = new Set();
+  for (const surface of surfaces) {
+    if (surface.production) hostnames.add(surface.production);
+    if (surface.staging) hostnames.add(surface.staging);
+  }
+  return { zoneName: matrix.apexDomain, hostnames: [...hostnames] };
+}
+
+/**
+ * Read the production DNS records — the AC3 read-back.
+ *
+ * Only names, record types, targets and the proxy flag are recorded: a DNS
+ * target is a public hostname, and the artifact never carries the API
+ * credential that read it.
+ *
+ * @param {{zoneName: string, hostnames: string[]}} scope
+ */
+async function captureCloudflare({ zoneName, hostnames }) {
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!token) return failure('CLOUDFLARE_API_TOKEN is not set');
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+
+  try {
+    const zonesResponse = await fetchJson(
+      `${CLOUDFLARE_API_BASE}/zones?name=${encodeURIComponent(zoneName)}`,
+      { headers },
+    );
+    const zone = (zonesResponse?.result ?? []).find(
+      (entry) => entry?.name === zoneName && entry?.id,
+    );
+    if (!zone) return failure(`no Cloudflare zone named ${zoneName}`);
+
+    const records = [];
+    for (const hostname of hostnames) {
+      const response = await fetchJson(
+        `${CLOUDFLARE_API_BASE}/zones/${zone.id}/dns_records?name=${encodeURIComponent(hostname)}`,
+        { headers },
+      );
+      for (const record of response?.result ?? []) {
+        // Cloudflare returns the record name as stored; only the exact
+        // hostname belongs to this scope.
+        if (record?.name !== hostname) continue;
+        records.push({
+          name: record.name,
+          type: record.type ?? 'unknown',
+          content: record.content ?? null,
+          proxied: record.proxied === true,
+        });
+      }
+    }
+
+    return { captured: true, zoneName, records };
+  } catch (error) {
+    return failure(error.message);
+  }
+}
+
 async function main(argv) {
   const options = parseArgs(argv);
   const manifestUrl = pathToFileURL(
@@ -326,8 +423,9 @@ async function main(argv) {
   ).href;
   const manifest = await import(manifestUrl);
   const environment = manifest.getPlatformEnvironment('production');
+  const dnsScope = readDnsScope(options.repoRoot);
 
-  const [neon, fly, github, upstash] = await Promise.all([
+  const [neon, fly, github, upstash, cloudflare] = await Promise.all([
     captureNeon({ projectName: options.neonProject }),
     captureFly({
       platformApp: environment.platformApp,
@@ -335,13 +433,14 @@ async function main(argv) {
     }),
     captureGitHub({ repo: options.githubRepo, environment: options.githubEnvironment }),
     captureUpstash(),
+    captureCloudflare(dnsScope),
   ]);
 
   const artifact = {
     schemaVersion: 1,
     environment: 'production',
     capturedAt: new Date().toISOString(),
-    providers: { neon, fly, github, upstash },
+    providers: { neon, fly, github, upstash, cloudflare },
   };
 
   const serialized = `${JSON.stringify(artifact, null, 2)}\n`;
