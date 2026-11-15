@@ -59,7 +59,7 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 4;
+export const SUPPORTED_SCHEMA_VERSION = 5;
 
 /** Neon's four default roles — they are not service roles. */
 const NEON_DEFAULT_ROLES = new Set([
@@ -219,6 +219,38 @@ function row(gate, status, { step, owner, label, reason }) {
 }
 
 /**
+ * The process group names a rendered Fly config declares.
+ *
+ * The platform is ONE app with ONE process group — the cost model and the
+ * shared-fate topology both depend on it — so the names are read from the
+ * config Fly actually deploys rather than restated here: a checker that
+ * carries its own copy of the expected topology can agree with a drifted
+ * config.
+ *
+ * @param {string} configText
+ * @returns {string[]}
+ */
+export function processGroupNames(configText) {
+  const names = [];
+  let inTable = false;
+
+  for (const rawLine of String(configText ?? '').split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const tableMatch = /^\[([^\]]+)\]$/.exec(line);
+    if (tableMatch) {
+      inTable = tableMatch[1] === 'processes';
+      continue;
+    }
+    if (!inTable) continue;
+    const assignment = /^([A-Za-z0-9_-]+)\s*=/.exec(line);
+    if (assignment) names.push(assignment[1]);
+  }
+
+  return names;
+}
+
+/**
  * Decide whether a captured provisioning state satisfies the production
  * provisioning gates.
  *
@@ -228,6 +260,9 @@ function row(gate, status, { step, owner, label, reason }) {
  * @param {string} [options.healthProbeApp]
  * @param {string[]} [options.requiredSourceNames]
  * @param {string[]} [options.expectedSchemas]
+ * @param {string} [options.expectedPlatformEnvironmentId]
+ * @param {object} [options.expectedPlatformCorsOrigins]
+ * @param {string[]} [options.expectedPlatformProcessGroups]
  * @returns {{ok: boolean, failures: object[], rows: object[]}}
  */
 export function evaluateProvisioningState(state, options = {}) {
@@ -580,6 +615,242 @@ export function evaluateProvisioningState(state, options = {}) {
           reason: `${name} runs release ${app.releaseVersion} on ${started.length} started Machine(s)`,
         }),
       );
+    }
+
+    // --- Fly: AC1/AC4 — the DEPLOYED platform app's CONFIGURATION
+    //
+    // The gates above prove the production platform app EXISTS, carries a
+    // release and runs a started Machine. None of that says WHICH
+    // configuration the running app was deployed with: an app deployed
+    // from the shared staging config exists, has a release, carries the
+    // right secret NAMES — and still serves staging's environment id,
+    // staging's CORS allow-lists and staging's process group.
+    //
+    // FLY MASKS SECRETS, so the deployed database and Redis URLs are not
+    // readable at all. The plain `[env]` values ARE readable, and they
+    // are exactly the ones that say which environment the app runs as.
+    const platformConfig = fly.platformConfig ?? null;
+    const configFailure =
+      !platformConfig || platformConfig.captured !== true
+        ? (platformConfig?.error ??
+          'the deployed production platform configuration was not captured')
+        : null;
+    // An app that does not exist and an app with no Machine are the
+    // operator's to close; a read that could not be made is the
+    // capture's, and blaming the operator for it would be wrong.
+    const configOwner =
+      platformConfig?.reason === 'unreadable' ? 'Rowan (capture)' : 'Quinn (operator)';
+    const configConflicts = new Set(asArray(platformConfig?.conflictingKeys));
+
+    // 1. The environment id the production overlay declares.
+    {
+      const gate = 'fly.production-platform-app-environment-id';
+      const label = 'Deployed production platform environment id';
+      const expectedId =
+        typeof options.expectedPlatformEnvironmentId === 'string'
+          ? options.expectedPlatformEnvironmentId.trim()
+          : '';
+      if (configFailure) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: configOwner,
+            label,
+            reason: configFailure,
+          }),
+        );
+      } else if (expectedId === '') {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Rowan',
+            label,
+            reason:
+              'the production platform overlay declares no environment id, so the deployed one cannot be proven',
+          }),
+        );
+      } else if (configConflicts.has('PLATFORM_ENVIRONMENT_ID')) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason:
+              'the deployed production platform app carries a different PLATFORM_ENVIRONMENT_ID on different Machines',
+          }),
+        );
+      } else if (!platformConfig.environmentId) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason:
+              'the deployed production platform app carries no PLATFORM_ENVIRONMENT_ID, so the environment it runs as is unknown',
+          }),
+        );
+      } else if (platformConfig.environmentId !== expectedId) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason: `the deployed production platform app runs as "${platformConfig.environmentId}", expected "${expectedId}"`,
+          }),
+        );
+      } else {
+        add(
+          row(gate, 'met', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason: `the deployed production platform app runs as ${expectedId}`,
+          }),
+        );
+      }
+    }
+
+    // 2. The CORS allow-lists the production overlay declares.
+    {
+      const gate = 'fly.production-platform-app-cors-origins';
+      const label = 'Deployed production platform CORS allow-lists';
+      const expectedOrigins = options.expectedPlatformCorsOrigins ?? {};
+      const expectedKeys = Object.keys(expectedOrigins);
+      if (configFailure) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: configOwner,
+            label,
+            reason: configFailure,
+          }),
+        );
+      } else if (expectedKeys.length === 0) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Rowan',
+            label,
+            reason:
+              'the production platform overlay declares no CORS allow-lists, so the deployed ones cannot be proven',
+          }),
+        );
+      } else {
+        const problems = [];
+        for (const key of expectedKeys) {
+          const expected = asArray(expectedOrigins[key]).map((origin) =>
+            String(origin).toLowerCase(),
+          );
+          const deployed = asArray(platformConfig.corsOrigins?.[key]);
+          if (configConflicts.has(key)) {
+            problems.push(`${key} differs between Machines`);
+            continue;
+          }
+          if (deployed.length === 0) {
+            problems.push(`${key} is not deployed`);
+            continue;
+          }
+          const missing = expected.filter((origin) => !deployed.includes(origin));
+          const extra = deployed.filter((origin) => !expected.includes(origin));
+          if (missing.length > 0 || extra.length > 0) {
+            problems.push(
+              `${key} allows ${deployed.join(', ')} instead of ${expected.join(', ')}`,
+            );
+          }
+        }
+        const malformed = Number(platformConfig.malformedOrigins ?? 0);
+        if (malformed > 0) {
+          problems.push(
+            `${malformed} deployed origin(s) are not an https origin and were not recorded`,
+          );
+        }
+        if (problems.length > 0) {
+          add(
+            row(gate, 'unmet', {
+              step: 'Slice D step 3',
+              owner: 'Quinn (operator)',
+              label,
+              reason: problems.join('; '),
+            }),
+          );
+        } else {
+          add(
+            row(gate, 'met', {
+              step: 'Slice D step 3',
+              owner: 'Quinn (operator)',
+              label,
+              reason: `the deployed production platform app allows exactly the production origins (${expectedKeys.length} allow-list(s))`,
+            }),
+          );
+        }
+      }
+    }
+
+    // 3. The one consolidated process group the shared config declares.
+    {
+      const gate = 'fly.production-platform-app-process-group';
+      const label = 'Deployed production platform process group';
+      const expectedGroups = asArray(options.expectedPlatformProcessGroups);
+      if (configFailure) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: configOwner,
+            label,
+            reason: configFailure,
+          }),
+        );
+      } else if (expectedGroups.length !== 1) {
+        // The platform is ONE app with ONE process group. A rendered
+        // config that declares anything else is a forked topology, and
+        // that is a repository fact, not the operator's.
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Rowan',
+            label,
+            reason: `the rendered production platform config declares ${expectedGroups.length} process group(s), expected exactly 1 — the platform is one app, one process group`,
+          }),
+        );
+      } else if (configConflicts.has('FLY_PROCESS_GROUP')) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason:
+              'the deployed production platform app runs more than one process group — the consolidated platform runs one',
+          }),
+        );
+      } else if (!platformConfig.processGroup) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason:
+              'the deployed production platform app carries no FLY_PROCESS_GROUP, so the process group it runs cannot be proven',
+          }),
+        );
+      } else if (platformConfig.processGroup !== expectedGroups[0]) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason: `the deployed production platform app runs the "${platformConfig.processGroup}" process group, expected "${expectedGroups[0]}"`,
+          }),
+        );
+      } else {
+        add(
+          row(gate, 'met', {
+            step: 'Slice D step 3',
+            owner: 'Quinn (operator)',
+            label,
+            reason: `the deployed production platform app runs the single "${expectedGroups[0]}" process group`,
+          }),
+        );
+      }
     }
   }
 
@@ -1278,6 +1549,49 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     ),
   ];
 
+  // The production platform OVERLAY is the file Fly deploys for the
+  // production platform app, so the expected environment id and CORS
+  // allow-lists are read from it rather than restated here: a checker
+  // that carries its own copy of the expected values can agree with a
+  // drifted overlay. The manifest and the overlay are bound together by
+  // the renderer's contract test, so the two cannot drift apart.
+  //
+  // The rendered config — the shared config with the overlay merged onto
+  // it — is what Fly actually deploys, so the expected process group is
+  // read from it.
+  //
+  // A parse or render failure is not a crash: it becomes an empty
+  // expectation set, and an empty expectation set fails the gate as a
+  // missing repository fact rather than passing vacuously.
+  let expectedPlatformEnvironmentId = '';
+  let expectedPlatformCorsOrigins = {};
+  let expectedPlatformProcessGroups = [];
+  try {
+    const rendererUrl = pathToFileURL(
+      join(repoRoot, 'infra/cloud/platform/render-fly-config.mjs'),
+    ).href;
+    const renderer = await import(rendererUrl);
+    const overlay = renderer.parseOverlay(
+      readFileSync(join(repoRoot, 'infra/cloud/fly/platform.production.overlay.toml'), 'utf8'),
+    );
+    expectedPlatformEnvironmentId = overlay.env.PLATFORM_ENVIRONMENT_ID ?? '';
+    for (const [key, value] of Object.entries(overlay.env)) {
+      if (!key.endsWith('CORS_ALLOWED_ORIGINS')) continue;
+      expectedPlatformCorsOrigins[key] = String(value)
+        .split(',')
+        .map((origin) => origin.trim().toLowerCase())
+        .filter(Boolean);
+    }
+    const sharedText = readFileSync(join(repoRoot, 'infra/cloud/fly/platform.fly.toml'), 'utf8');
+    expectedPlatformProcessGroups = processGroupNames(
+      renderer.mergeFlyConfig(sharedText, overlay),
+    );
+  } catch {
+    expectedPlatformEnvironmentId = '';
+    expectedPlatformCorsOrigins = {};
+    expectedPlatformProcessGroups = [];
+  }
+
   return {
     platformApp: environment.platformApp,
     healthProbeApp: environment.healthProbeApp,
@@ -1286,6 +1600,9 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     expectedPlatformSecretNames: [...provisioner.PLATFORM_SECRET_NAMES],
     expectedProbeCadence,
     expectedProductionHostFingerprints,
+    expectedPlatformEnvironmentId,
+    expectedPlatformCorsOrigins,
+    expectedPlatformProcessGroups,
     dnsExpectations: {
       zoneName: matrix.apexDomain ?? null,
       surfaces: dnsSurfaces,

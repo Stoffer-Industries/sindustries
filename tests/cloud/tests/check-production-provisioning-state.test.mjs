@@ -60,6 +60,19 @@
 //  46. Machines that disagree on a target fail.
 //  47. An unreadable deployed probe target capture fails.
 //  48. An expectation set with no production host fails the probe target gate.
+//  49. A deployed CORS allow-list that names a staging origin fails.
+//  50. A deployed CORS allow-list that is missing entirely fails.
+//  51. A deployed platform app that runs as another environment fails.
+//  52. A deployed platform app that carries no environment id fails.
+//  53. Machines that disagree on the deployed environment id fail.
+//  54. A deployed platform app that runs another process group fails.
+//  55. An artifact with no deployed platform configuration fails rather than
+//      passing.
+//  56. A deployed origin that is not an https origin fails.
+//  57. An expectation set with no expected environment id fails the
+//      environment-id gate.
+//  58. An expectation set with no expected process group fails the
+//      process-group gate.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -800,4 +813,105 @@ test('the command line exits 0 on the passing artifact and 1 on a failing one', 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+// --- The deployed production platform app's configuration (task fb1240c0)
+//
+// The app's existence, its release and its secret NAMES are proved
+// elsewhere. None of them says WHICH configuration the running app was
+// deployed with: an app deployed from the shared staging config passes
+// every one of those gates while still serving staging's environment id,
+// staging's CORS allow-lists and staging's process group.
+
+test('a deployed CORS allow-list that names a staging origin fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.platformConfig.corsOrigins.PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS = [
+        'https://tasks.staging.sindustries.co.nz',
+        'https://mission-control.sindustries.co.nz',
+      ];
+    }),
+    'fly.production-platform-app-cors-origins',
+  );
+});
+
+test('a deployed CORS allow-list that is missing entirely fails', () => {
+  assertFails(
+    mutate((state) => {
+      delete state.providers.fly.platformConfig.corsOrigins
+        .PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS;
+    }),
+    'fly.production-platform-app-cors-origins',
+  );
+});
+
+test('a deployed platform app that runs as another environment fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.platformConfig.environmentId = 'staging';
+    }),
+    'fly.production-platform-app-environment-id',
+  );
+});
+
+test('a deployed platform app that carries no environment id fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.platformConfig.environmentId = null;
+    }),
+    'fly.production-platform-app-environment-id',
+  );
+});
+
+test('machines that disagree on the deployed environment id fail', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.platformConfig.conflictingKeys = ['PLATFORM_ENVIRONMENT_ID'];
+      state.providers.fly.platformConfig.environmentId = null;
+    }),
+    'fly.production-platform-app-environment-id',
+  );
+});
+
+test('a deployed platform app that runs another process group fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.platformConfig.processGroup = 'tasks-api';
+    }),
+    'fly.production-platform-app-process-group',
+  );
+});
+
+test('an artifact with no deployed platform configuration fails rather than passing', () => {
+  assertFails(
+    mutate((state) => {
+      delete state.providers.fly.platformConfig;
+    }),
+    'fly.production-platform-app-environment-id',
+  );
+});
+
+test('a deployed origin that is not an https origin fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.platformConfig.malformedOrigins = 1;
+    }),
+    'fly.production-platform-app-cors-origins',
+  );
+});
+
+test('an expectation set with no expected environment id fails the environment-id gate', () => {
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, expectedPlatformEnvironmentId: '' },
+    'fly.production-platform-app-environment-id',
+  );
+});
+
+test('an expectation set with no expected process group fails the process-group gate', () => {
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, expectedPlatformProcessGroups: [] },
+    'fly.production-platform-app-process-group',
+  );
 });

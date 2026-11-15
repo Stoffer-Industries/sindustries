@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "environment": "production",
   "capturedAt": "2026-11-16T00:30:00.000Z",
   "providers": {
@@ -115,6 +115,26 @@
         },
         "conflictingKeys": [],
         "malformedTargets": 0,
+        "machineCount": 1
+      },
+      "platformConfig": {
+        "captured": true,
+        "environmentId": "production",
+        "processGroup": "platform",
+        "corsOrigins": {
+          "PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS": [
+            "https://tasks.sindustries.co.nz",
+            "https://mission-control.sindustries.co.nz"
+          ],
+          "PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS": [
+            "https://mission-control.sindustries.co.nz"
+          ],
+          "PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS": [
+            "https://mission-control.sindustries.co.nz"
+          ]
+        },
+        "conflictingKeys": [],
+        "malformedOrigins": 0,
         "machineCount": 1
       }
     },
