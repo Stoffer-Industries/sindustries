@@ -54,6 +54,26 @@ const REPO_ROOT_DEFAULT = (() => {
 const NEON_API_BASE = 'https://console.neon.tech/api/v2';
 const FLY_GRAPHQL_ENDPOINT = 'https://api.fly.io/graphql';
 const FLY_MACHINES_API_BASE = 'https://api.machines.dev';
+
+/**
+ * The health-probe cadence keys the capture reads (task fb1240c0, AC6).
+ *
+ * Only these two keys are ever read out of an app's deployed environment.
+ * The Machines API returns every environment variable the app carries, and
+ * the production health-probe app's environment also holds the production
+ * database and Redis URLs. Recording the whole map would write
+ * credential-shaped values into an artifact that is committed, compared
+ * between runs and pasted into a task comment, so the capture names the
+ * keys it needs and drops everything else AT THE READ.
+ *
+ * The cadence is the AC6 evidence: the repository already declares the
+ * production values (the production health-probe overlay) and asserts they
+ * are tighter than the staging daily cadence, but nothing proved that the
+ * DEPLOYED production probe carries them. A production probe left at the
+ * staging 86400s would pass every check the repository owned while watching
+ * nothing.
+ */
+const PROBE_CADENCE_KEYS = ['FLY_APP_PROBE_INTERVAL_SECONDS', 'DB_PROBE_INTERVAL_SECONDS'];
 const UPSTASH_API_BASE = 'https://api.upstash.com/v2';
 const GITHUB_API_BASE = 'https://api.github.com';
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
@@ -264,6 +284,106 @@ export async function readFlySecretNames(app, apiToken) {
   }
 }
 
+/**
+ * Read the deployed environment values of the named keys from a Fly app.
+ *
+ * The read is deliberately narrow: only the requested keys are kept, so the
+ * artifact can never carry a value the capture did not name. Everything
+ * else the API answers is dropped here.
+ *
+ * The three failure modes are kept apart, because they name different
+ * owners: an app that does not exist (the operator has not created it), a
+ * read that failed (the provider could not be looked at), and an app with
+ * no Machine (there is nothing deployed to read an environment from).
+ * Collapsing them into "no environment" would blame the operator for a
+ * read the capture never managed.
+ *
+ * @param {string} app
+ * @param {string} apiToken
+ * @param {string[]} keys the only keys to read and record
+ * @returns {Promise<{captured: boolean, env?: object, conflictingKeys?: string[], machineCount?: number, error?: string}>}
+ */
+export async function readFlyAppEnv(app, apiToken, keys) {
+  if (!app) {
+    return { captured: false, error: 'no Fly app name was supplied, so no environment could be read' };
+  }
+  try {
+    const response = await fetch(
+      `${FLY_MACHINES_API_BASE}/v1/apps/${encodeURIComponent(app)}/machines`,
+      { headers: { Authorization: `Bearer ${apiToken}` } },
+    );
+    if (response.status === 404) {
+      return {
+        captured: false,
+        error: `the Fly app ${app} does not exist, so its deployed environment cannot be read`,
+      };
+    }
+    if (!response.ok) {
+      return {
+        captured: false,
+        error: `the deployed environment of the Fly app ${app} could not be read (HTTP ${response.status})`,
+      };
+    }
+    const payload = await response.json();
+    // The Machines API answers a bare array of machines for this path
+    // (verified 2026-11-16 against the staging health-probe app). The
+    // object form is accepted as well; anything else is an unreadable read,
+    // never an empty environment.
+    const machines = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.machines)
+        ? payload.machines
+        : null;
+    if (!machines) {
+      return {
+        captured: false,
+        error: `the deployed environment read of the Fly app ${app} carried no machines`,
+      };
+    }
+    if (machines.length === 0) {
+      return {
+        captured: false,
+        error: `the Fly app ${app} carries no Machine, so its deployed environment cannot be read`,
+      };
+    }
+
+    const values = new Map();
+    for (const machine of machines) {
+      const env = machine?.config?.env;
+      if (!env || typeof env !== 'object') continue;
+      for (const key of keys) {
+        const value = env[key];
+        if (typeof value !== 'string' && typeof value !== 'number') continue;
+        if (!values.has(key)) values.set(key, new Set());
+        values.get(key).add(String(value));
+      }
+    }
+
+    const env = {};
+    const conflictingKeys = [];
+    for (const key of keys) {
+      const seen = values.get(key);
+      // An absent key stays absent: "the app does not carry this variable"
+      // is a different fact from "the read could not look".
+      if (!seen || seen.size === 0) continue;
+      // Machines that disagree are a real state (a rolling deploy with two
+      // generations), and the gate must not pick a winner.
+      if (seen.size > 1) {
+        conflictingKeys.push(key);
+        continue;
+      }
+      env[key] = [...seen][0];
+    }
+
+    return { captured: true, env, conflictingKeys, machineCount: machines.length };
+  } catch (error) {
+    return {
+      captured: false,
+      error: `the deployed environment of the Fly app ${app} could not be read (${error.message})`,
+    };
+  }
+}
+
 async function captureFly({ platformApp, healthProbeApp }) {
   const apiToken = process.env.FLY_API_TOKEN;
   if (!apiToken) return failure('FLY_API_TOKEN is not set');
@@ -318,11 +438,22 @@ async function captureFly({ platformApp, healthProbeApp }) {
     // not be read has an unreadable one. Collapsing either into "the
     // provider captured no secrets" would hide the difference between an
     // app without secrets and a capture that could not look.
+    // The cadence read is its own section, separate from the app inventory:
+    // it is the AC6 evidence (the DEPLOYED production probe cadence), and
+    // it must be reportable even when the app is absent from the
+    // organisation listing.
+    const healthProbeEnv = await readFlyAppEnv(
+      healthProbeApp,
+      apiToken,
+      PROBE_CADENCE_KEYS,
+    );
+
     return {
       captured: true,
       organization: organizations.map((organization) => organization?.name).filter(Boolean),
       apps,
       secretNamesCaptured: apps.length > 0 && apps.every((app) => Array.isArray(app.secretNames)),
+      healthProbeEnv,
     };
   } catch (error) {
     return failure(error.message);

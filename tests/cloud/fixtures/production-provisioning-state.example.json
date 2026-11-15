@@ -67,7 +67,16 @@
           "machineStates": ["started"]
         }
       ],
-      "secretNamesCaptured": true
+      "secretNamesCaptured": true,
+      "healthProbeEnv": {
+        "captured": true,
+        "env": {
+          "FLY_APP_PROBE_INTERVAL_SECONDS": "120",
+          "DB_PROBE_INTERVAL_SECONDS": "3600"
+        },
+        "conflictingKeys": [],
+        "machineCount": 1
+      }
     },
     "github": {
       "captured": true,

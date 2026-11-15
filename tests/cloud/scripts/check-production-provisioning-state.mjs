@@ -238,6 +238,7 @@ export function evaluateProvisioningState(state, options = {}) {
   const requiredSourceNames = [...(options.requiredSourceNames ?? [])];
   const expectedSchemas = [...(options.expectedSchemas ?? [])];
   const expectedPlatformSecretNames = [...(options.expectedPlatformSecretNames ?? [])];
+  const expectedProbeCadence = { ...(options.expectedProbeCadence ?? {}) };
   const dnsExpectations = options.dnsExpectations ?? { zoneName: null, surfaces: [] };
 
   const rows = [];
@@ -680,6 +681,104 @@ export function evaluateProvisioningState(state, options = {}) {
     }
   }
 
+  // --- AC6: the DEPLOYED production probe cadence (Slice D step 7) --------
+
+  // The repository already declared the production cadence (the production
+  // health-probe overlay) and asserted, in CI, that it is tighter than the
+  // staging daily cadence. What it could not prove is that the DEPLOYED
+  // production probe carries it: a production probe left at the staging
+  // 86400s passes every check the repository owns while watching nothing,
+  // which is exactly what AC6 says must not happen.
+  //
+  // The expected values are read from the overlay that declares them, not
+  // from a copy kept here: a checker that carries its own copy of the
+  // expected cadence can agree with a drifted overlay.
+  if (providerCaptured('fly')) {
+    const expectedKeys = Object.entries(expectedProbeCadence).filter(
+      ([, value]) => isNonEmptyString(value) || typeof value === 'number',
+    );
+
+    if (expectedKeys.length === 0) {
+      // An expectation set that names nothing cannot prove that the
+      // deployed probe runs the production cadence. This is a missing
+      // repository fact, so it is owned here rather than by the operator.
+      add(
+        row('health.production-probe-cadence', 'unmet', {
+          step: 'Slice D step 7',
+          owner: 'Rowan',
+          label: 'Deployed production probe cadence',
+          reason:
+            'the production probe overlay declares no expected cadence, so the deployed cadence cannot be proven',
+        }),
+      );
+    } else {
+      const probeEnv = providers.fly.healthProbeEnv ?? null;
+      if (!probeEnv || probeEnv.captured !== true) {
+        add(
+          row('health.production-probe-cadence', 'unmet', {
+            step: 'Slice D step 7',
+            owner: 'Quinn (operator)',
+            label: 'Deployed production probe cadence',
+            reason:
+              probeEnv?.error ??
+              'the deployed production health-probe environment was not captured',
+          }),
+        );
+      } else {
+        const deployed = probeEnv.env ?? {};
+        const conflicting = new Set(asArray(probeEnv.conflictingKeys));
+        const problems = [];
+
+        for (const [key, expectedValue] of expectedKeys) {
+          if (conflicting.has(key)) {
+            problems.push(`${key} is set to different values on different Machines`);
+            continue;
+          }
+          const actual = deployed?.[key];
+          if (actual === undefined || actual === null) {
+            problems.push(`${key} is not set on the deployed production health-probe app`);
+            continue;
+          }
+          const actualNumber = Number(actual);
+          const expectedNumber = Number(expectedValue);
+          if (!Number.isFinite(actualNumber) || !Number.isFinite(expectedNumber)) {
+            problems.push(
+              `${key} is not a number on the deployed production health-probe app (${JSON.stringify(actual)})`,
+            );
+            continue;
+          }
+          if (actualNumber !== expectedNumber) {
+            problems.push(
+              `${key} is ${actualNumber}s on the deployed production health-probe app, not the declared ${expectedNumber}s`,
+            );
+          }
+        }
+
+        if (problems.length > 0) {
+          add(
+            row('health.production-probe-cadence', 'unmet', {
+              step: 'Slice D step 7',
+              owner: 'Quinn (operator)',
+              label: 'Deployed production probe cadence',
+              reason: problems.join('; '),
+            }),
+          );
+        } else {
+          add(
+            row('health.production-probe-cadence', 'met', {
+              step: 'Slice D step 7',
+              owner: 'Quinn (operator)',
+              label: 'Deployed production probe cadence',
+              reason: `the deployed production health-probe app carries ${expectedKeys
+                .map(([key]) => key)
+                .join(' and ')} at the declared production cadence`,
+            }),
+          );
+        }
+      }
+    }
+  }
+
   // --- Cloudflare DNS: AC3 — production records point at the production apps
 
   if (providerCaptured('cloudflare')) {
@@ -926,12 +1025,46 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
       stagingTarget: surface.cnameTargets.staging ?? null,
     }));
 
+  // The production probe cadence is declared by the production health-probe
+  // overlay — the file Fly actually deploys — so the expected values are
+  // read from it rather than restated here: a checker that carries its own
+  // copy of the expected cadence can agree with a drifted overlay.
+  //
+  // The overlay is parsed with the renderer's own parser, so the keys a
+  // checker compares are the keys the deployment contract allows an
+  // overlay to set. A parse failure is not a crash: it becomes an empty
+  // expectation set, and an empty expectation set fails the gate as a
+  // missing repository fact.
+  let expectedProbeCadence = {};
+  try {
+    const rendererUrl = pathToFileURL(
+      join(repoRoot, 'infra/cloud/platform/render-fly-config.mjs'),
+    ).href;
+    const renderer = await import(rendererUrl);
+    const overlay = renderer.parseOverlay(
+      readFileSync(
+        join(
+          repoRoot,
+          'infra/cloud/observability/health-probe/fly.production.overlay.toml',
+        ),
+        'utf8',
+      ),
+    );
+    expectedProbeCadence = {
+      FLY_APP_PROBE_INTERVAL_SECONDS: overlay.env.FLY_APP_PROBE_INTERVAL_SECONDS ?? null,
+      DB_PROBE_INTERVAL_SECONDS: overlay.env.DB_PROBE_INTERVAL_SECONDS ?? null,
+    };
+  } catch {
+    expectedProbeCadence = {};
+  }
+
   return {
     platformApp: environment.platformApp,
     healthProbeApp: environment.healthProbeApp,
     requiredSourceNames: manifest.requiredSourceNames(environment),
     expectedSchemas: Object.values(environment.schemas ?? {}),
     expectedPlatformSecretNames: [...provisioner.PLATFORM_SECRET_NAMES],
+    expectedProbeCadence,
     dnsExpectations: {
       zoneName: matrix.apexDomain ?? null,
       surfaces: dnsSurfaces,
