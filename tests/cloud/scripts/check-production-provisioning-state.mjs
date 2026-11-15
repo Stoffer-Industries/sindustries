@@ -225,8 +225,16 @@ function row(gate, status, { step, owner, label, reason }) {
  * @returns {{ok: boolean, failures: object[], rows: object[]}}
  */
 export function evaluateProvisioningState(state, options = {}) {
-  const platformApp = options.platformApp ?? 'sindustries-platform-production';
-  const healthProbeApp = options.healthProbeApp ?? 'sindustries-health-probe-production';
+  // The expected names are deliberately NOT restated here. This checker used
+  // to carry its own copy of the production app names as a fallback, which
+  // is the same defect class the DNS gates were fixed for: a checker that
+  // carries its own copy of the expected facts can agree with a drifted
+  // source of truth. The environment manifest is the only place that names
+  // production, so a caller that supplies no names is a caller that has not
+  // told us what to check — and an empty expectation set must never read as
+  // "everything required is present".
+  const platformApp = options.platformApp ?? null;
+  const healthProbeApp = options.healthProbeApp ?? null;
   const requiredSourceNames = [...(options.requiredSourceNames ?? [])];
   const expectedSchemas = [...(options.expectedSchemas ?? [])];
   const dnsExpectations = options.dnsExpectations ?? { zoneName: null, surfaces: [] };
@@ -373,7 +381,19 @@ export function evaluateProvisioningState(state, options = {}) {
       (schema) =>
         !serviceRoles.some((role) => role.toLowerCase().includes(schema.toLowerCase())),
     );
-    if (missingSchemas.length > 0) {
+    if (expectedSchemas.length === 0) {
+      // Comparing the observed roles against no expected schema proves
+      // nothing, so this gate cannot be met by an empty expectation set.
+      add(
+        row('neon.service-roles', 'unmet', {
+          step: 'Slice D step 1',
+          owner: 'Rowan',
+          label: 'Production Neon service roles',
+          reason:
+            'the environment manifest supplied no expected schema, so the production service roles cannot be proven',
+        }),
+      );
+    } else if (missingSchemas.length > 0) {
       add(
         row('neon.service-roles', 'unmet', {
           step: 'Slice D step 1',
@@ -457,6 +477,21 @@ export function evaluateProvisioningState(state, options = {}) {
       ['fly.production-platform-app', platformApp, 'Consolidated production platform app'],
       ['fly.production-health-probe-app', healthProbeApp, 'Production health-probe app'],
     ]) {
+      if (!name) {
+        // The manifest did not name the app, so its existence is not a fact
+        // that can be checked. Saying "the app does not exist" would blame
+        // the operator for a missing repository fact.
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Rowan',
+            label,
+            reason:
+              'the environment manifest supplied no production app name, so the app cannot be proven to exist',
+          }),
+        );
+        continue;
+      }
       const app = byName.get(name);
       if (!app) {
         add(
@@ -501,7 +536,20 @@ export function evaluateProvisioningState(state, options = {}) {
     const github = providers.github;
     const secretNames = new Set(asArray(github.secretNames));
     const missing = requiredSourceNames.filter((name) => !secretNames.has(name));
-    if (missing.length > 0) {
+    if (requiredSourceNames.length === 0) {
+      // "All 0 required source secrets are present" is a vacuous pass: an
+      // expectation set that names nothing cannot prove that the production
+      // Environment carries the credentials AC4 requires.
+      add(
+        row('github.production-environment-sources', 'unmet', {
+          step: 'Slice D step 4',
+          owner: 'Rowan',
+          label: 'Production Environment source secrets',
+          reason:
+            'the environment manifest supplied no required source secret name, so the production Environment sources cannot be proven',
+        }),
+      );
+    } else if (missing.length > 0) {
       add(
         row('github.production-environment-sources', 'unmet', {
           step: 'Slice D step 4',

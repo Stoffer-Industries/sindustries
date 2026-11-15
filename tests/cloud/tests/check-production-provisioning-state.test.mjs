@@ -35,6 +35,10 @@
 //  23. A production record pointing at a staging deployment fails.
 //  24. A staging hostname moved off its staging target fails.
 //  25. A missing staging DNS record fails.
+//  26. An expectation set with no required source secret name fails.
+//  27. An expectation set with no expected schema fails.
+//  28. An expectation set with no production app name fails.
+//  29. The checker restates no production app name of its own.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -70,6 +74,26 @@ function mutate(mutator) {
 
 function assertFails(state, expectedGate) {
   const { ok, failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  assert.equal(ok, false, `expected the checker to fail for gate ${expectedGate}`);
+  const failed = failures.map((failure) => failure.gate);
+  assert.ok(
+    failed.includes(expectedGate),
+    `expected gate ${expectedGate} to fail, got: ${failed.join(', ') || 'none'}`,
+  );
+}
+
+/**
+ * Assert that a gate fails when the EXPECTATIONS are what changed.
+ *
+ * The gates below compare the captured state against the environment
+ * manifest. If the manifest ever stops naming the things it must name,
+ * the comparison can silently become vacuous — "all 0 required source
+ * secrets are present" is true without checking anything. These cases
+ * change the expectation set, not the artifact, and assert that the
+ * checker refuses to call an unprovable gate met.
+ */
+function assertFailsWithExpectations(state, options, expectedGate) {
+  const { ok, failures } = evaluateProvisioningState(state, options);
   assert.equal(ok, false, `expected the checker to fail for gate ${expectedGate}`);
   const failed = failures.map((failure) => failure.gate);
   assert.ok(
@@ -326,6 +350,58 @@ test('a missing staging DNS record fails', () => {
     }),
     'cloudflare.staging-dns-unchanged',
   );
+});
+
+test('an expectation set with no required source secret name fails the source gate', () => {
+  // "All 0 required source secrets are present" proves nothing: the
+  // comparison is vacuous, and a vacuous comparison must not report met.
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, requiredSourceNames: [] },
+    'github.production-environment-sources',
+  );
+});
+
+test('an expectation set with no expected schema fails the service-role gate', () => {
+  // With no expected schema, every observed role set satisfies "one
+  // service role per schema ()". That is a vacuous pass, not a met gate.
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, expectedSchemas: [] },
+    'neon.service-roles',
+  );
+});
+
+test('an expectation set with no production app name fails the Fly app gates', () => {
+  // The checker must not fall back to a restated copy of the app name: it
+  // has to be told what to look for, or the gate cannot be proven.
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, platformApp: null, healthProbeApp: null },
+    'fly.production-platform-app',
+  );
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, platformApp: null, healthProbeApp: null },
+    'fly.production-health-probe-app',
+  );
+});
+
+test('the checker restates no production app name of its own', async () => {
+  // The production app names live in the environment manifest. A checker
+  // that carries its own copy can agree with a drifted manifest, so it
+  // must fail when it is given no expectations at all.
+  const { ok, failures } = evaluateProvisioningState(loadFixture(), {});
+  assert.equal(ok, false);
+  const failed = failures.map((failure) => failure.gate);
+  for (const gate of [
+    'fly.production-platform-app',
+    'fly.production-health-probe-app',
+    'github.production-environment-sources',
+    'neon.service-roles',
+  ]) {
+    assert.ok(failed.includes(gate), `expected gate ${gate} to fail without expectations`);
+  }
 });
 
 test('the command line exits 0 on the passing artifact and 1 on a failing one', async () => {
