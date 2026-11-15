@@ -261,6 +261,17 @@ credential boundary.
     egress proxy (`urllib` `build_opener(ProxyHandler({}))`, `curl
     --noproxy '*'`): Python 3.14 rejects the proxy's MITM leaf under
     `VERIFY_X509_STRICT`, while curl and Node succeed.
+  - **Executable read-back (task `fb1240c0`, added 2026-11-16):** the facts
+    in this section are readable in one command instead of by hand —
+    `node infra/cloud/scripts/capture-production-provisioning-state.mjs
+    --out <state-file>` captures the Neon, Fly, GitHub `production`
+    Environment and Upstash state as a redacted artifact (names, flags and
+    counts only), and `node
+    tests/cloud/scripts/check-production-provisioning-state.mjs <state-file>`
+    decides, per Slice D gate, whether the step is met and names the owner
+    of the step that is not. A provider that cannot be read is an OPEN gate,
+    not a skipped one, so a green run means the state was read — not that
+    the state was never looked at.
 
 ### 6. Production deploy workflows (task `fb1240c0`)
 
