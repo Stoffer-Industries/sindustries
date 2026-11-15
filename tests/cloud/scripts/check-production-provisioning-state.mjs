@@ -53,7 +53,7 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 1;
+export const SUPPORTED_SCHEMA_VERSION = 2;
 
 /** Neon's four default roles — they are not service roles. */
 const NEON_DEFAULT_ROLES = new Set([
@@ -496,6 +496,24 @@ export function evaluateProvisioningState(state, options = {}) {
       }
       const app = byName.get(name);
       if (!app) {
+        // The capture reads every production app the manifest names, on
+        // its own, so a missing entry is not a missing app — it is a
+        // capture that did not record what it was asked to record. The
+        // operator is not the owner of that.
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Rowan',
+            label,
+            reason: `the capture recorded no state for the production app ${name}`,
+          }),
+        );
+        continue;
+      }
+      // `exists` has three values, not two. An unreadable read is not an
+      // absent app, and an absent app is not an app with no release: the
+      // three name different owners, so they must not share a reason.
+      if (app.exists === false) {
         add(
           row(gate, 'unmet', {
             step: 'Slice D step 3',
@@ -506,17 +524,41 @@ export function evaluateProvisioningState(state, options = {}) {
         );
         continue;
       }
+      if (app.exists !== true) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: 'Rowan',
+            label,
+            reason: `the state of the Fly app ${name} could not be read: ${
+              app.machineInventoryError ?? 'no reason recorded'
+            }`,
+          }),
+        );
+        continue;
+      }
       const machines = asArray(app.machineStates);
       const started = machines.filter((state) => state === 'started');
-      if (!app.releaseVersion || started.length === 0) {
+      if (!app.releaseVersion) {
+        add(
+          row(gate, 'unmet', {
+            step: 'Slice D step 3',
+            owner: app.releaseError ? 'Rowan' : 'Quinn (operator)',
+            label,
+            reason: app.releaseError
+              ? `the release of the Fly app ${name} could not be read: ${app.releaseError}`
+              : `the Fly app ${name} exists but has no deployed release`,
+          }),
+        );
+        continue;
+      }
+      if (started.length === 0) {
         add(
           row(gate, 'unmet', {
             step: 'Slice D step 3',
             owner: 'Quinn (operator)',
             label,
-            reason: `the Fly app ${name} exists but has no deployed release (${
-              app.releaseVersion ? `release ${app.releaseVersion}` : 'no release'
-            }) and no started Machine (${started.length}/${machines.length} started)`,
+            reason: `the Fly app ${name} exists but carries no started Machine (0/${machines.length} started)`,
           }),
         );
         continue;
@@ -652,7 +694,7 @@ export function evaluateProvisioningState(state, options = {}) {
           owner: 'Quinn (operator)',
           label: 'Production app secret inventory',
           reason: `the production platform app's secret inventory could not be read: ${
-            platformAppEntry.secretInventoryError ?? 'no reason recorded'
+            platformAppEntry.inventoryReadError ?? 'no reason recorded'
           }`,
         }),
       );

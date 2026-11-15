@@ -45,6 +45,14 @@
 //  32. An unreadable deployed probe environment fails.
 //  33. Machines that disagree on the cadence fail.
 //  34. An expectation set with no expected cadence fails.
+//  35. An app the provider says does not exist fails and says so.
+//  36. An app whose state could not be read fails and names the capture,
+//      not the operator.
+//  37. An app with no deployed release fails.
+//  38. A release that could not be read fails and names the capture.
+//  39. An app entry with no existence fact fails rather than passing.
+//  40. A health-probe app with no existence fact fails rather than passing.
+//  41. A reason field does not trip the redaction guard.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -203,6 +211,100 @@ test('a production app with no started Machine fails', () => {
   );
 });
 
+test('an app the provider says does not exist fails and says so', () => {
+  // The existence fact is read from the app itself, not inferred from a
+  // listing. An app the provider says is absent is reported as absent,
+  // with the operator named — not as "exists but has no release".
+  const state = mutate((artifact) => {
+    artifact.providers.fly.apps[0].exists = false;
+    artifact.providers.fly.apps[0].releaseVersion = null;
+    artifact.providers.fly.apps[0].machineStates = [];
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const failed = failures.find((failure) => failure.gate === 'fly.production-platform-app');
+
+  assert.ok(failed, 'expected the production platform app gate to fail');
+  assert.match(failed.reason, /does not exist/);
+  assert.equal(failed.owner, 'Quinn (operator)');
+});
+
+test('an app whose state could not be read fails and names the capture, not the operator', () => {
+  // An unreadable read is not an absent app. It is a read that never
+  // happened, so the owner is the capture, and the reason carries what
+  // stopped it.
+  const state = mutate((artifact) => {
+    artifact.providers.fly.apps[0].exists = null;
+    artifact.providers.fly.apps[0].machineInventoryError =
+      'the Machine inventory of the Fly app could not be read (HTTP 500)';
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const failed = failures.find((failure) => failure.gate === 'fly.production-platform-app');
+
+  assert.ok(failed, 'expected the production platform app gate to fail');
+  assert.match(failed.reason, /could not be read/);
+  assert.match(failed.reason, /HTTP 500/);
+  assert.equal(failed.owner, 'Rowan');
+});
+
+test('an app with no deployed release fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.apps[0].releaseVersion = null;
+    }),
+    'fly.production-platform-app',
+  );
+});
+
+test('a release that could not be read fails and names the capture', () => {
+  const state = mutate((artifact) => {
+    artifact.providers.fly.apps[0].releaseVersion = null;
+    artifact.providers.fly.apps[0].releaseError =
+      'the release of the Fly app could not be read (HTTP 502)';
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const failed = failures.find((failure) => failure.gate === 'fly.production-platform-app');
+
+  assert.ok(failed, 'expected the production platform app gate to fail');
+  assert.match(failed.reason, /could not be read/);
+  assert.equal(failed.owner, 'Rowan');
+});
+
+test('a reason field does not trip the redaction guard', () => {
+  // The redaction guard fires on a FIELD NAME that promises a credential.
+  // A reason field must therefore not be named like one: an artifact that
+  // says why an inventory could not be read is not carrying a credential,
+  // and the guard must not have to be weakened to say so.
+  const state = mutate((artifact) => {
+    artifact.providers.fly.apps[0].inventoryReadError =
+      'the secret inventory could not be read (HTTP 500)';
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const redacted = failures.filter((failure) => failure.gate === 'artifact.redaction');
+
+  assert.deepEqual(redacted, [], 'a reason field must not read as a credential-shaped field');
+});
+
+test('an app entry with no existence fact fails rather than passing', () => {
+  // An artifact captured before the existence fact existed must not be
+  // able to prove an app is deployed. Absent the fact, the gate fails
+  // closed.
+  assertFails(
+    mutate((state) => {
+      delete state.providers.fly.apps[0].exists;
+    }),
+    'fly.production-platform-app',
+  );
+});
+
+test('a health-probe app with no existence fact fails rather than passing', () => {
+  assertFails(
+    mutate((state) => {
+      delete state.providers.fly.apps[1].exists;
+    }),
+    'fly.production-health-probe-app',
+  );
+});
+
 test('a missing production Environment source secret fails', () => {
   assertFails(
     mutate((state) => {
@@ -244,7 +346,7 @@ test('an unreadable secret inventory fails the secret-inventory gate', () => {
   assertFails(
     mutate((state) => {
       state.providers.fly.apps[0].secretNames = null;
-      state.providers.fly.apps[0].secretInventoryError =
+      state.providers.fly.apps[0].inventoryReadError =
         'the secret inventory could not be read (HTTP 500)';
     }),
     'fly.production-platform-app-secrets',

@@ -244,7 +244,7 @@ async function captureNeon({ projectName }) {
  *
  * @param {string} app
  * @param {string} apiToken
- * @returns {Promise<{secretNames: string[]|null, secretInventoryError?: string}>}
+ * @returns {Promise<{secretNames: string[]|null, inventoryReadError?: string}>}
  */
 export async function readFlySecretNames(app, apiToken) {
   try {
@@ -255,20 +255,20 @@ export async function readFlySecretNames(app, apiToken) {
     if (response.status === 404) {
       return {
         secretNames: null,
-        secretInventoryError: 'the Fly app does not exist, so it carries no secret inventory',
+        inventoryReadError: 'the Fly app does not exist, so it carries no secret inventory',
       };
     }
     if (!response.ok) {
       return {
         secretNames: null,
-        secretInventoryError: `the secret inventory could not be read (HTTP ${response.status})`,
+        inventoryReadError: `the secret inventory could not be read (HTTP ${response.status})`,
       };
     }
     const payload = await response.json();
     if (!Array.isArray(payload?.secrets)) {
       return {
         secretNames: null,
-        secretInventoryError: 'the secret inventory response carried no secrets array',
+        inventoryReadError: 'the secret inventory response carried no secrets array',
       };
     }
     const names = payload.secrets
@@ -279,9 +279,123 @@ export async function readFlySecretNames(app, apiToken) {
   } catch (error) {
     return {
       secretNames: null,
-      secretInventoryError: `the secret inventory could not be read (${error.message})`,
+      inventoryReadError: `the secret inventory could not be read (${error.message})`,
     };
   }
+}
+
+/**
+ * Fetch the Machine inventory of a Fly app from the Machines API.
+ *
+ * This is the AUTHORITATIVE answer to "does this app exist, and is
+ * anything deployed on it": the API answers 404 for an app that does not
+ * exist, so the answer does not depend on a listing that could be
+ * truncated. The organisation listing GraphQL offers is capped at 50 apps
+ * per organisation, and an app beyond the cap never appears in it — so a
+ * presence read from that listing is a presence read from a truncated
+ * list, and an app that exists would be reported as one that does not.
+ *
+ * The three failure modes are kept apart, because they name different
+ * owners: an app that does not exist (the operator has not created it), a
+ * read that failed (the provider could not be looked at), and an app with
+ * no Machine (there is nothing deployed to read). Collapsing them would
+ * blame the operator for a read the capture never managed.
+ *
+ * The Machines API answers this path with a BARE ARRAY of machines
+ * (verified 2026-11-16 against the staging health-probe app); the object
+ * form (`{ machines: [...] }`) is accepted as well. Anything else is an
+ * unreadable read, never an empty Machine list.
+ *
+ * @param {string} app
+ * @param {string} apiToken
+ * @returns {Promise<{read: boolean, missing: boolean, machines: object[], error?: string}>}
+ */
+export async function fetchFlyMachines(app, apiToken) {
+  if (!app) {
+    return {
+      read: false,
+      missing: false,
+      machines: [],
+      error: 'no Fly app name was supplied, so no Machine inventory could be read',
+    };
+  }
+  try {
+    const response = await fetch(
+      `${FLY_MACHINES_API_BASE}/v1/apps/${encodeURIComponent(app)}/machines`,
+      { headers: { Authorization: `Bearer ${apiToken}` } },
+    );
+    if (response.status === 404) {
+      return {
+        read: false,
+        missing: true,
+        machines: [],
+        error: `the Fly app ${app} does not exist, so it carries no Machine`,
+      };
+    }
+    if (!response.ok) {
+      return {
+        read: false,
+        missing: false,
+        machines: [],
+        error: `the Machine inventory of the Fly app ${app} could not be read (HTTP ${response.status})`,
+      };
+    }
+    const payload = await response.json();
+    const machines = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.machines)
+        ? payload.machines
+        : null;
+    if (!machines) {
+      return {
+        read: false,
+        missing: false,
+        machines: [],
+        error: `the Machine inventory read of the Fly app ${app} carried no machines`,
+      };
+    }
+    return { read: true, missing: false, machines };
+  } catch (error) {
+    return {
+      read: false,
+      missing: false,
+      machines: [],
+      error: `the Machine inventory of the Fly app ${app} could not be read (${error.message})`,
+    };
+  }
+}
+
+/**
+ * Read the deployment state of a Fly app as facts, not as a guess.
+ *
+ * `exists` is the fact the AC1 gate needs and it has three values, not
+ * two: `true` (the app exists), `false` (it does not) and `null` (the read
+ * could not be made). An unreadable read is never an absent app — that
+ * confusion is how a provider failure turns into an accusation against the
+ * operator.
+ *
+ * Only the Machine STATES are kept. The Machine objects carry the deployed
+ * environment, which holds credential-shaped values, and nothing but the
+ * state may reach the artifact.
+ *
+ * @param {string} app
+ * @param {string} apiToken
+ * @returns {Promise<{exists: boolean|null, machineStates: string[], machineCount: number, error?: string}>}
+ */
+export async function readFlyAppMachines(app, apiToken) {
+  const inventory = await fetchFlyMachines(app, apiToken);
+  if (!inventory.read) {
+    return {
+      exists: inventory.missing ? false : null,
+      machineStates: [],
+      machineCount: 0,
+      error: inventory.error,
+    };
+  }
+  const machineStates = inventory.machines.map((machine) =>
+    typeof machine?.state === 'string' ? machine.state : 'unknown',
+  );
+  return { exists: true, machineStates, machineCount: inventory.machines.length };
 }
 
 /**
@@ -307,46 +421,19 @@ export async function readFlyAppEnv(app, apiToken, keys) {
   if (!app) {
     return { captured: false, error: 'no Fly app name was supplied, so no environment could be read' };
   }
-  try {
-    const response = await fetch(
-      `${FLY_MACHINES_API_BASE}/v1/apps/${encodeURIComponent(app)}/machines`,
-      { headers: { Authorization: `Bearer ${apiToken}` } },
-    );
-    if (response.status === 404) {
-      return {
-        captured: false,
-        error: `the Fly app ${app} does not exist, so its deployed environment cannot be read`,
-      };
-    }
-    if (!response.ok) {
-      return {
-        captured: false,
-        error: `the deployed environment of the Fly app ${app} could not be read (HTTP ${response.status})`,
-      };
-    }
-    const payload = await response.json();
-    // The Machines API answers a bare array of machines for this path
-    // (verified 2026-11-16 against the staging health-probe app). The
-    // object form is accepted as well; anything else is an unreadable read,
-    // never an empty environment.
-    const machines = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.machines)
-        ? payload.machines
-        : null;
-    if (!machines) {
-      return {
-        captured: false,
-        error: `the deployed environment read of the Fly app ${app} carried no machines`,
-      };
-    }
-    if (machines.length === 0) {
-      return {
-        captured: false,
-        error: `the Fly app ${app} carries no Machine, so its deployed environment cannot be read`,
-      };
-    }
+  const inventory = await fetchFlyMachines(app, apiToken);
+  if (!inventory.read) {
+    return { captured: false, error: inventory.error };
+  }
+  if (inventory.machines.length === 0) {
+    return {
+      captured: false,
+      error: `the Fly app ${app} carries no Machine, so its deployed environment cannot be read`,
+    };
+  }
+  const machines = inventory.machines;
 
+  try {
     const values = new Map();
     for (const machine of machines) {
       const env = machine?.config?.env;
@@ -405,59 +492,106 @@ async function captureFly({ platformApp, healthProbeApp }) {
     return payload?.data ?? {};
   };
 
+  /**
+   * Read one app's current release from the GraphQL API.
+   *
+   * A per-app query does not depend on any listing, so the release of an
+   * app is read the same way whether or not the organisation listing
+   * mentions it. The read never throws: an app that does not exist and a
+   * read that failed are different facts, and the Machine inventory is what
+   * settles which of the two it is.
+   *
+   * @param {string} name
+   * @returns {Promise<{releaseVersion: number|string|null, releaseError: string|null}>}
+   */
+  const readRelease = async (name) => {
+    try {
+      const detail = await query(
+        `{ app(id: ${JSON.stringify(name)}) { name currentRelease { version } } }`,
+      );
+      const app = detail?.app ?? null;
+      if (!app) {
+        return { releaseVersion: null, releaseError: `the Fly app ${name} has no release` };
+      }
+      if (!app.currentRelease) {
+        return {
+          releaseVersion: null,
+          releaseError: `the Fly app ${name} has no current release`,
+        };
+      }
+      return { releaseVersion: app.currentRelease.version ?? null, releaseError: null };
+    } catch (error) {
+      return {
+        releaseVersion: null,
+        releaseError: `the release of the Fly app ${name} could not be read (${error.message})`,
+      };
+    }
+  };
+
+  let organizations = [];
   try {
     const data = await query(
       '{ organizations { nodes { id name apps(first: 50) { nodes { name } } } } }',
     );
-    const organizations = data?.organizations?.nodes ?? [];
-    const wanted = new Set([platformApp, healthProbeApp]);
+    organizations = data?.organizations?.nodes ?? [];
+  } catch (error) {
+    return failure(error.message);
+  }
 
-    const apps = [];
+  const organizationFor = (name) => {
     for (const organization of organizations) {
-      const names = (organization?.apps?.nodes ?? []).map((app) => app?.name).filter(Boolean);
-      for (const name of names) {
-        if (!wanted.has(name)) continue;
-        const detail = await query(
-          `{ app(id: ${JSON.stringify(name)}) { name currentRelease { version } machines(first: 20) { nodes { state } } } }`,
-        );
-        const app = detail?.app ?? {};
-        const inventory = await readFlySecretNames(app.name ?? name, apiToken);
-        apps.push({
-          name: app.name ?? name,
-          organization: organization.name ?? null,
-          releaseVersion: app.currentRelease?.version ?? null,
-          machineStates: (app.machines?.nodes ?? []).map((machine) => machine?.state),
-          ...inventory,
-        });
-      }
+      const names = (organization?.apps?.nodes ?? []).map((app) => app?.name);
+      if (names.includes(name)) return organization.name ?? null;
     }
+    return null;
+  };
 
-    // The secret inventory is read per app above, from the Machines API.
+  // Every production app is read on its OWN. The organisation listing above
+  // is capped at 50 apps per organisation, so an app beyond the cap never
+  // appears in it: a presence read from that listing is a presence read
+  // from a truncated list, and an app that exists would be reported as one
+  // that does not. The Machine inventory answers the same question without
+  // a cap, and a per-app release query answers it without a listing at all.
+  const apps = [];
+  for (const name of [platformApp, healthProbeApp].filter(Boolean)) {
+    const machines = await readFlyAppMachines(name, apiToken);
+    const release = await readRelease(name);
+    const inventory = await readFlySecretNames(name, apiToken);
+    apps.push({
+      name,
+      organization: organizationFor(name),
+      exists: machines.exists,
+      releaseVersion: release.releaseVersion,
+      machineStates: machines.machineStates,
+      machineCount: machines.machineCount,
+      ...(release.releaseError ? { releaseError: release.releaseError } : {}),
+      ...(machines.error ? { machineInventoryError: machines.error } : {}),
+      ...inventory,
+    });
+  }
+
+  // The secret inventory is read per app above, from the Machines API.
     // It is reported per app because that is where it is true: an app that
     // does not exist has no inventory, and an app whose inventory could
     // not be read has an unreadable one. Collapsing either into "the
     // provider captured no secrets" would hide the difference between an
     // app without secrets and a capture that could not look.
-    // The cadence read is its own section, separate from the app inventory:
-    // it is the AC6 evidence (the DEPLOYED production probe cadence), and
-    // it must be reportable even when the app is absent from the
-    // organisation listing.
-    const healthProbeEnv = await readFlyAppEnv(
-      healthProbeApp,
-      apiToken,
-      PROBE_CADENCE_KEYS,
-    );
+  // The cadence read is its own section, separate from the app inventory:
+  // it is the AC6 evidence (the DEPLOYED production probe cadence), and
+  // it must be reportable even when the app does not exist.
+  const healthProbeEnv = await readFlyAppEnv(
+    healthProbeApp,
+    apiToken,
+    PROBE_CADENCE_KEYS,
+  );
 
-    return {
-      captured: true,
-      organization: organizations.map((organization) => organization?.name).filter(Boolean),
-      apps,
-      secretNamesCaptured: apps.length > 0 && apps.every((app) => Array.isArray(app.secretNames)),
-      healthProbeEnv,
-    };
-  } catch (error) {
-    return failure(error.message);
-  }
+  return {
+    captured: true,
+    organization: organizations.map((organization) => organization?.name).filter(Boolean),
+    apps,
+    secretNamesCaptured: apps.length > 0 && apps.every((app) => Array.isArray(app.secretNames)),
+    healthProbeEnv,
+  };
 }
 
 async function captureGitHub({ repo, environment }) {
@@ -633,7 +767,12 @@ async function main(argv) {
   ]);
 
   const artifact = {
-    schemaVersion: 1,
+    // Version 2: the Fly app entries carry an authoritative existence
+    // fact (`exists`), the Machine count, and a separate reason for an
+    // unreadable read. Version 1 recorded presence only as a side effect
+    // of the organisation listing, so an artifact from a v1 capture can
+    // no longer be read as proof that an app exists.
+    schemaVersion: 2,
     environment: 'production',
     capturedAt: new Date().toISOString(),
     providers: { neon, fly, github, upstash, cloudflare },
