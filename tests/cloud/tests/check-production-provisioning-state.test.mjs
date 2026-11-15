@@ -217,6 +217,83 @@ test('no production Redis database fails', () => {
   );
 });
 
+test('a production app missing a required secret fails the secret-inventory gate', () => {
+  // The GitHub source gate proves the Environment carries the values; this
+  // gate proves they landed on the app. An app that is missing one of them
+  // would boot with a missing credential, so the gate must be red.
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.apps[0].secretNames = state.providers.fly.apps[0].secretNames.filter(
+        (name) => name !== 'PLATFORM_TASKS_API_DATABASE_URL',
+      );
+    }),
+    'fly.production-platform-app-secrets',
+  );
+});
+
+test('an unreadable secret inventory fails the secret-inventory gate', () => {
+  // An inventory that could not be read is NOT an empty inventory.
+  // Reporting "no secrets" here would name the operator for a read that
+  // never happened.
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.apps[0].secretNames = null;
+      state.providers.fly.apps[0].secretInventoryError =
+        'the secret inventory could not be read (HTTP 500)';
+    }),
+    'fly.production-platform-app-secrets',
+  );
+});
+
+test('a secret inventory that was never recorded fails the secret-inventory gate', () => {
+  // An artifact written before the inventory was captured carries no
+  // `secretNames` key at all. That is an unproven inventory, not a proven
+  // empty one.
+  assertFails(
+    mutate((state) => {
+      delete state.providers.fly.apps[0].secretNames;
+    }),
+    'fly.production-platform-app-secrets',
+  );
+});
+
+test('an expectation set with no expected secret name fails the secret-inventory gate', () => {
+  // "All 0 required secret(s) are registered" proves nothing: the
+  // comparison is vacuous, and a vacuous comparison must not report met.
+  assertFailsWithExpectations(
+    loadFixture(),
+    { ...EXPECTATIONS, expectedPlatformSecretNames: [] },
+    'fly.production-platform-app-secrets',
+  );
+});
+
+test('the expected secret names come from the provisioner, not from the checker', async () => {
+  // The provisioner owns the names it registers. The checker reads them
+  // from there rather than keeping a copy that could agree with a drifted
+  // provisioner.
+  const provisioner = await import(
+    new URL('../../../infra/cloud/platform/platform-provision-secrets.mjs', import.meta.url).href
+  );
+  assert.deepEqual(
+    [...EXPECTATIONS.expectedPlatformSecretNames],
+    [...provisioner.PLATFORM_SECRET_NAMES],
+  );
+  assert.ok(EXPECTATIONS.expectedPlatformSecretNames.length > 0);
+});
+
+test('the example artifact carries exactly the canonical secret names', () => {
+  // The fixture must not drift from the provisioner either: an example
+  // artifact that names a different set would teach the wrong shape.
+  const fixture = loadFixture();
+  const platformApp = fixture.providers.fly.apps.find(
+    (app) => app.name === 'sindustries-platform-production',
+  );
+  assert.deepEqual(
+    [...platformApp.secretNames].sort(),
+    [...EXPECTATIONS.expectedPlatformSecretNames].sort(),
+  );
+});
+
 test('a non-production environment fails', () => {
   assertFails(
     mutate((state) => {
