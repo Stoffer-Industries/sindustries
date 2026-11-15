@@ -1003,6 +1003,7 @@ test('a recorded operator read-back is carried into the artifact', () => {
       readBackAt: '2026-11-16T00:00:00.000Z',
       scope: 'personal organization',
       evidenceRef: 'operator-evidence/fly-spend-limit.txt',
+      targets: ['sindustries-platform-production'],
     },
   });
   try {
@@ -1046,7 +1047,11 @@ test('an operator evidence file that records nothing is refused', () => {
 
 test('an operator evidence slot with no read-back time is refused', () => {
   const file = writeOperatorEvidence({
-    flySpendLimit: { recorded: true, scope: 'personal organization' },
+    flySpendLimit: {
+      recorded: true,
+      scope: 'personal organization',
+      targets: ['sindustries-platform-production'],
+    },
   });
   try {
     const { evidence, problems } = loadOperatorEvidence(file.path);
@@ -1057,11 +1062,30 @@ test('an operator evidence slot with no read-back time is refused', () => {
   }
 });
 
+test('a recorded operator read-back with no production surface is refused', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: {
+      recorded: true,
+      readBackAt: '2026-11-16T00:00:00.000Z',
+      scope: 'personal organization',
+      evidenceRef: 'operator-evidence/fly-spend-limit.txt',
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /targets/);
+  } finally {
+    file.cleanup();
+  }
+});
+
 test('an operator evidence slot with an unknown field is refused', () => {
   const file = writeOperatorEvidence({
     flySpendLimit: {
       recorded: true,
       readBackAt: '2026-11-16T00:00:00.000Z',
+      targets: ['sindustries-platform-production'],
       monthlyLimit: '50',
     },
   });

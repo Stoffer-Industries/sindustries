@@ -54,6 +54,7 @@ import {
 } from '../../../infra/cloud/platform/probe-target-facts.mjs';
 import {
   OPERATOR_EVIDENCE_SLOTS,
+  operatorEvidenceCoverage,
   operatorEvidenceRecorded,
   operatorEvidenceSummary,
   validateOperatorEvidence,
@@ -65,7 +66,7 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 6;
+export const SUPPORTED_SCHEMA_VERSION = 7;
 
 /** The operator obligation gate → the evidence slot that closes it. */
 const OPERATOR_EVIDENCE_SLOT_BY_GATE = new Map(
@@ -79,6 +80,9 @@ const NEON_DEFAULT_ROLES = new Set([
   'anonymous',
   'authenticated',
 ]);
+
+/** The name of the production Neon branch. */
+const PRODUCTION_NEON_BRANCH = 'production';
 
 /**
  * Keys whose VALUE would carry a credential if it were ever populated.
@@ -296,6 +300,21 @@ export function evaluateProvisioningState(state, options = {}) {
   ].filter((fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0);
   const dnsExpectations = options.dnsExpectations ?? { zoneName: null, surfaces: [] };
 
+  // The surfaces each operator obligation must have been read back
+  // against. They are supplied by the caller — derived from the
+  // environment manifest and the hostname matrix — and never read from
+  // the artifact: a checker that derived the expected surfaces from the
+  // evidence it is checking would agree with a drifted record.
+  const operatorTargetExpectations = options.expectedOperatorTargets ?? {};
+  const expectedTargetsForSlot = (slot) => {
+    const definition = OPERATOR_EVIDENCE_SLOTS.find(
+      (candidate) => candidate.slot === slot,
+    );
+    if (!definition?.coverage) return [];
+    const targets = operatorTargetExpectations[definition.coverage];
+    return Array.isArray(targets) ? targets : [];
+  };
+
   const rows = [];
   const failures = [];
 
@@ -439,13 +458,13 @@ export function evaluateProvisioningState(state, options = {}) {
   if (providerCaptured('neon')) {
     const neon = providers.neon;
     const branch = neon.branch ?? {};
-    if (branch.name !== 'production') {
+    if (branch.name !== PRODUCTION_NEON_BRANCH) {
       add(
         row('neon.production-branch', 'unmet', {
           step: 'Slice D step 1',
           owner: 'Quinn (operator)',
           label: 'Production Neon branch',
-          reason: `expected a branch named "production", found ${JSON.stringify(branch.name ?? null)}`,
+          reason: `expected a branch named "${PRODUCTION_NEON_BRANCH}", found ${JSON.stringify(branch.name ?? null)}`,
         }),
       );
     } else if (branch.state !== 'ready') {
@@ -1540,6 +1559,11 @@ export function evaluateProvisioningState(state, options = {}) {
     }
 
     const spendLimitSummary = operatorEvidenceSummary(state.operatorEvidence, 'flySpendLimit');
+    const spendLimitCoverage = operatorEvidenceCoverage(
+      state.operatorEvidence,
+      'flySpendLimit',
+      expectedTargetsForSlot('flySpendLimit'),
+    );
     if (exposure.length === 0) {
       add(
         row(gate, 'not-applicable', {
@@ -1550,7 +1574,17 @@ export function evaluateProvisioningState(state, options = {}) {
             'nothing is publicly exposed yet; the Fly spend limit must be set and read back before the production health probe is deployed or a production DNS record is published',
         }),
       );
-    } else if (!spendLimitSummary) {
+    } else if (spendLimitCoverage.expected.length === 0) {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Rowan',
+          label,
+          reason:
+            'the repository supplies no expected production app scope for the Fly spend-limit read-back, so the read-back cannot be proven',
+        }),
+      );
+    } else if (!spendLimitCoverage.recorded) {
       add(
         row(gate, 'unmet', {
           step: 'Slice D step 6',
@@ -1559,6 +1593,17 @@ export function evaluateProvisioningState(state, options = {}) {
           reason:
             `${exposure.join('; ')}, but no Fly spend-limit read-back is recorded. ` +
             'The approved design makes the limit a hard gate before any public exposure, so the exposure must not stand until the read-back is recorded.',
+        }),
+      );
+    } else if (!spendLimitCoverage.covered) {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason:
+            `${exposure.join('; ')}, and the recorded Fly spend-limit read-back is not bound to the ` +
+            `production app scope it must cover: ${describeCoverageGap(spendLimitCoverage)}`,
         }),
       );
     } else {
@@ -1577,6 +1622,37 @@ export function evaluateProvisioningState(state, options = {}) {
     const slot = OPERATOR_EVIDENCE_SLOT_BY_GATE.get(entry.gate);
     const summary = slot ? operatorEvidenceSummary(state.operatorEvidence, slot) : null;
     if (summary) {
+      const coverage = operatorEvidenceCoverage(
+        state.operatorEvidence,
+        slot,
+        expectedTargetsForSlot(slot),
+      );
+      if (coverage.expected.length === 0) {
+        add(
+          row(entry.gate, 'unmet', {
+            step: entry.step,
+            owner: 'Rowan',
+            label: entry.label,
+            reason:
+              `the operator recorded this read-back (${summary}), but the repository supplies no ` +
+              'expected surface for this obligation, so the read-back cannot be proven',
+          }),
+        );
+        continue;
+      }
+      if (!coverage.covered) {
+        add(
+          row(entry.gate, 'unmet', {
+            step: entry.step,
+            owner: entry.owner,
+            label: entry.label,
+            reason:
+              `the operator recorded this read-back (${summary}), but it is not bound to the ` +
+              `production surfaces it must prove: ${describeCoverageGap(coverage)}`,
+          }),
+        );
+        continue;
+      }
       add(
         row(entry.gate, 'met', {
           step: entry.step,
@@ -1600,6 +1676,23 @@ export function evaluateProvisioningState(state, options = {}) {
   }
 
   return { ok: failures.length === 0, failures, rows };
+}
+
+/**
+ * Why a recorded read-back does not cover what it must prove.
+ *
+ * @param {{expected: string[], missing: string[], extra: string[]}} coverage
+ * @returns {string}
+ */
+export function describeCoverageGap(coverage) {
+  const parts = [];
+  if (coverage.missing.length > 0) {
+    parts.push(`it does not name ${coverage.missing.join(', ')}`);
+  }
+  if (coverage.extra.length > 0) {
+    parts.push(`it names ${coverage.extra.join(', ')}, which production does not use`);
+  }
+  return parts.join('; ') || 'it names no expected production surface';
 }
 
 /**
@@ -1736,6 +1829,28 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     expectedPlatformProcessGroups = [];
   }
 
+  // The surfaces each operator obligation must have been read back
+  // against. They come from the same source-of-truth facts the other
+  // gates compare against — the environment manifest for the app names
+  // and the API hostnames, the hostname matrix for the Fly-hosted
+  // production hostnames — so a read-back cannot be recorded against a
+  // surface production does not use, and a surface production DOES use
+  // cannot be left out of the record.
+  const productionApiHostnames = [
+    ...new Set(
+      Object.values(environment.apiBaseUrls ?? {})
+        .map((url) => hostOfTargetValue(url))
+        .filter((host) => typeof host === 'string' && host.length > 0),
+    ),
+  ];
+  const productionHostnames = [
+    ...new Set(
+      dnsSurfaces
+        .map((surface) => surface.productionHostname)
+        .filter((hostname) => typeof hostname === 'string' && hostname.length > 0),
+    ),
+  ];
+
   return {
     platformApp: environment.platformApp,
     healthProbeApp: environment.healthProbeApp,
@@ -1747,6 +1862,23 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     expectedPlatformEnvironmentId,
     expectedPlatformCorsOrigins,
     expectedPlatformProcessGroups,
+    expectedOperatorTargets: {
+      // AC5 sets the limit on the PRODUCTION APP scope, so the read-back
+      // must name that app.
+      platformAppScope: [environment.platformApp],
+      // The interval must have been observed on the production probe app.
+      healthProbeApp: [environment.healthProbeApp],
+      // The health responses must come from all three production APIs.
+      productionApiHostnames,
+      // The DNS/TLS read-back must cover every production hostname.
+      productionHostnames,
+      // The denial proof must cover the production branch and BOTH the
+      // staging and the dev credential: AC2 names the staging/dev
+      // separation, so one refused credential does not prove it. These
+      // are credential KINDS from the Neon contract, not hostnames or
+      // credential values.
+      neonSeparation: [PRODUCTION_NEON_BRANCH, 'staging', 'dev'],
+    },
     dnsExpectations: {
       zoneName: matrix.apexDomain ?? null,
       surfaces: dnsSurfaces,

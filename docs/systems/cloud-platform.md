@@ -244,6 +244,23 @@ obligations no machine can prove (the staging/dev Neon denial proof, one
 successful production probe interval, the production API health responses
 and the DNS resolution/TLS read-back).
 
+A recorded read-back is only as good as what it covers, so it also names
+the production surfaces it was read back against, in `targets`. A boolean
+proves that a statement was made, not that the statement was true of the
+production environment: a record scoped "done" would otherwise close the
+DNS read-back while no production hostname resolved. The checker compares
+`targets` against the surfaces the repository expects for that slot — the
+production app scope for the spend limit, the production health-probe app
+for the probe interval, the three production API hostnames for the health
+responses, every production hostname for the DNS/TLS read-back, and the
+production branch with both the staging and the dev credential for the
+Neon denial proof — and leaves the obligation open when the record names
+none of them, only some of them, or a surface production does not use. The
+app names and hostnames are derived from the environment manifest and the
+hostname matrix; the Neon credential kinds are fixed by the Neon contract.
+The expected sets therefore cannot drift away from the topology the
+repository uses.
+
 **Credential boundary.** The production credential path is the same rule as
 staging, with the `production` GitHub Environment instead of `staging`: the
 live values (`FLY_API_TOKEN`, the Neon production DSNs, the Upstash

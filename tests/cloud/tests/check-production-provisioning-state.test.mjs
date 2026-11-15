@@ -86,6 +86,14 @@
 //  66. An operator evidence value that carries a credential fails both the
 //      shape gate and the redaction guard.
 //  67. A recorded read-back closes the obligation it belongs to.
+//  68. A recorded read-back that names no production surface stays open.
+//  69. A recorded read-back that names only some surfaces stays open.
+//  70. A recorded read-back that names a non-production surface stays open.
+//  71. The ordering gate refuses a spend-limit read-back for another scope.
+//  72. A non-array operator evidence target fails the shape gate.
+//  73. A non-surface operator evidence target fails the shape gate.
+//  74. A repeated operator evidence target fails the shape gate.
+//  75. An operator obligation with no expected surface stays open.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -276,6 +284,122 @@ test('a recorded read-back closes the obligation it belongs to', () => {
   const spendLimit = rows.find((row) => row.gate === 'fly.spend-limit-readback');
   assert.equal(spendLimit.status, 'met');
   assert.ok(spendLimit.reason.includes('read back'), 'the reason names the read-back');
+});
+
+test('a recorded read-back that names no production surface leaves the obligation open', () => {
+  // A boolean proves that a statement was made, not what was read back.
+  // A record that names nothing can close the DNS read-back while no
+  // production hostname resolves at all.
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.dnsResolutionAndTlsReadback.targets = [];
+    }),
+    'dns.resolution-and-tls-readback',
+  );
+});
+
+test('a recorded read-back that names only some of the surfaces leaves the obligation open', () => {
+  const state = mutate((artifact) => {
+    artifact.operatorEvidence.dnsResolutionAndTlsReadback.targets = [
+      'tasks-api.sindustries.co.nz',
+      'budget-api.sindustries.co.nz',
+      'content-scheduler-api.sindustries.co.nz',
+    ];
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  const dns = failures.find((failure) => failure.gate === 'dns.resolution-and-tls-readback');
+  assert.ok(dns, 'the DNS read-back gate fails');
+  assert.ok(
+    dns.reason.includes('health-probe.sindustries.co.nz'),
+    'the reason names the surface that was left out',
+  );
+});
+
+test('a recorded read-back that names a surface production does not use leaves the obligation open', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.productionProbeInterval.targets = [
+        'sindustries-health-probe-staging',
+      ];
+    }),
+    'health.production-probe-interval',
+  );
+});
+
+test('the ordering gate refuses a spend-limit read-back that is not bound to the production app scope', () => {
+  // The exposure is already present in the fixture, so the ordering gate
+  // applies. A read-back against another scope must not stand in for the
+  // production app's scope.
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.flySpendLimit.targets = ['sindustries-platform-staging'];
+    }),
+    'fly.spend-limit-before-public-exposure',
+  );
+});
+
+test('an operator evidence target that is not an array fails the shape gate', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.flySpendLimit.targets = 'sindustries-platform-production';
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+test('an operator evidence target that is not a surface name fails the shape gate', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.flySpendLimit.targets = ['postgresql://someone:pw@db.example.com/x'];
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+test('a repeated operator evidence target fails the shape gate', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.flySpendLimit.targets = [
+        'sindustries-platform-production',
+        'sindustries-platform-production',
+      ];
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+test('an operator obligation with no expected surface cannot be proven', () => {
+  // The same rule the other gates follow: an expectation set that names
+  // nothing cannot prove anything, so the obligation stays open and the
+  // owner is the repository, not the operator.
+  const { failures } = evaluateProvisioningState(loadFixture(), {
+    ...EXPECTATIONS,
+    expectedOperatorTargets: {
+      ...EXPECTATIONS.expectedOperatorTargets,
+      platformAppScope: [],
+    },
+  });
+  const spendLimit = failures.find(
+    (failure) => failure.gate === 'fly.spend-limit-readback',
+  );
+  assert.ok(spendLimit, 'the obligation stays open');
+  assert.equal(spendLimit.owner, 'Rowan', 'the missing repository fact is owned here');
+});
+
+test('the ordering gate cannot be proven without an expected production app scope', () => {
+  const { failures } = evaluateProvisioningState(loadFixture(), {
+    ...EXPECTATIONS,
+    expectedOperatorTargets: {
+      ...EXPECTATIONS.expectedOperatorTargets,
+      platformAppScope: [],
+    },
+  });
+  const ordering = failures.find(
+    (failure) => failure.gate === 'fly.spend-limit-before-public-exposure',
+  );
+  assert.ok(ordering, 'the ordering gate stays open');
+  assert.equal(ordering.owner, 'Rowan', 'the missing repository fact is owned here');
+  assert.match(ordering.reason, /expected production app scope/);
 });
 
 test('a Neon provider that could not be read fails', () => {
