@@ -44,6 +44,14 @@ if (typeof window === 'undefined') {
  * / `detectSessionInUrl` / `storage` options unchanged — those still apply
  * to the Supabase session when VITE_AUTH_PROVIDER === 'supabase' AND when
  * the Supabase session was established before the Clerk cutover.
+ *
+ * The `accessToken` option is supplied on the Clerk path ONLY. supabase-js
+ * (2.x) does not build its own auth client when `accessToken` is present —
+ * it installs a proxy over `client.auth` that throws on every property
+ * access — so passing the option unconditionally made the Supabase provider
+ * path throw inside its mount effect (`supabase.auth.getSession()`) and left
+ * the app hanging on the auth gate. See the tech design at
+ * docs/specs/gymtrack-supabase-auth-path-tech-design.md.
  */
 let liveAccessTokenGetter = null;
 
@@ -84,14 +92,27 @@ export function setSupabaseAccessTokenGetter(getter) {
 // The guard is the source of truth for "supabase.js must not be imported in a
 // server context"; do not move `createClient` ahead of it without re-validating
 // SSR safety.
-export const supabase = createClient(url, anonKey, {
+const activeProvider = getActiveProvider();
+const isSupabaseProvider = activeProvider === 'supabase';
+
+/**
+ * Client options. The `accessToken` callback is added below, and only on the
+ * Clerk path: supabase-js replaces `client.auth` with a throwing proxy
+ * whenever the option is present, so the Supabase provider path must be
+ * constructed without it.
+ */
+const clientOptions = {
   auth: {
-    persistSession: getActiveProvider() === 'supabase',
-    autoRefreshToken: getActiveProvider() === 'supabase',
-    detectSessionInUrl: getActiveProvider() === 'supabase',
+    persistSession: isSupabaseProvider,
+    autoRefreshToken: isSupabaseProvider,
+    detectSessionInUrl: isSupabaseProvider,
     storage: window.localStorage
-  },
-  accessToken: async () => {
+  }
+};
+
+if (!isSupabaseProvider) {
+  // Clerk path: supabase-js sends the Clerk session JWT as the bearer token.
+  clientOptions.accessToken = async () => {
     if (!liveAccessTokenGetter) return null;
     try {
       const token = await liveAccessTokenGetter();
@@ -101,5 +122,7 @@ export const supabase = createClient(url, anonKey, {
       // request, which is the right behaviour for a torn-down session.
       return null;
     }
-  }
-});
+  };
+}
+
+export const supabase = createClient(url, anonKey, clientOptions);

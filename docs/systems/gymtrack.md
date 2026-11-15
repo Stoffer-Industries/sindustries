@@ -1,7 +1,7 @@
 # GymTrack
 
 **Status:** Live (SPA + legacy REST agent API) / Draft rollout on branch `task-1474d515-gymtrack-mcp-server-oauth-redo` (MCP OAuth server)
-**Last updated:** 2026-10-17
+**Last updated:** 2026-11-16
 **Owner:** Rowan (engineering) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **Related tasks:** `18256740`, `f520c396`, `72d7cc3b`, `1474d515`, `bb09eaed`
@@ -67,6 +67,15 @@ The SPA owns:
 4. The app checks the Clerk session via `<AuthGate>`; if needed, it redirects through `/login` and preserves the full destination.
 5. `AgentConsentPage` loads the client metadata from `public.gymtrack_oauth_clients`, then POSTs the user's approve/deny decision back to the MCP service with the current Supabase access token.
 6. The MCP service verifies that Supabase token server-side, creates or updates `gymtrack_oauth_consents`, stores a hashed authorization code, and returns the client redirect URL.
+
+### Shared Supabase client construction
+
+The browser talks to Supabase through one shared supabase-js client (`apps/gymtrack/src/lib/supabase.js`) that is also the PostgREST transport. Its options are derived from the active identity provider, which is the single source of truth (`getActiveProvider()` in `apps/gymtrack/src/lib/clerkConfig.js`, read at module load).
+
+- **Clerk path** — the client carries the `accessToken` option, so supabase-js sends the Clerk session JWT as the bearer token and Supabase Third-Party Auth resolves `auth.uid()` to the Clerk subject at the RLS boundary. supabase-js does not build its own auth client when that option is present: `client.auth` is a proxy that throws on every property access.
+- **Supabase path** — the client is built **without** the `accessToken` option, so `client.auth` is the SDK's real auth client, the provider owns its session through `supabase.auth`, and no Clerk token can reach a Supabase request. The `supabase` value of `VITE_AUTH_PROVIDER` is therefore a runnable one-env-var rollback path, not only a dispatcher branch.
+
+The two providers' `supabase.auth` surfaces differ by design. Three Clerk-path call sites still reach `supabase.auth` without a provider guard (`workouts-auth.js`, `connectedAgents.js`) and therefore hit the throwing proxy; the durable fix is to resolve identity from the provider-agnostic auth context rather than to add another provider guard.
 
 ### Sign-up email verification
 
