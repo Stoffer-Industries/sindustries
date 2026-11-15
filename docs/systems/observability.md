@@ -7,13 +7,13 @@
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** Staging target on Fly.io (Sydney region); production rollout is tracked under the broader cloud migration plan
 
-> **Naming history:** this workstream was originally scoped as a separate "Hosted Observability and Migration Alerts" spec (task `4b3d6e9c`). The artefacts land under `infra/cloud/observability/` plus two handover docs (`docs/systems/observability.md` and `infra/cloud/observability/README.md`); the prior per-alert response runbook (`docs/runbooks/cloud-alerts-response.md`) was retired in PR #583 — its per-alert content lives in the AC3/AC4 sections of `docs/specs/hosted-observability-migration-alerts-tech-design.md` and in this document's "Alert ownership" + "Runbook for each alert" sections. The local observability stack documented in `infra/docker-compose.observability.yml` continues to operate the developer's local machine unchanged.
+> **Naming history:** this workstream was originally scoped as a separate "Hosted Observability and Migration Alerts" spec (task `4b3d6e9c`). The artefacts land under `infra/cloud/observability/` plus two handover docs (`docs/systems/observability.md` and `infra/cloud/observability/README.md`); the prior per-alert response runbook (`docs/runbooks/cloud-alerts-response.md`) was retired in PR #583 — its per-alert content lives in the AC3/AC4 sections of `docs/specs/hosted-observability-migration-alerts-tech-design.md` and in this document's "Alert ownership" + "Runbook for each alert" sections. The local observability stack documented in `infra/docker-compose.observability.yml` was decommissioned on 2026-11-15 (task `a7938522`): the local Tempo, Prometheus and Grafana services were removed, and the local collector now forwards every span and metric to the Grafana Cloud tenant. See "Local collector → Grafana Cloud" in `infra/cloud/observability/README.md`.
 
 ---
 
 ## Context
 
-SIndustries runs a multi-service Node/TypeScript stack against a Postgres + Redis back-end. The existing local observability stack (`infra/docker-compose.observability.yml` + `packages/otel-node` + `infra/grafana/`) ships traces, metrics, and dashboards to the developer's machine. That stack is a useful dev experience, but it does not satisfy the cloud migration acceptance criteria because:
+SIndustries runs a multi-service Node/TypeScript stack against a Postgres + Redis back-end. Historically a local observability stack (`infra/docker-compose.observability.yml` + `packages/otel-node` + `infra/grafana/`) shipped traces, metrics, and dashboards to the developer's machine. That stack was decommissioned on 2026-11-15 (task `a7938522`): the local Tempo, Prometheus and Grafana services are gone, and the local collector forwards to the Grafana Cloud tenant instead. The hosted stack satisfies the cloud migration acceptance criteria because:
 
 - All four components run on the local machine; cloud services that emit signals from the staging/production region never reach them.
 - No alert evaluation or documented ownership exists beyond the Grafana dashboard; there is no Alertmanager or external notification integration.
@@ -295,6 +295,83 @@ So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix a
 **Transport-independent label contract.** Whichever transport carries the event, the stream labels are the same: `service_name`, `app`, `source`, `environment`, `release`, `route`, `operation`, `provider`, `errorCode`, `status`. On the Loki push path they are the `streams[].stream` keys. On the OTLP/logs path they are **`resourceLogs[].resource.attributes`** — resource attributes, never log-record attributes. That placement is load-bearing, not cosmetic: Loki's OTLP ingestion promotes resource attributes into indexed stream labels, while log-record attributes become structured metadata, which a LogQL **stream selector cannot match**. Putting `app`/`source` on the log record instead of the resource would forward cleanly, land the events, and then make the operator query return nothing.
 
 **The operator query is `{service_name="gymtrack"}`** — established by live production evidence, not by assumption (see the resolved assumption below). It is the only selector this repo depends on: `app` was never separately verified as an indexed label on the hosted tenant, so no panel selects on it. The relay emits the service identity as the `service.name` resource attribute — the OpenTelemetry semantic convention that Grafana Cloud's default `default_resource_attributes_as_index_labels` promotes to the indexed `service_name` label (Loki rewrites the dot). The relay deliberately does **not** also emit a literal `service_name` resource attribute: that attribute is not in the tenant's default promotion list, so it lands in structured metadata where no stream selector can match it — inert on the hosted tenant, and a duplicate-label hazard if an operator ever widened the promotion list. (On the Loki push path `service_name` IS the literal stream-label name the push API accepts; that is a different mechanism and is unaffected.) The per-event fields (`errorCode`, `operation`, `route`, `source`) are read out of the sanitized JSON body with `| json` — selectively, one named field per panel (`| json errorCode="errorCode"`), because a bare `| json` extracts every top-level body field as a label and the per-event `timestamp` would turn every event into its own series. The extracted values are the same values the labels advertise, because the body and the labels share the `'none'` sentinel for absent optional fields. `source` is the **event** source (`auth`, `window.error`, `unhandledrejection`) and is never the literal string `browser` — an absent source uses the same `'none'` sentinel as the other optional fields — so the selector that was documented before 2026-11-11 (`{app="gymtrack", source="browser"}`) could not match a real event. `apps/gymtrack/api/telemetry.test.js` and `apps/gymtrack/grafana/dashboard-contract.test.js` pin both halves together: the relay emits `service_name=gymtrack`, and every dashboard panel selects on it.
+
+**Querying the hosted tenant from a shell (operator path).** The selector above is the *contract*; this is the *transport*. The hosted Grafana instance is queried through its datasource proxy, using the provisioning credential that `bootstrap-observability.sh` already uses for `/api/datasources`:
+
+```bash
+# 1. the Loki datasource uid on the hosted tenant (do not hardcode it).
+#
+#    The selection rule lives in ONE file —
+#    infra/cloud/observability/loki-datasource-selector.jq — which
+#    `resolve_loki_datasource_uid()` in
+#    infra/cloud/observability/bootstrap-observability.sh also runs, so the
+#    operator path and the provisioning path cannot drift. Run this from the
+#    repo root.
+#
+#    The rule prefers, in order, an operator pin
+#    (GRAFANA_CLOUD_LOKI_DATASOURCE_UID), the canonical application-logs
+#    datasource (a `logs` uid/name suffix), the tenant default, and only
+#    then the first Loki datasource. The "default first, otherwise the
+#    first Loki datasource" rule this replaces picked
+#    `grafanacloud-alert-state-history` on the live tenant — a
+#    purpose-built Loki datasource that never receives application logs —
+#    while the GymTrack rows sat in `grafanacloud-logs`. Every query and
+#    dashboard bound to the wrong datasource then answered "no rows"
+#    against a healthy telemetry pipeline. The uid is not hardcoded
+#    because it is tenant state.
+#
+#    The pin is AUTHORITATIVE: a pin that matches no Loki datasource
+#    produces no uid, and both this path and the script fail closed rather
+#    than falling back to a rule that is known not to work on that tenant.
+#
+#    The datasource list is fetched into a file first, so a transport or
+#    auth failure is reported as a failure instead of being mistaken for
+#    "the tenant has no Loki datasource", and jq's exit status is not
+#    masked by a pipeline.
+loki_response_file="$(mktemp)"
+loki_status="$(curl --silent --show-error \
+  --output "${loki_response_file}" --write-out '%{http_code}' \
+  -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
+  "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/datasources")"
+if [ "${loki_status}" != "200" ]; then
+  echo "could not read the Grafana datasource list (HTTP ${loki_status})" >&2
+  rm -f "${loki_response_file}"
+  exit 1
+fi
+loki_uid="$(jq -r --arg override "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" \
+  -f infra/cloud/observability/loki-datasource-selector.jq < "${loki_response_file}")" \
+  || { echo "could not parse the Grafana datasource list" >&2; rm -f "${loki_response_file}"; exit 1; }
+rm -f "${loki_response_file}"
+
+# an operator pin is authoritative: if it is set and the selector did not
+# return it, the pin matches no Loki datasource on this tenant
+if [ -n "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID:-}" ] \
+    && [ "${loki_uid}" != "${GRAFANA_CLOUD_LOKI_DATASOURCE_UID}" ]; then
+  echo "GRAFANA_CLOUD_LOKI_DATASOURCE_UID=${GRAFANA_CLOUD_LOKI_DATASOURCE_UID} matches no Loki datasource on the hosted Grafana tenant" >&2
+  exit 1
+fi
+
+# fail explicitly when the tenant has no Loki datasource at all, rather
+# than building a /proxy/uid//... URL that answers 404 for a confusing reason
+if [ -z "${loki_uid}" ]; then
+  echo "no Loki datasource on the hosted Grafana tenant" >&2
+  exit 1
+fi
+
+# 2. run the selector over the window you care about
+now=$(date +%s); start=$((now-3600))
+curl --fail --silent --show-error -G \
+  -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
+  --data-urlencode 'query={service_name="gymtrack"}' \
+  --data-urlencode "start=${start}000000000" --data-urlencode "end=${now}000000000" \
+  "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/datasources/proxy/uid/${loki_uid}/loki/api/v1/query_range"
+```
+
+`GRAFANA_CLOUD_INSTANCE_URL` is the stack base URL and `GRAFANA_CLOUD_PROVISIONING_AUTH` is the quoted `Bearer <service-account-token>` value; both live in `infra/cloud/observability/.env.local` (gitignored) and in the operator environment. **A `401` from this path is a credential-scope problem, not an empty result** — the same "probe answered 401, so the telemetry is broken" confusion that the health-probe section describes above applies to the query path: a `401` means the provisioning credential was not applied, and an empty `data.result` with a `200` means the selector matched no rows in that window. Check for rows, not for a status code.
+
+**Authentication-failure coverage.** Every explicitly handled authentication failure is exported, including the branch that Clerk reaches first: an unknown or unregistered identifier. That branch used to return before the telemetry report, so the most common sign-in failure (a typo'd or unregistered address) produced **no** telemetry at all and no operator could distinguish "the user mistyped their email" from "the auth provider is broken". It is now exported as `operation=signin_identify` with the safe Clerk error code and status (`errorCode=form_identifier_not_found`, `status=422`), alongside the existing `operation=signin` (password step) and `operation=signin_finalize` rows. `apps/gymtrack/src/lib/clerkAuth.test.jsx` § "browser telemetry contract" pins both branches.
+
+The auth reporting surface is **context-only**. Callers reduce the provider envelope to the provider, operation, safe error code, and status before calling `reportAuthError(context)`; the envelope has no parameter through which it could reach the serializer. Auth events therefore always have `message=null` and `stack=null`, regardless of what the provider envelope contains. `apps/gymtrack/src/lib/browserTelemetry.test.js` § "never lets a Clerk envelope reach the POST body" serializes a representative envelope with email, token, session, and stack sentinels and asserts that none of them reach the POST body.
 
 **Resolved assumption (live production evidence, 2026-11-10).** The earlier version of this section flagged an open question: the tests could assert only that *we emit* `app` and `source` as resource attributes, not that the Grafana Cloud tenant indexes those attributes on ingestion. AC4's live verification answered it on the real tenant: events pushed without a service name landed under `service_name="unknown_service"`, and the documented `{app="gymtrack", source="browser"}` selector returned nothing — the tenant indexes `service_name`, and the compound selector's failure is fully explained by `source` (the event source is never the literal `browser`). `app` was not separately probed as an indexed selector, so the operator contract uses `service_name` alone. The fix was two-sided: the relay now emits the service identity (the `service.name` resource attribute, and a `service_name` stream label on the Loki push path, where `service_name` is the literal label name the push API accepts), and the dashboard selects on `{service_name="gymtrack"}` and reads the remaining fields with a selective `| json` extraction. **Verification path: run the query after provisioning and check for rows, not for a 200.** If rows are absent but the events are visible in the tenant's raw log view, the cause is label promotion on the tenant side, not the relay payload. `GRAFANA_CLOUD_OTLP_HEADERS` is parsed by `parseOtlpHeaderString()` rather than used as a raw header value: it arrives in the OTLP **exporter header string** form (`Authorization=Basic <base64>`, optionally comma-separated across several headers such as `X-Scope-OrgID`), which is the same format the OTel SDKs and `bootstrap-observability.sh` already consume. Splitting on the first `=` keeps base64 padding intact, values are URL-decoded, and a segment whose leading chunk is not a valid header name is treated as a bare header value so `Basic <b64>` keeps working. The relay's own unit tests live in `apps/gymtrack/api/telemetry.test.js` and assert this resolution, this header parsing, the token check, the rate limit, the redaction pass, and the size caps.
 7. The hosted Loki tenant absorbs the new event source. The new `gymtrack-browser-errors` dashboard (JSON in `apps/gymtrack/grafana/dashboards/gymtrack-browser-errors.json`) is provisioned by the existing `bootstrap-observability.sh`; the script's `step_dashboards` function now also walks `apps/gymtrack/grafana/dashboards/*.json` in addition to its canonical tree.

@@ -60,6 +60,16 @@ function loadMatrix(repoRoot) {
   // actually in the matrix.
   const stagingByHost = new Map();
   const productionByHost = new Map();
+  // Vercel project id -> the surface it belongs to, the environment it
+  // serves and the hostname that environment binds. The hostname matrix
+  // records a frontend surface's production project (`vercelProject`)
+  // and its staging project (`vercelStagingProject`) separately, and
+  // each project serves its own environment's hostname. This map is what
+  // binds a project in this matrix to a surface: without it, a project
+  // that no frontend surface references could claim ANY hostname in the
+  // matrix — an API surface's hostname included — and both this check
+  // and the CI-wired hostname-matrix check would stay green.
+  const frontendProjects = new Map();
   for (const s of raw.surfaces ?? []) {
     if (typeof s.staging === 'string') {
       staging.set(s.id, s.staging);
@@ -69,8 +79,23 @@ function loadMatrix(repoRoot) {
       production.set(s.id, s.production);
       productionByHost.set(s.production, s.id);
     }
+    if (s.kind !== 'frontend') continue;
+    if (typeof s.vercelProject === 'string') {
+      frontendProjects.set(s.vercelProject, {
+        surfaceId: s.id,
+        environment: 'production',
+        host: typeof s.production === 'string' ? s.production : null,
+      });
+    }
+    if (typeof s.vercelStagingProject === 'string') {
+      frontendProjects.set(s.vercelStagingProject, {
+        surfaceId: s.id,
+        environment: 'staging',
+        host: typeof s.staging === 'string' ? s.staging : null,
+      });
+    }
   }
-  return { staging, production, stagingByHost, productionByHost };
+  return { staging, production, stagingByHost, productionByHost, frontendProjects };
 }
 
 function loadVercelMatrix(repoRoot) {
@@ -96,7 +121,7 @@ function hostOf(value) {
 function main() {
   const { repoRoot } = parseArgs();
   const errors = [];
-  const { staging, production, stagingByHost, productionByHost } = loadMatrix(repoRoot);
+  const { staging, production, stagingByHost, productionByHost, frontendProjects } = loadMatrix(repoRoot);
   const vercel = loadVercelMatrix(repoRoot);
 
   let projectCount = 0;
@@ -104,25 +129,100 @@ function main() {
   let envVarCount = 0;
   let matrixDerivedCount = 0;
 
+  const listedProjects = new Set();
+
   for (const project of vercel.vercelProjects ?? []) {
     projectCount += 1;
     const pid = project.vercelProjectId;
-    for (const [envName, envDef] of Object.entries(project.environments ?? {})) {
+    listedProjects.add(pid);
+    // The matrix records whether the project exists in the Vercel team
+    // yet. Its whole point is to match reality, so the flag is required
+    // and must be a boolean: a production project that has not been
+    // created must not be able to read as a live one.
+    if (typeof project.provisioned !== 'boolean') {
+      errors.push(
+        `${pid}: provisioned must be a boolean (found ${JSON.stringify(project.provisioned ?? null)}) — ` +
+          `the env matrix records the contract, and a project that does not exist in the Vercel team yet must say so`,
+      );
+      continue;
+    }
+    const envEntries = Object.entries(project.environments ?? {});
+    // One project, one environment. The project-model decision (task
+    // 5cb4a8fe, Quinn 2026-11-13) makes the PROJECT the environment
+    // separator: the staging project has no `preview` target, so a
+    // project that carried two environments would be a project whose
+    // environment identity is ambiguous again.
+    if (envEntries.length !== 1) {
+      errors.push(
+        `${pid}: must carry exactly one Vercel environment (found ${envEntries.length}) — ` +
+          `the project is the environment separator, not the Vercel environment`,
+      );
+      continue;
+    }
+    // A project may only exist in this matrix if the hostname matrix
+    // records it as one of a frontend surface's projects.
+    const binding = frontendProjects.get(pid);
+    if (!binding) {
+      errors.push(
+        `${pid}: is not referenced by any frontend surface in ${MATRIX_PATH} — every project in this matrix must be ` +
+          `the vercelProject or the vercelStagingProject of a frontend surface, so a project cannot claim a hostname ` +
+          `that is not a frontend's`,
+      );
+      continue;
+    }
+    for (const [envName, envDef] of envEntries) {
       envCount += 1;
-      // The committed customDomain must match the staging or production
-      // hostname for the matching surface in the matrix.
+      // The datasource fetch below uses the matrix, not the Vercel
+      // environment name: the staging project's single environment is its
+      // production deployment target, so `envName` carries no
+      // environment identity at all.
       const cdHost = hostOf(envDef.customDomain);
       if (!cdHost) {
         errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(envDef.customDomain)} is not a valid hostname`);
         continue;
       }
-      if (envName === 'production' && !productionByHost.has(cdHost)) {
-        errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(cdHost)} is not a production hostname in ${MATRIX_PATH}`);
-      } else if (envName === 'preview' && !stagingByHost.has(cdHost)) {
-        errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(cdHost)} is not a staging hostname in ${MATRIX_PATH}`);
+      // The committed customDomain must match the staging or production
+      // hostname for the matching surface in the matrix.
+      const isProductionHost = productionByHost.has(cdHost);
+      const isStagingHost = stagingByHost.has(cdHost);
+      if (!isProductionHost && !isStagingHost) {
+        errors.push(`${pid}/${envName}: customDomain ${JSON.stringify(cdHost)} is not a hostname in ${MATRIX_PATH}`);
+        continue;
       }
-
-      const isProduction = envName === 'production';
+      // The customDomain must also be the hostname of the surface this
+      // project belongs to. The project id says which surface the
+      // project is; the hostname matrix records the production project
+      // and the staging project separately, and each serves its own
+      // environment's hostname.
+      if (binding.host && cdHost !== binding.host) {
+        errors.push(
+          `${pid}/${envName}: customDomain ${JSON.stringify(cdHost)} is not the ${binding.environment} hostname of the ` +
+            `${binding.surfaceId} surface in ${MATRIX_PATH} (expected ${JSON.stringify(binding.host)}) — a project may ` +
+            `only claim its own surface's hostname`,
+        );
+        continue;
+      }
+      const servesEnvironment = binding.environment;
+      if (envDef.servesEnvironment !== servesEnvironment) {
+        errors.push(
+          `${pid}/${envName}: servesEnvironment ${JSON.stringify(envDef.servesEnvironment ?? null)} does not match ` +
+            `the customDomain (${cdHost} is the ${servesEnvironment} hostname of the ${binding.surfaceId} surface in ${MATRIX_PATH})`,
+        );
+        continue;
+      }
+      // The branch the project builds from, recorded as an OBSERVED fact
+      // (the branch the live deployment was built from). It must be
+      // present and non-empty: an absent branch is how the recorded
+      // `mission-control-vercel` branch — which does not exist in the
+      // repository — stayed invisible to every check.
+      if (typeof envDef.branch !== 'string' || envDef.branch.trim() === '') {
+        errors.push(
+          `${pid}/${envName}: branch must be a non-empty string — the env matrix records the branch the live ` +
+            `deployment is built from, and an absent branch cannot be checked against the repository`,
+        );
+        continue;
+      }
+      const isProduction = servesEnvironment === 'production';
       for (const [envVarName, envVarValue] of Object.entries(envDef.env ?? {})) {
         envVarCount += 1;
         const actualHost = hostOf(envVarValue);
@@ -140,7 +240,7 @@ function main() {
         matrixDerivedCount += 1;
         const expected = isProduction ? production.get(surface) : staging.get(surface);
         if (!expected) {
-          errors.push(`${pid}/${envName}/${envVarName}: ${MATRIX_PATH} has no ${envName} hostname for surface ${JSON.stringify(surface)}; add the surface to the matrix first`);
+          errors.push(`${pid}/${envName}/${envVarName}: ${MATRIX_PATH} has no ${servesEnvironment} hostname for surface ${JSON.stringify(surface)}; add the surface to the matrix first`);
           continue;
         }
         // Cross-environment drift: a production env var value referencing
@@ -150,16 +250,29 @@ function main() {
         // wrong (mixed up environments) instead of the generic
         // "does not match" error.
         const otherEnvHost = isProduction ? staging.get(surface) : production.get(surface);
-        const otherEnvName = isProduction ? 'preview/staging' : 'production';
+        const otherEnvName = isProduction ? 'staging' : 'production';
         if (otherEnvHost && actualHost === otherEnvHost) {
-          errors.push(`${pid}/${envName}/${envVarName}: value references a ${otherEnvName} hostname (${actualHost}) but the Vercel environment is ${envName}`);
+          errors.push(`${pid}/${envName}/${envVarName}: value references a ${otherEnvName} hostname (${actualHost}) but this project serves ${servesEnvironment}`);
           continue;
         }
         if (actualHost !== expected) {
-          errors.push(`${pid}/${envName}/${envVarName}: host ${JSON.stringify(actualHost)} does not match the ${envName} hostname in ${MATRIX_PATH} (expected ${JSON.stringify(expected)})`);
+          errors.push(`${pid}/${envName}/${envVarName}: host ${JSON.stringify(actualHost)} does not match the ${servesEnvironment} hostname in ${MATRIX_PATH} (expected ${JSON.stringify(expected)})`);
           continue;
         }
       }
+    }
+  }
+
+  // Completeness: every frontend project the hostname matrix records
+  // must appear here. A frontend surface's production project and its
+  // staging project are the two halves of the separation; dropping one
+  // would leave a surface with a contract that no project implements.
+  for (const [pid, binding] of frontendProjects) {
+    if (!listedProjects.has(pid)) {
+      errors.push(
+        `${pid}: the ${binding.environment} project of the ${binding.surfaceId} surface in ${MATRIX_PATH} is not listed ` +
+          `in ${VERCEL_ENV_MATRIX_PATH} — every frontend project the hostname matrix records must appear here`,
+      );
     }
   }
 

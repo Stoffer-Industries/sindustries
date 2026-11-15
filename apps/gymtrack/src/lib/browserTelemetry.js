@@ -25,9 +25,11 @@
  *
  * The module exports three symbols:
  *   - `installBrowserTelemetry()` — registers global listeners once.
- *   - `reportAuthError(error, context)` — explicitly called from
- *     every `{ data: null, error: ... }` return in
- *     `clerkAuth.jsx` and `supabaseAuth.jsx`.
+ *   - `reportAuthError(context)` — explicitly called from every
+ *     `{ data: null, error: ... }` return in `clerkAuth.jsx` and
+ *     `supabaseAuth.jsx`. The auth surface is CONTEXT-ONLY: the error
+ *     envelope is never handed to the serializer, so no message and no
+ *     stack can be derived from it.
  *   - `_resetBrowserTelemetryForTests()` — clears module-level state
  *     between vitest cases (the dedupe / volume counters are
  *     module-level, so a per-test reset is required).
@@ -87,20 +89,62 @@ function redactMessage(message) {
   return truncate(redactString(message).toLowerCase(), 200);
 }
 
+/**
+ * Resolve the release identifier of the deployed build.
+ *
+ * Order:
+ *   1. `VITE_RELEASE_TAG` — an explicit per-deploy tag, when the
+ *      operator sets one.
+ *   2. `VERCEL_GIT_COMMIT_SHA` — the commit Vercel is deploying. It is
+ *      reachable from the bundle only because `vite.config.js` lists
+ *      that exact name in `envPrefix`.
+ *   3. `VERCEL_DEPLOYMENT_ID` — the deployment identifier, as a last
+ *      resort for a build with no commit metadata.
+ *   4. `unknown` for a production build, `dev` otherwise.
+ *
+ * The previous behaviour fell back to the literal `'dev'` whenever
+ * `VITE_RELEASE_TAG` was unset, so every production row in Grafana was
+ * labelled `release=dev` and could not be told apart from a local run.
+ * A production build with no release metadata is now labelled
+ * `unknown` — never `dev`. The relay requires `release` to be a
+ * string, so the fallback keeps the payload valid.
+ */
+function resolveRelease() {
+  const explicit = truncate(import.meta.env?.VITE_RELEASE_TAG ?? '', 64);
+  if (explicit) return explicit;
+
+  const commit = truncate(import.meta.env?.VERCEL_GIT_COMMIT_SHA ?? '', 64);
+  if (commit) return commit;
+
+  const deployment = truncate(import.meta.env?.VERCEL_DEPLOYMENT_ID ?? '', 64);
+  if (deployment) return deployment;
+
+  const mode = (import.meta.env?.MODE ?? '').toString();
+  return mode === 'production' ? 'unknown' : 'dev';
+}
+
 function buildPayload({ error, context, source }) {
-  const safeMessage =
-    redactMessage(context?.safeMessage) ??
-    redactMessage(safeErrorMessage(error)) ??
-    null;
-  const safeStack =
-    context?.safeStack !== undefined
+  // `contextOnly` is the auth-surface contract: the caller passed a
+  // context object and no error envelope, so nothing may be derived
+  // from an error — not a message, not a stack. The flag is checked
+  // explicitly rather than inferred from `error === null`, so the
+  // guarantee survives a future change to the generic path.
+  const contextOnly = context?.contextOnly === true;
+  const safeMessage = contextOnly
+    ? null
+    : (redactMessage(context?.safeMessage) ??
+      redactMessage(safeErrorMessage(error)) ??
+      null);
+  const safeStack = contextOnly
+    ? null
+    : context?.safeStack !== undefined
       ? redactStack(context.safeStack)
       : redactStack(safeErrorStack(error));
 
   return {
     environment:
       (import.meta.env?.MODE ?? 'unknown').toString().slice(0, 32) || 'unknown',
-    release: truncate(import.meta.env?.VITE_RELEASE_TAG ?? '', 64) || 'dev',
+    release: resolveRelease(),
     route: truncate(window?.location?.pathname ?? '', 128),
     operation: truncate(context?.operation ?? source ?? 'unknown', 64),
     provider: context?.provider ?? null,
@@ -259,15 +303,30 @@ export function installBrowserTelemetry() {
 /**
  * Explicit auth-error reporting. Called from every
  * `{ data: null, error: ... }` return in clerkAuth.jsx and
- * supabaseAuth.jsx. The `context` argument carries the operation name,
- * the provider ('clerk' | 'supabase'), and a safe Clerk error code /
- * status extracted from the error envelope (no message, no stack).
+ * supabaseAuth.jsx.
+ *
+ * CONTRACT — the auth surface is context-only. This function does not
+ * accept an error envelope: the caller extracts the safe fields
+ * (operation, provider, errorCode, status) and passes only those. The
+ * envelope therefore never reaches the serializer, so no `message` and
+ * no `stack` can be derived from it.
+ *
+ * The guarantee is structural, not a redaction promise. A Clerk
+ * envelope can carry an email address, a session token or a stack
+ * frame that the browser-side pattern redaction does not cover, so
+ * relying on redaction to strip it would leave the contract dependent
+ * on a best-effort layer. Making the envelope un-passable removes the
+ * dependency.
  *
  * The function never throws. Caller code is unchanged — failures here
  * cannot break the auth flow.
  */
-export function reportAuthError(error, context) {
-  dispatch({ error, context, source: 'auth' });
+export function reportAuthError(context) {
+  dispatch({
+    error: null,
+    context: { ...(context ?? {}), contextOnly: true },
+    source: 'auth'
+  });
 }
 
 /**

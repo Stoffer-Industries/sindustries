@@ -1,5 +1,15 @@
 # fly.toml — auto-post-worker staging.
 #
+# RETIRED — the per-service staging Fly app this spec configures was destroyed
+# in the 2026-11-07 staging consolidation. The worker now runs as a child
+# process of the ONE consolidated staging platform app; the live staging deploy
+# path is `infra/cloud/fly/platform.fly.toml` via
+# `.github/workflows/deploy-staging-platform.yml`. This file is retained as a
+# historical template only and MUST NOT be deployed — the retired-app guard in
+# `infra/cloud/scripts/tests/retired-staging-apps.test.sh` asserts that no
+# operator surface deploys it. Live topology: `docs/systems/cloud-platform.md`;
+# cutover and pending cleanup: `docs/runbooks/platform-consolidation-rollback.md`.
+#
 # Stable hostname (task 5cb4a8fe; source of truth: infra/cloud/hostname-matrix.json):
 #   staging:    (none) — queue-bound, not HTTP-bound
 #   production: (none) — queue-bound, not HTTP-bound
@@ -10,10 +20,12 @@
 #
 # Long-running BullMQ queue consumer. NOT an HTTP service — Quinn's
 # APPROVED review on PR #508 (docs/specs/cloud-deployment-foundation-tech-design.md)
-# confirmed the worker gets a SEPARATE Fly app process (no sidecar in
-# tasks-api), with no [http_service] section and no http_checks. Fly
-# monitors the process via the entrypoint's liveness; a clean exit
-# triggers a restart per Fly's process supervisor.
+# confirmed the worker ran as a SEPARATE Fly app process (no sidecar in
+# tasks-api), with no [http_service] section and no http_checks. Since the
+# 2026-11-07 consolidation the same worker code runs as a child process of the
+# consolidated staging platform app, supervised by
+# `infra/cloud/platform/platform-supervisor.mjs` rather than by a per-app Fly
+# process supervisor.
 #
 # The build context is set to the repo root (`../../..`) so the
 # Dockerfile's `COPY services/content-scheduler-api/` references resolve
@@ -23,16 +35,14 @@
 # scheduler extraction, so this Fly app spec does NOT depend on the
 # worker being extracted to a standalone service.
 #
-# Quinn-owned answers from PR #508 (locked):
-#   - Worker placement: SEPARATE Fly app process (this file).
+# Pre-consolidation answers from PR #508 (locked then; superseded by the
+# 2026-11-07 cutover named above — retained for history only):
+#   - Worker placement: was a SEPARATE Fly app process (this file).
 #   - REDIS_URL: stays as the env-var contract — Upstash credentials
 #     (Sydney, TLS) are Quinn-supplied and referenced by secret name only.
 #   - .openclaw boundary: Quinn owns Fly.io API token, Neon connection
 #     string, Upstash credentials, and the DNS provider token. This file
 #     references secret names only — no live values committed.
-#
-# When invoking from CI: `fly deploy --config infra/cloud/fly/auto-post-worker.fly.toml`
-# from the repo root.
 
 app = 'sindustries-auto-post-worker-staging'
 primary_region = 'syd'

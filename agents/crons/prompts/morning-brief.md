@@ -24,7 +24,7 @@ Process (fail-soft):
 4) Pull tasks where Tom is an attention owner from the Tasks API:
    TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list \
-       --attention-owner Tom --status open --status ready --status doing --status acceptance --json
+       --attention-owner Tom --status open --status ready --status doing --status acceptance
 
 5) Pull active tasks from the Tasks API (team status):
    TASKS_API_BASE_URL=http://localhost:4001/api/v1 \

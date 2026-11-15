@@ -29,6 +29,9 @@ DEFAULT_OPENCLAW_MAX_ATTEMPTS = 2
 DEFAULT_MAX_ISSUE_BYTES = 1 * 1024 * 1024
 DEFAULT_MAX_ARTICLE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_REDIRECTS = 5
+DEFAULT_FETCH_MAX_REQUESTS = 3
+DEFAULT_FETCH_BACKOFF_BASE_SECONDS = 1.0
+DEFAULT_FETCH_BACKOFF_MAX_SECONDS = 30.0
 USER_AGENT = "sindustries-cto-craft-workflow/0.1 (+internal)"
 
 
@@ -48,6 +51,9 @@ class Settings:
     max_issue_bytes: int
     max_article_bytes: int
     max_redirects: int
+    fetch_max_requests: int
+    fetch_backoff_base_seconds: float
+    fetch_backoff_max_seconds: float
     require_ingest_secret: bool
     min_qualified_candidates: int = MIN_QUALIFIED_CANDIDATES
     max_selected_angles: int = MAX_SELECTED_ANGLES
@@ -118,6 +124,13 @@ def _optional_attempts(name: str, default: int) -> int:
     return value
 
 
+def _optional_positive_float(name: str, default: float) -> float:
+    value = _optional_float(name, default)
+    if value <= 0:
+        raise RuntimeError(f"{name} must be positive, got {value}")
+    return value
+
+
 def load_settings(*, require_secrets: bool = True) -> Settings:
     """Build a Settings instance from the current process environment.
 
@@ -180,6 +193,17 @@ def load_settings(*, require_secrets: bool = True) -> Settings:
             "CTO_CRAFT_MAX_ARTICLE_BYTES", DEFAULT_MAX_ARTICLE_BYTES
         ),
         max_redirects=_optional_int("CTO_CRAFT_MAX_REDIRECTS", DEFAULT_MAX_REDIRECTS),
+        fetch_max_requests=_optional_attempts(
+            "CTO_CRAFT_FETCH_MAX_REQUESTS", DEFAULT_FETCH_MAX_REQUESTS
+        ),
+        fetch_backoff_base_seconds=_optional_positive_float(
+            "CTO_CRAFT_FETCH_BACKOFF_BASE_SECONDS",
+            DEFAULT_FETCH_BACKOFF_BASE_SECONDS,
+        ),
+        fetch_backoff_max_seconds=_optional_positive_float(
+            "CTO_CRAFT_FETCH_BACKOFF_MAX_SECONDS",
+            DEFAULT_FETCH_BACKOFF_MAX_SECONDS,
+        ),
         require_ingest_secret=require_ingest_secret,
     )
 
@@ -199,5 +223,8 @@ __all__ = [
     "DEFAULT_MAX_ISSUE_BYTES",
     "DEFAULT_MAX_ARTICLE_BYTES",
     "DEFAULT_MAX_REDIRECTS",
+    "DEFAULT_FETCH_MAX_REQUESTS",
+    "DEFAULT_FETCH_BACKOFF_BASE_SECONDS",
+    "DEFAULT_FETCH_BACKOFF_MAX_SECONDS",
     "USER_AGENT",
 ]

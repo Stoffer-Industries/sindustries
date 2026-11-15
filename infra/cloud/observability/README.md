@@ -66,7 +66,7 @@ The probe is its own Fly app (`infra/cloud/observability/health-probe/`) that ru
 
 ### `bootstrap-observability.sh`
 
-Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Discovers the Grafana Cloud stack's pre-provisioned Prometheus datasource via `/api/datasources`, uploads wrapped dashboard models, translates the portable alert files into per-rule HTTP payloads, and creates or updates each alert by UID. Performs a smoke deploy and surfaces a final report.
+Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Discovers the Grafana Cloud stack's pre-provisioned Prometheus datasource via `/api/datasources`, and selects the Loki datasource with the shared rule in `infra/cloud/observability/loki-datasource-selector.jq` (the same file the operator procedure in `docs/systems/observability.md` runs) — an operator pin (`GRAFANA_CLOUD_LOKI_DATASOURCE_UID`) wins outright, otherwise the canonical `logs` datasource, then the tenant default, then the first Loki datasource. Uploads wrapped dashboard models, translates the portable alert files into per-rule HTTP payloads, and creates or updates each alert by UID. Performs a smoke deploy and surfaces a final report.
 
 ---
 
@@ -123,7 +123,30 @@ After Tom hands over the Grafana Cloud + Fly + Neon credentials, the operator (Q
 
 ## Local dev experience
 
-The local observability stack (`infra/docker-compose.observability.yml` + `packages/otel-node` + `infra/grafana/`) continues to operate the developer's machine unchanged. When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, the OTel SDK in `packages/otel-node/src/index.ts` falls back to the local OTel Collector (the default OTLP endpoint `http://localhost:4318`).
+The local observability stack was decommissioned on 2026-11-15 (task `a7938522`). `infra/docker-compose.observability.yml` now contains the OTel collector only: it stays the single local OTLP receiver, and it forwards every span and metric to the Grafana Cloud tenant. When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, the OTel SDK in `packages/otel-node/src/index.ts` falls back to the local OTel Collector (the default OTLP endpoint `http://localhost:4318`).
+
+### Local collector → Grafana Cloud
+
+The collector's export credentials come from the same `infra/cloud/observability/.env.local` file this directory already owns. `scripts/dev/grafana-cloud-otel-env.sh` reads it and exports two values into the process environment that starts the stack:
+
+| Variable | Meaning |
+|---|---|
+| `GRAFANA_CLOUD_OTLP_ENDPOINT` | The OTLP gateway endpoint, normalized to the `/otlp` prefix the tenant requires (`https://<gateway-host>/otlp`). The exporter posts to `<endpoint>/v1/traces` and `<endpoint>/v1/metrics`; the same payload at `/v1/traces` is a **404** on the tenant. |
+| `GRAFANA_CLOUD_OTLP_AUTHORIZATION` | The `Authorization` header value, parsed out of the `GRAFANA_CLOUD_OTLP_HEADERS` header *string*. |
+
+`GRAFANA_CLOUD_OTLP_HEADERS` is an OTLP exporter header string (`Authorization=Basic <base64>`), **not** a header value. Interpolating it straight into a collector header would send `Authorization: Authorization=Basic <base64>` and the tenant would answer 401. The helper parses it with the same rules as `apps/gymtrack/api/telemetry.js::parseOtlpHeaderString()` — a segment with no valid header name before its first `=` is a bare Authorization value, which is how base64 padding survives the split — so the two consumers cannot silently diverge.
+
+The helper fails closed: a missing endpoint, a missing header, a header set with no `Authorization`, or an endpoint path that would produce the known 404 all abort startup with a message that names the problem and never prints the credential. `make up` (and `scripts/dev/up.sh`) runs it before the stack comes up; `OBSERVABILITY=0` remains the explicit escape hatch for local work that needs no telemetry.
+
+Contract test: `scripts/dev/tests/grafana-cloud-otel-env.test.sh` (offline — no credential, no Grafana access).
+
+### Hosted metric and label names
+
+Grafana Cloud's OTLP→Prometheus translation renames things, so dashboard expressions must use the hosted names rather than the old local scrape names:
+
+- A monotonic sum counter named `foo_counter` is stored as `foo_counter_total`.
+- Dotted attribute names become underscored labels: `llm.model` → `llm_model`, `service.name` → `service_name`.
+- Span-derived metrics keep the spanmetrics names, e.g. `traces_span_metrics_calls_total`, carrying `agent_id` **only** on spans that set that attribute.
 
 To send local dev traffic to Grafana Cloud instead (useful for debugging hosted dashboards from a dev machine):
 

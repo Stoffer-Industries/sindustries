@@ -15,6 +15,14 @@
 # pre-generate here. The Prisma client is created at /app/services/tasks-api/
 # node_modules/.prisma/client on first boot.
 #
+# `prestart` deliberately does NOT run `prisma migrate deploy`. On the Fly
+# path, migrations are applied by the app's `release_command`
+# (infra/cloud/fly/tasks-api.fly.toml), so a machine start, restart or
+# scale-up never needs database write access from inside the container.
+# Instead, the container's startup schema preflight
+# (services/tasks-api/src/lib/schemaPreflight.ts) fails closed when the
+# database and the generated client have drifted.
+#
 # PORT=4001 pairs with the prodlike DATABASE_URL port 7432 (the existing
 # assertApiPortDbPortPairing guard in services/tasks-api/src/server.ts).
 # ALLOW_PORT_DB_MISMATCH=1 is the documented escape hatch for the cloud
@@ -56,6 +64,6 @@ ENV ALLOW_PORT_DB_MISMATCH=1
 EXPOSE 4001
 
 # Start: `npm run start --workspace services/tasks-api` runs the service's
-# `prestart` (`prisma generate`) then `start`
+# `prestart` (`prisma generate` only — no migration at boot) then `start`
 # (`tsx --require @sindustries/otel-node/register src/server.ts`).
 CMD ["npm", "run", "start", "--workspace", "services/tasks-api"]

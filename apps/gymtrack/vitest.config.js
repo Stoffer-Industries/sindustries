@@ -23,7 +23,11 @@ export default defineConfig({
       // The Grafana dashboard ships next to the app it visualizes, and
       // its LogQL selectors are a contract with the relay — the
       // dashboard-contract test asserts both halves line up.
-      'grafana/**/*.test.{js,jsx}'
+      'grafana/**/*.test.{js,jsx}',
+      // Playwright's own specs live in `test/e2e` and are matched by
+      // `*.spec.ts`, so they are not picked up here. `test/unit` holds
+      // plain unit tests for the e2e support code itself.
+      'test/**/*.test.{ts,tsx}'
     ]
   }
 });

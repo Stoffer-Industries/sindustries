@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { createApp } from './app';
-import { config, ConfigValidationError } from './config/index.ts';
+import { config } from './config/index.ts';
+import { writeFatalToStderr } from './lib/fatalStderr.ts';
+import { assertTaskApprovalSchema } from './lib/schemaPreflight.ts';
 
 // `config` is parsed and frozen at module load. If any required value is
 // missing or malformed, the import throws ConfigValidationError after
@@ -43,22 +45,50 @@ function assertApiPortDbPortPairing(apiPort: number) {
 
 assertApiPortDbPortPairing(PORT);
 
-const app = createApp();
+async function start() {
+  // Task 20195ce7 AC2: the generated Prisma client and the database it
+  // talks to move independently (Edge fast-forwards the checkout on every
+  // merge; nothing applied the matching migration to the long-lived local
+  // Postgres). On 2026-10-23 that drift 500'd every read on the shared
+  // Tasks API. Verify the schema BEFORE opening the listener, so drift is
+  // a loud, correctly-attributed startup failure instead of a silent
+  // total outage.
+  try {
+    await assertTaskApprovalSchema();
+  } catch (error) {
+    // Synchronous write: `console.error` + `process.exit` can truncate the
+    // payload on a piped stderr (Node's pipe writes are async on macOS).
+    writeFatalToStderr(
+      `${JSON.stringify(
+        {
+          level: 'fatal',
+          event: 'schema_preflight_failed',
+          service: 'tasks-api',
+          message: error instanceof Error ? error.message : String(error)
+        },
+        null,
+        2
+      )}\n`
+    );
+    process.exit(1);
+  }
 
-app.listen(PORT, () => {
-  console.log(`tasks-api listening on http://localhost:${PORT}`);
-});
+  const app = createApp();
+
+  app.listen(PORT, () => {
+    console.log(`tasks-api listening on http://localhost:${PORT}`);
+  });
+}
+
+start();
 
 // Defensive: if config somehow loaded but the assert above threw, surface
 // it as a non-zero exit. The common case (config validation failure) is
 // already handled by the ConfigValidationError from the static import.
 process.on('unhandledRejection', (err) => {
-  if (err instanceof ConfigValidationError) {
-    // eslint-disable-next-line no-console
-    console.error(err);
-    process.exit(1);
-  }
-  // eslint-disable-next-line no-console
-  console.error(err);
+  // Synchronous write for the same reason as the preflight failure above:
+  // a piped stderr can truncate an async `console.error` on exit.
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  writeFatalToStderr(`${detail}\n`);
   process.exit(1);
 });

@@ -339,13 +339,19 @@ invariants against the config file so neither can regress silently.
 **The deploy stays opt-in.** Provisioning the app and its secrets is safe
 at any time — no Machine runs until a deploy. The deploy itself is gated
 on the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED=true`,
-because the platform's auto-post worker starts consuming the BullMQ queue
-as soon as the platform is deployed, while the old
-`sindustries-auto-post-worker-staging` app is still running. The operator
-path (`infra/cloud/bin/deploy platform`) is gated by the same variable, so
-the opt-in cannot be bypassed. The cutover order is in
-`docs/runbooks/platform-consolidation-rollback.md` §3: the old auto-post
-worker is scaled to zero BEFORE the platform is deployed.
+and the gate is a blanket opt-in on every staging deploy: after the
+2026-11-07 cutover every service name resolves to the platform app, so
+there is no service name that reaches it without passing the gate. The
+operator path (`infra/cloud/bin/deploy platform`) is gated by the same
+variable, so the opt-in cannot be bypassed. The gate's original purpose
+— keeping a merged platform deploy from cutting staging over while the old
+`sindustries-auto-post-worker-staging` app was still consuming the same
+BullMQ queue — was discharged by that cutover: the four per-service
+staging apps were destroyed ahead of it, so the platform's auto-post worker
+is the only consumer of the queue. The cutover order was
+`docs/runbooks/platform-consolidation-rollback.md` §3, which records the
+sequence as it was executed on 2026-11-07 (steps 3, 4 and 7 did not run and
+remain blocked on task `5cb4a8fe`).
 
 ## Account / ownership / billing
 
@@ -378,7 +384,7 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 - The auto-post worker row with `staging: null`, `production: null`, and `publicUrl: false` — the explicit non-public nature is auditable from the matrix and from the per-hostname comment block at the top of `infra/cloud/fly/auto-post-worker.fly.toml`.
 - A `providerFallback` per public surface (the `*.fly.dev` / `*.vercel.app` URL the design records as the migration path until the stable CNAMEs + certs land).
 - A `cnameTargets` per public surface (the DNS target each stable hostname's CNAME must resolve to, per environment).
-- A `vercelEnvironments` per frontend surface (the Vercel environment each stable hostname's custom domain is bound to).
+- A `vercelProject` per frontend surface (the production Vercel project that owns the production stable hostname) and a `vercelStagingProject` (the staging Vercel project that owns the staging stable hostname).
 
 `providerFallback` and `cnameTargets` are different things and are not interchangeable. `providerFallback` is the **production** provider host — the documented migration path. `cnameTargets` is the per-environment DNS target:
 
@@ -393,19 +399,21 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 
 The staging column differs from the production column because the staging topology differs from production: the three API surfaces are served by the one consolidated platform Fly app (task `219fb673`), and health-probe keeps its own staging Fly app.
 
-The Vercel frontends CNAME to Vercel's shared managed custom-domain target in both environments. That target is the same for **every** Vercel project, so the DNS shape carries no environment identity at all for those two surfaces: the staging hostname and the production hostname of one project resolve to byte-identical DNS. The environment separation therefore lives in the Vercel environment each custom domain is bound to, which the matrix records as `vercelEnvironments`:
+The Vercel frontends CNAME to Vercel's shared managed custom-domain target in both environments. That target is the same for **every** Vercel project, so the DNS shape carries no environment identity at all for those two surfaces: the staging hostname and the production hostname of one project resolve to byte-identical DNS. The environment separation therefore lives in the Vercel **project** that owns each stable hostname — the staging hostname lives in the staging project, the production hostname in the production project:
 
-| Surface | `vercelEnvironments.staging` | `vercelEnvironments.production` |
+| Surface | `vercelStagingProject` | `vercelProject` |
 | --- | --- | --- |
-| mission-control | `preview` | `production` |
-| tasks-app | `preview` | `production` |
+| mission-control | `sindustries-mission-control-staging` | `sindustries-mission-control` |
+| tasks-app | `sindustries-tasks-app-staging` | `sindustries-tasks` |
 
-`tests/cloud/scripts/check-stable-hostname-matrix.mjs` asserts that the two stable hostnames bind to **different** Vercel environments and that both bindings match `infra/cloud/vercel-env-matrix.json`.
+**Project model (Quinn, 2026-11-13, task `5cb4a8fe`).** The separation is per project, not per Vercel environment. Neither project has a `preview` target: each carries exactly one environment — its own production deployment target — and `infra/cloud/vercel-env-matrix.json` records which Sindustries environment that target serves in `servesEnvironment`. The earlier model (`vercelEnvironments.staging = preview`) did not describe reality: the live staging projects have no `preview` target and their custom domains are bound to their production deployment target.
+
+`tests/cloud/scripts/check-stable-hostname-matrix.mjs` asserts that the two stable hostnames bind to **different** Vercel projects, that each project carries exactly one environment, and that each project's environment binds the matching stable hostname in `infra/cloud/vercel-env-matrix.json`.
 
 **AC2 for the two frontends is verified at two different levels, and the weaker one must not be overstated:**
 
-- **Repo-verified (contract):** the staging stable hostname is bound to the project's staging Vercel environment and the production stable hostname to a different one; the staging environment's `VITE_*` API base URLs point at the staging API hostnames (asserted by `tests/cloud/scripts/check-vercel-env-matrix.mjs`).
-- **Operator-verified (Vercel — not repo-verified):** that the bound environment is actually serving a deployment built from the expected branch (`staging` for the preview environment, `main` for production).
+- **Repo-verified (contract):** the staging stable hostname is bound to the surface's staging Vercel project and the production stable hostname to a different one; the staging project's `VITE_*` API base URLs point at the staging API hostnames (asserted by `tests/cloud/scripts/check-vercel-env-matrix.mjs`).
+- **Operator-verified (Vercel — not repo-verified):** that the bound project is actually serving a deployment built from the expected branch (`main` for both the staging and the production projects). The `mission-control-vercel` branch named by the earlier mission-control-vercel-deployment tech design was never created in the repository; the deployments serving the stable staging hostnames were built from `main`, commit 7ba14896.
 
 The HTTPS check does **not** distinguish a staging deployment from a production one — a production build served under the staging hostname returns a healthy 200. It is a reachability and certificate check, not an environment-separation check, and the docs must not describe it as the separator.
 
@@ -442,7 +450,64 @@ The two Vercel frontends could not be verified **from the host that ran the harn
 
 The harness now classifies this case explicitly for both HTTPS and CORS preflight probes: a response whose body carries a proxy marker, or a gateway status behind a proxy that `NO_PROXY` does not exempt, is recorded as `failureMode: proxy_blocked` rather than an upstream status, and the row evidence says the harness could not reach the deployment. CORS preflight also requires both a successful 2xx status and the expected allow-origin header; a failed preflight reads a bounded response-body excerpt and applies the same failure classification. Before an excerpt is persisted in result JSON or row evidence, the redactor removes URI userinfo and Basic/Proxy-Authorization credential values. The row still fails — the harness could not verify the hostname, so the AC5 live gate stays open — but the failure is no longer attributed to the deployment.
 
-**Outstanding for AC5:** the two frontend rows must be verified from a host that is not behind the proxy block (or from CI) before the live gate can pass. Until then the AC5 live gate stays open for those two rows.
+**Outstanding for AC5 (as recorded on 2026-11-11):** the two frontend rows must be verified from a host that is not behind the proxy block (or from CI) before the live gate can pass. **That verification now exists** — see [Live AC5 harness result — public-internet runner (2026-11-15 NZ)](#live-ac5-harness-result--public-internet-runner-2026-11-15-nz) below: dispatched on a public-internet runner, both frontend rows pass. The representative authenticated staging workflow was still open at that point; the separate staging-validation run recorded below now closes that final AC5 staging leg.
+
+### Live verification from a public-internet runner
+
+`.github/workflows/stable-hostname-live-verify.yml` is the dispatch-only path that produces the public-internet verdict the operator host cannot. It runs the same harness (`--mode live`) on a GitHub-hosted `ubuntu-latest` runner with the proxy environment cleared and `NO_PROXY` pinned, so the request path is provably direct: a proxy in the path answers before the request leaves the runner and turns a deployment verdict into `failureMode: proxy_blocked`.
+
+The workflow is deliberately narrow:
+
+- **dispatch only** — no `push`, `pull_request` or `schedule` trigger, so it never fires unattended against a moving deployment;
+- **no deploy** — it does not touch the Fly or Vercel control planes;
+- **no credentials** — the harness performs DNS resolution, an HTTPS `GET` on a health endpoint and a CORS preflight and reads no token, so the job needs no GitHub environment and no secret;
+- **the redacted result JSON is uploaded as a run artifact**, including when the harness reports a failure, because a failing run is the evidence.
+
+`tests/cloud/tests/stable-hostname-live-verify-workflow.test.mjs` asserts that contract on every CI run, so the workflow cannot quietly start firing unattended, reading a credential, deploying, or running behind a proxy again.
+
+A failing row in that workflow is the honest signal that a surface is not serving as the matrix describes. The workflow produces evidence; it does not assert an AC.
+
+**The expectation this section carried until 2026-11-15 was wrong, and the workflow is what caught it.** It previously stated that the two Vercel frontends were expected to fail because the matrix names Vercel projects that do not exist. That conflated two different projects. The names the matrix records for the **production** hostnames (`vercelProject`) do not exist in the Vercel team — that gap is real and still open. The **staging** hostnames are bound to the staging projects the matrix already records as `vercelStagingProject`, and those serve. The first dispatch of this workflow returns `verdict: pass` for both frontend rows; the AC5 staging clause is therefore evidenced, and what remains open is the production half of AC2/AC6.
+
+### Live AC5 harness result — public-internet runner (2026-11-15 NZ)
+
+`.github/workflows/stable-hostname-live-verify.yml` dispatched on `main` at commit `e2c58158` — run `43595192346`, harness `runId: stable-hostname-live-43595192346-1` — produced the first public-internet verdict for this matrix:
+
+| Surface | DNS | HTTPS | CORS preflight | Row |
+| --- | --- | --- | --- | --- |
+| tasks-api | ok | ok | ok | ok |
+| budget-api | ok | ok | ok | ok |
+| content-scheduler-api | ok | ok | ok | ok |
+| health-probe | ok | ok | — | ok |
+| mission-control | ok | ok | — | ok |
+| tasks-app | ok | ok | — | ok |
+| auto-post-worker | — | — | — | skip (no public URL by design) |
+
+`verdict: pass`. Every public surface resolves through its stable staging hostname, answers HTTPS with a certificate valid for that hostname, and — for the three API surfaces — passes a CORS preflight from the expected frontend origin. The two Vercel frontends return HTTP 200 on `/` through their stable hostnames, and the content-scheduler surface answers 200 on the auto-post worker's health route, so the worker is observed on the API surface exactly as the matrix records it. The auto-post worker row is skipped because it has no public URL by design.
+
+Three rows carry no CORS column value because they are not CORS origins: the two frontends are browser entry points rather than API servers, and the health probe exposes no browser-facing surface. The harness records `cors: null` for those rows rather than a pass, so the table above does not overstate them.
+
+This credential-free public-runner result did **not** cover the representative authenticated staging workflow (`representativeWorkflow: skip`, owned by `tests/cloud/staging-workflows.mjs`). The separate staging-validation run below now covers that leg. The production half of AC2/AC6 remains open — the production hostnames still have no DNS records, no certificates and no owning Vercel project, which is recorded in the AC6 register [`docs/cloud/production-blockers.md`](../../docs/cloud/production-blockers.md).
+
+A caveat worth keeping in view: the harness proves a hostname resolves and serves. It cannot tell a staging deployment from a production one behind the same hostname, because both are verified through reachability and TLS only. Environment separation for the two Vercel frontends therefore rests on the distinct Vercel projects recorded by the matrix (`vercelStagingProject` for staging and `vercelProject` for production), not on this verdict.
+
+### Authenticated staging workflow result — staging-validation runner (2026-11-15 NZ)
+
+`.github/workflows/cloud-staging-validate.yml` dispatched on `main` at commit `5c924937` — [run `43606147320`](https://github.com/Stoffer-Industries/sindustries/actions/runs/43606147320), harness `runId: staging-validate-20261114144157-4a73` — exercised the representative authenticated staging workflows through the stable hostnames:
+
+| Surface | Authenticated workflow evidence |
+| --- | --- |
+| tasks-api | create, read, comment, patch, archive, and list-excludes-archived all passed through `tasks-api.staging.sindustries.co.nz` |
+| budget-api | `/me` passed through `budget-api.staging.sindustries.co.nz` using the synthetic staging session |
+| content-scheduler-api | auto-post health, create, approve, and unapprove passed through `content-scheduler-api.staging.sindustries.co.nz` |
+
+The structured result is `verdict: pass`; all 15 recorded checks pass, and `cleanup.ok` is `true`. The synthetic budget session was revoked (one user and one session deleted), the synthetic scheduler item was removed, and the synthetic task was archived. The artifact is redacted and contains no credential values.
+
+The run's intent commit is `5c924937`, whose diff is documentation-only, so the workflow classified it as `tests-only`; the deployed services reported version `e2c58158` and `matchesIntent: true` under that scope rule. This does not weaken the AC5 result: every request in the authenticated harness used the stable staging hostname, and none used a provider fallback URL.
+
+One accepted limitation remains explicit in the result: the deeper Budget API linked-card write path is skipped by design because its prerequisite fixture is not exposed publicly. That boundary is recorded in the approved staging-environment design and does not replace the representative `/me` authenticated workflow.
+
+Together, run `43595192346` and run `43606147320` now supply the complete AC5 staging evidence: public frontend roots/assets, API health, Content Scheduler auto-post health, and representative authenticated staging workflows all work through the stable hostnames. The task checkbox remains untouched pending Tom/QA's gate.
 
 Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the consolidated platform app (the router already serves each stable hostname at the root of its own surface) and update the smoke-check URLs in the live deploy workflow, `.github/workflows/deploy-staging-platform.yml`. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; each still defines its own `deploy` job, but nothing calls them since their caller jobs were removed from `ci.yml` on 2026-11-07) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
 
@@ -469,6 +534,10 @@ The custom domains Vercel serves each project on (production: `mission-control.s
 The full production-blockers list — DNS records, TLS certs, Vercel custom domain registration, Vercel env var provisioning, Fly secrets, and the cross-environment safety net — is tracked in [`docs/cloud/production-blockers.md`](../cloud/production-blockers.md). Each blocker has a named owner (Quinn for DNS / TLS / Vercel / Fly secrets; separate tasks for production deploy workflows and production cutover) and a status field; the production deploy workflows and production cutover are explicitly out of scope for `5cb4a8fe` and tracked under tasks `020f423e` and `f2c23e26`.
 
 The static checks above are the cross-environment safety net: a staging URL accidentally pasted into a production Vercel environment or production fly.toml fails the cross-env drift check at compile time, not at runtime. Quinn does not need to remember "don't paste staging credentials into production"; the contract makes it impossible to ship without the matching matrix value.
+
+`tests/cloud/scripts/check-production-blockers-register.mjs` closes the last gap in that net: the register and the matrix are two files, and a rename in the matrix that did not reach the register would leave the operator-facing document pointing at a project that does not exist. The check asserts every surface with a production hostname has a row in the register and that the row carries the matrix's exact project/app identifier.
+
+The register's §9 records the live state of the DNS, TLS and Vercel control planes as observed on 2026-11-11, including the two places where they disagree with the contract: the matrix names Vercel projects (`sindustries-mission-control`, `sindustries-tasks`) that are not in the Vercel team, while the staging deployments that do exist sit under `sindustries-mission-control-staging` / `sindustries-tasks-app-staging` and hold the verified custom-domain bindings. The project-model decision that reconciles the two is Quinn's, and it gates the two frontend rows of the register.
 
 ---
 
@@ -557,7 +626,7 @@ Every operator path in `infra/cloud/` resolves to the consolidated app:
 | `infra/cloud/bin/rollback <service>` | `sindustries-platform-staging` | A rollback is shared-fate: every service rolls back together. |
 | `infra/cloud/scripts/bootstrap-staging.sh` | `sindustries-platform-staging` | Refuses the retired per-service names with the reason. |
 | `infra/cloud/observability/failure-inject.sh` | refuses service-scoped drills | The `tasks-api-down` / `budget-api-down` scenarios can no longer be produced by scaling a Fly app. They refuse any staging target, and refuse the consolidated platform in particular: scaling it to zero takes down ALL FOUR services, so a service-scoped drill against it is a full-platform outage wearing a service-scoped label. Producing a service-scoped outage needs a child-level mechanism inside the platform Machine, which does not exist yet. The refusal is mode-aware: `--dry-run` exits 0 and prints REFUSED (the task-31233a0a contract is "a preview has no side effects and needs no credentials", and a refusal has neither), while a real run exits 1 without touching Fly. |
-| `.github/workflows/cloud-staging-validate.yml` | `sindustries-platform-staging` | Its "wake the content-scheduler machines" step targets the platform app (the Machine that can be cold), not the destroyed per-service app. Its preflight validates each staging target variable against its OWN surface's (host, path-prefix) routes from `infra/cloud/hostname-matrix.json` (`stagingRoutes`), so a variable still pointing at a destroyed app — or at a DIFFERENT surface — fails as a configuration error instead of a harness timeout. The routes are per target, not one shared allow-list: every service exposes `/health`, so a host-only allow-list let `STAGING_TASKS_API_URL` point at the budget-api hostname, probe the wrong service and report `tasks.health: pass`. The check never resolves DNS (the stable hostnames do not resolve yet — the CNAME gap on task 5cb4a8fe). |
+| `.github/workflows/cloud-staging-validate.yml` | `sindustries-platform-staging` | Its "wake the content-scheduler machines" step targets the platform app (the Machine that can be cold), not the destroyed per-service app. Its preflight validates each staging target variable against its OWN surface's (host, path-prefix) routes from `infra/cloud/hostname-matrix.json` (`stagingRoutes`), so a variable still pointing at a destroyed app — or at a DIFFERENT surface — fails as a configuration error instead of a harness timeout. The routes are per target, not one shared allow-list: every service exposes `/health`, so a host-only allow-list let `STAGING_TASKS_API_URL` point at the budget-api hostname, probe the wrong service and report `tasks.health: pass`. The check never resolves DNS: it validates each configured target against the matrix's own (host, path-prefix) routes rather than resolving the hostname, so a stable hostname that does not resolve yet cannot fail this preflight. The stable staging hostnames do resolve now — see the public-internet runner result above. |
 
 `bin/status` reads `flyctl status --json`, and that envelope's shape has
 changed between flyctl releases: some versions nest the release version

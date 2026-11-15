@@ -36,6 +36,34 @@ python3 tasks_api_client.py list -h
 python3 tasks_api_client.py create -h
 ```
 
+## Client path and required flags
+
+The client is a **single file at the skill root** — not inside `scripts/`:
+
+```
+/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py
+```
+
+`scripts/` holds `agent_task_queue.py` and `pending_tech_design_approvals.py`, plus a **deprecated forwarding shim** at
+`scripts/tasks_api_client.py`. That shim execs the maintained client with the same argv and exit code and prints a
+deprecation notice on stderr, so a caller still composing the old path gets a working read instead of an opaque
+`No such file or directory` (exit 2). It will be removed; use the skill-root path above.
+
+`--id` is **required** by every single-task subcommand and must be the full task UUID:
+
+| Subcommand | Required flags |
+|---|---|
+| `list` | none (optional filters: `--assignee`, `--status`, `--summary`, `--heartbeat`) |
+| `create` | `--title` (plus optional `--description`, `--priority`, `--type`, `--tags`) |
+| `get` | `--id <full-task-uuid>` |
+| `patch` | `--id <full-task-uuid>` (plus the fields to change) |
+| `approve` / `revoke-approval` | `--id <full-task-uuid>` + `--type {spec,tech_design,qa_agent,accepted}` |
+| `archive` | `--id <full-task-uuid>` |
+
+Omitting `--id` fails fast with an argparse error (`the following arguments are required: --id`) and performs no request. `python3 <client> <subcommand> -h` is the authoritative flag list.
+
+The `tasks-api` directory name contains a hyphen, so `from agents.skills.ops.tasks_api import tasks_api_client` does not import — use `importlib.util.spec_from_file_location`, or shell out to the CLI.
+
 Programmatic use: import `get_task`, `list_tasks`, and `get_base_url` from `tasks_api_client` for scripts that need to query tasks without the CLI.
 
 The client automatically prefers the current agent's scoped credential
@@ -65,6 +93,14 @@ GitHub reports merge conflicts. This remains actionable even when CI is green
 and review feedback is absent: rebase onto the base branch, preserve both
 sides of content conflicts, push with `--force-with-lease`, and re-request the
 original reviewer because the push dismisses the approval.
+
+That force-push path is for **genuine content conflicts**. A branch that is
+merely behind `main` (`mergeStateStatus: BEHIND`) is not a conflict: GitHub
+refuses the merge with "the head branch is not up to date with the base
+branch", and the fix is GitHub's update-branch operation, which refreshes the
+branch without rewriting the reviewed commits — see the "When the merge is
+refused because the branch is behind `main`" section of
+`agents/skills/dev/pr-process/SKILL.md`.
 
 ### Attention owners: ordered action and escalation stack
 

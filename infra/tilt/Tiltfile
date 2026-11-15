@@ -20,10 +20,9 @@ o11y_project = os.getenv('O11Y_PROJECT_NAME', 'sindustries-' + mode + '-o11y')
 
 if observability_enabled:
   docker_compose('../docker-compose.observability.yml', project_name=o11y_project)
-  dc_resource('tempo', project_name=o11y_project, labels=['infra', 'observability', mode])
+  # Grafana Cloud is the telemetry destination; the collector is the only
+  # local observability service (task a7938522).
   dc_resource('otel-collector', project_name=o11y_project, labels=['infra', 'observability', mode])
-  dc_resource('prometheus', project_name=o11y_project, labels=['infra', 'observability', mode])
-  dc_resource('grafana', project_name=o11y_project, labels=['infra', 'observability', mode])
 
 dc_resource(
   'postgres',

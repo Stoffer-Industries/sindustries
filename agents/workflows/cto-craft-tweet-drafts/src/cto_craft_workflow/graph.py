@@ -65,7 +65,6 @@ SELECT = "select_distinct_angles"
 IMPORT = "import_drafts"
 NOTIFY = "format_notification"
 _URL_RE = re.compile(r"https?://[^\s]+")
-_HTTP_STATUS_RE = re.compile(r"^HTTP (?P<status>\d{3})$")
 
 
 @dataclass(frozen=True)
@@ -85,6 +84,30 @@ class GraphDeps:
     parse_issue_links_fn: Callable[[str, bytes], list[dict]] | None = None
 
 
+def _attempt_dicts(attempts: object) -> list[dict]:
+    """Normalize FetchAttempt-like values to JSON-serializable dictionaries."""
+
+    result: list[dict] = []
+    for attempt in attempts or ():
+        if isinstance(attempt, dict):
+            result.append(dict(attempt))
+            continue
+        as_dict = getattr(attempt, "as_dict", None)
+        if callable(as_dict):
+            result.append(as_dict())
+            continue
+        result.append(
+            {
+                "request": getattr(attempt, "request", None),
+                "transport": getattr(attempt, "transport", None),
+                "code": getattr(attempt, "code", None),
+                "status": getattr(attempt, "status", None),
+                "delay_ms": getattr(attempt, "delay_ms", 0),
+            }
+        )
+    return result
+
+
 def _emit_diagnostic(
     state: PipelineState,
     *,
@@ -92,29 +115,16 @@ def _emit_diagnostic(
     code: str,
     message: str,
     url: str | None = None,
+    attempts: object = (),
 ) -> None:
-    diag = {"node": node, "code": code, "message": message, "url": url}
+    diag = {
+        "node": node,
+        "code": code,
+        "message": message,
+        "url": url,
+        "attempts": _attempt_dicts(attempts),
+    }
     state.setdefault("diagnostics", []).append(diag)
-
-
-def _is_transient_fetch_error(exc: FetchError) -> bool:
-    """Return whether a source fetch failure should produce a silent no-op.
-
-    A CDN/origin can briefly return a 5xx or rate-limit response. Those
-    failures are safe to skip because the workflow has no write to retry at
-    this point. Permanent fetch failures (unsafe URLs, unsupported content,
-    and similar configuration/source-shape problems) remain visible failures.
-    """
-
-    if exc.code in {"TIMEOUT", "TRANSPORT_ERROR"}:
-        return True
-    if exc.code != "HTTP_ERROR":
-        return False
-    match = _HTTP_STATUS_RE.fullmatch(exc.message)
-    if match is None:
-        return False
-    status = int(match.group("status"))
-    return status == 429 or status >= 500
 
 
 # ---------------------------------------------------------------------------
@@ -124,17 +134,28 @@ def _is_transient_fetch_error(exc: FetchError) -> bool:
 def discover_latest_issue(state: PipelineState, deps: GraphDeps) -> dict:
     """Fetch the TMW archive and resolve the latest issue URL.
 
-    A transient source fetch failure is recorded and treated as a no-op. There
-    is no article list to continue with when archive discovery is unavailable,
-    and retrying the whole workflow would only repeat the external GET. Parse
-    failures remain visible operational failures.
+    Source fetch failures are retried inside SafeFetcher. An exhausted fetch
+    budget is a visible failed outcome, never a no-op. Parse failures remain
+    visible operational failures.
     """
 
     try:
         resource = deps.fetcher.fetch(deps.archive_url, kind="issue")
     except FetchError as exc:
-        _emit_diagnostic(state, node="discover_latest_issue", code=exc.code, message=exc.message, url=exc.url)
-        return {"outcome": "noop" if _is_transient_fetch_error(exc) else "failed"}
+        attempts = _attempt_dicts(getattr(exc, "attempts", ()))
+        _emit_diagnostic(
+            state,
+            node="discover_latest_issue",
+            code=exc.code,
+            message=exc.message,
+            url=exc.url,
+            attempts=attempts,
+        )
+        return {
+            "outcome": "failed",
+            "outcome_reason": f"source archive fetch failed: {exc.message}",
+            "fetch_attempts": attempts,
+        }
 
     try:
         latest: LatestIssue = parse_archive(deps.archive_url, resource.body)
@@ -146,6 +167,7 @@ def discover_latest_issue(state: PipelineState, deps: GraphDeps) -> dict:
         "issue_url": latest.issue_url,
         "issue_title": latest.issue_title,
         "issue_published_at": latest.issue_published_at,
+        "fetch_attempts": _attempt_dicts(getattr(resource, "attempts", ())),
     }
 
 
@@ -160,8 +182,20 @@ def extract_public_links(state: PipelineState, deps: GraphDeps) -> dict:
     try:
         resource = deps.fetcher.fetch(issue_url, kind="issue")
     except FetchError as exc:
-        _emit_diagnostic(state, node="extract_public_links", code=exc.code, message=exc.message, url=exc.url)
-        return {"outcome": "noop" if _is_transient_fetch_error(exc) else "failed"}
+        attempts = _attempt_dicts(getattr(exc, "attempts", ()))
+        _emit_diagnostic(
+            state,
+            node="extract_public_links",
+            code=exc.code,
+            message=exc.message,
+            url=exc.url,
+            attempts=attempts,
+        )
+        return {
+            "outcome": "failed",
+            "outcome_reason": f"source issue fetch failed: {exc.message}",
+            "fetch_attempts": attempts,
+        }
 
     parse_fn = deps.parse_issue_links_fn or parse_issue_links
     try:
@@ -171,9 +205,16 @@ def extract_public_links(state: PipelineState, deps: GraphDeps) -> dict:
         return {"outcome": "failed"}
 
     if not links:
-        return {"outcome": "noop"}
+        return {
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+            "fetch_attempts": _attempt_dicts(getattr(resource, "attempts", ())),
+        }
 
-    return {"article_links": links[:MAX_ELIGIBLE_LINKS]}
+    return {
+        "article_links": links[:MAX_ELIGIBLE_LINKS],
+        "fetch_attempts": _attempt_dicts(getattr(resource, "attempts", ())),
+    }
 
 
 def _build_angle_user_message(extracted: ExtractedArticle) -> str:
@@ -191,7 +232,11 @@ def _build_angle_user_message(extracted: ExtractedArticle) -> str:
     )
 
 
-def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dict | None:
+def _score_one_article(
+    state: PipelineState,
+    deps: GraphDeps,
+    link: dict,
+) -> tuple[dict | None, list[dict]]:
     """Score a single article link. Returns the candidate dict or None on any failure.
 
     Pulled out of fetch_and_score_article so the fan-out loop can reuse
@@ -201,24 +246,34 @@ def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dic
     """
     url = link.get("url") or ""
     if not url:
-        return None
+        return None, []
 
     fetch_article = deps.fetch_article or (lambda u: deps.fetcher.fetch(u, kind="article"))
     try:
         resource = fetch_article(url)
     except FetchError as exc:
-        _emit_diagnostic(state, node="fetch_and_score_article", code=exc.code, message=exc.message, url=exc.url)
-        return None
+        attempts = _attempt_dicts(getattr(exc, "attempts", ()))
+        _emit_diagnostic(
+            state,
+            node="fetch_and_score_article",
+            code=exc.code,
+            message=exc.message,
+            url=exc.url,
+            attempts=attempts,
+        )
+        return None, attempts
+
+    article_attempts = _attempt_dicts(getattr(resource, "attempts", ()))
 
     try:
         extracted = extract_article(resource.url, resource.body, fallback_title=link.get("title"))
     except Exception as exc:  # defensive
         _emit_diagnostic(state, node="fetch_and_score_article", code="EXTRACT_FAILED", message=str(exc), url=url)
-        return None
+        return None, article_attempts
 
     if extracted.char_count < 200:
         _emit_diagnostic(state, node="fetch_and_score_article", code="ARTICLE_TOO_SHORT", message="article below minimum usable text", url=url)
-        return None
+        return None, article_attempts
 
     user_message = _build_angle_user_message(extracted)
     system_prompt = deps.system_prompt.rstrip()
@@ -237,12 +292,12 @@ def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dic
         return None
 
     if out is None:
-        return None
+        return None, article_attempts
     candidate = out.model_dump()
     if not is_valid_candidate_shape(candidate):
         _emit_diagnostic(state, node="fetch_and_score_article", code="MODEL_OUTPUT_INVALID", message="model output failed shape check", url=url)
-        return None
-    return candidate
+        return None, article_attempts
+    return candidate, article_attempts
 
 
 def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
@@ -263,13 +318,15 @@ def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
     """
 
     candidates: list[dict] = []
+    attempts: list[dict] = []
     for link in state.get("article_links", []) or []:
         if not isinstance(link, dict):
             continue
-        scored = _score_one_article(state, deps, link)
+        scored, link_attempts = _score_one_article(state, deps, link)
+        attempts.extend(link_attempts)
         if scored is not None:
             candidates.append(scored)
-    return {"candidates": candidates}
+    return {"candidates": candidates, "fetch_attempts": attempts}
 
 
 def collect_candidates(state: PipelineState, deps: GraphDeps) -> dict:
@@ -298,7 +355,11 @@ def collect_candidates(state: PipelineState, deps: GraphDeps) -> dict:
         cleaned.append(candidate)
 
     if len(cleaned) < MIN_QUALIFIED_CANDIDATES:
-        return {"deduped_candidates": cleaned, "outcome": "noop"}
+        return {
+            "deduped_candidates": cleaned,
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     return {"deduped_candidates": cleaned}
 
@@ -319,14 +380,22 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
 
     candidates = list(state.get("deduped_candidates", []) or state.get("candidates", []) or [])
     if not candidates:
-        return {"selected_angles": [], "outcome": "noop"}
+        return {
+            "selected_angles": [],
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     above_threshold = [
         c for c in candidates
         if float(c.get("resonance_score", 0.0)) >= deps.min_resonance_score
     ]
     if len(above_threshold) < MIN_QUALIFIED_CANDIDATES:
-        return {"selected_angles": [], "outcome": "noop"}
+        return {
+            "selected_angles": [],
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     above_threshold.sort(
         key=lambda c: (
@@ -354,7 +423,11 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
             break
 
     if len(selected) < MIN_QUALIFIED_CANDIDATES:
-        return {"selected_angles": [], "outcome": "noop"}
+        return {
+            "selected_angles": [],
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     return {"selected_angles": selected}
 
@@ -407,7 +480,10 @@ def import_drafts(state: PipelineState, deps: GraphDeps) -> dict:
 
     selected = list(state.get("selected_angles", []) or [])
     if not selected:
-        return {"outcome": "noop"}
+        return {
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     if deps.import_fn is None:
         _emit_diagnostic(state, node="import_drafts", code="NO_IMPORT_FN", message="no import function configured")
@@ -448,7 +524,11 @@ def import_drafts(state: PipelineState, deps: GraphDeps) -> dict:
 
     created = int(response.get("createdCount", 0))
     if created <= 0:
-        return {"import_result": response, "outcome": "noop"}
+        return {
+            "import_result": response,
+            "outcome": "noop",
+            "outcome_reason": "no new issue content since last run",
+        }
 
     return {"import_result": response, "outcome": "created"}
 

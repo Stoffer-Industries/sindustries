@@ -14,12 +14,22 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# This repo is an npm workspace, so Prisma is usually hoisted to the
+# repo-root node_modules rather than installed under each service. Checking
+# only the service-local path misses the hoisted binary and makes this
+# script run `npm install` from the canonical checkout, which can dirty the
+# tracked package-lock.json. Look in both places.
+prisma_binary_available() {
+  local service_dir="$1"
+  [[ -x "$service_dir/node_modules/.bin/prisma" || -x "$ROOT_DIR/node_modules/.bin/prisma" ]]
+}
+
 ensure_tasks_api_deps() {
-  if [[ -x "$API_DIR/node_modules/.bin/prisma" ]]; then
+  if prisma_binary_available "$API_DIR"; then
     return 0
   fi
 
-  echo "Prisma CLI not found in services/tasks-api/node_modules; installing dependencies..."
+  echo "Prisma CLI not found in services/tasks-api/node_modules or the repo root; installing dependencies..."
   (
     cd "$API_DIR"
     npm install
@@ -27,11 +37,11 @@ ensure_tasks_api_deps() {
 }
 
 ensure_budget_api_deps() {
-  if [[ -x "$BUDGET_API_DIR/node_modules/.bin/prisma" ]]; then
+  if prisma_binary_available "$BUDGET_API_DIR"; then
     return 0
   fi
 
-  echo "Prisma CLI not found in services/budget-api/node_modules; installing dependencies..."
+  echo "Prisma CLI not found in services/budget-api/node_modules or the repo root; installing dependencies..."
   (
     cd "$BUDGET_API_DIR"
     npm install
@@ -39,11 +49,11 @@ ensure_budget_api_deps() {
 }
 
 ensure_content_scheduler_api_deps() {
-  if [[ -x "$CONTENT_SCHEDULER_API_DIR/node_modules/.bin/prisma" ]]; then
+  if prisma_binary_available "$CONTENT_SCHEDULER_API_DIR"; then
     return 0
   fi
 
-  echo "Prisma CLI not found in services/content-scheduler-api/node_modules; installing dependencies..."
+  echo "Prisma CLI not found in services/content-scheduler-api/node_modules or the repo root; installing dependencies..."
   (
     cd "$CONTENT_SCHEDULER_API_DIR"
     npm install
