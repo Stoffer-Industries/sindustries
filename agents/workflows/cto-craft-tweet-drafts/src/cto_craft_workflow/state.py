@@ -153,7 +153,7 @@ class PipelineState(TypedDict, total=False):
     notification: str | None
 
     diagnostics: list[Diagnostic]
-    fetch_attempts: list[dict]
+    fetch_attempts: Annotated[list[dict], operator.add]
 
 
 def make_initial_state(

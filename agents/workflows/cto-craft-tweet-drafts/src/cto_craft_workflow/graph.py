@@ -206,7 +206,11 @@ def extract_public_links(state: PipelineState, deps: GraphDeps) -> dict:
         return {"outcome": "failed"}
 
     if not links:
-        return {"outcome": "noop"}
+        return {
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+            "fetch_attempts": _attempt_dicts(getattr(resource, "attempts", ())),
+        }
 
     return {
         "article_links": links[:MAX_ELIGIBLE_LINKS],
@@ -229,7 +233,11 @@ def _build_angle_user_message(extracted: ExtractedArticle) -> str:
     )
 
 
-def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dict | None:
+def _score_one_article(
+    state: PipelineState,
+    deps: GraphDeps,
+    link: dict,
+) -> tuple[dict | None, list[dict]]:
     """Score a single article link. Returns the candidate dict or None on any failure.
 
     Pulled out of fetch_and_score_article so the fan-out loop can reuse
@@ -239,7 +247,7 @@ def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dic
     """
     url = link.get("url") or ""
     if not url:
-        return None
+        return None, []
 
     fetch_article = deps.fetch_article or (lambda u: deps.fetcher.fetch(u, kind="article"))
     try:
@@ -254,22 +262,19 @@ def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dic
             url=exc.url,
             attempts=attempts,
         )
-        state.setdefault("fetch_attempts", []).extend(attempts)
-        return None
+        return None, attempts
 
-    state.setdefault("fetch_attempts", []).extend(
-        _attempt_dicts(getattr(resource, "attempts", ()))
-    )
+    article_attempts = _attempt_dicts(getattr(resource, "attempts", ()))
 
     try:
         extracted = extract_article(resource.url, resource.body, fallback_title=link.get("title"))
     except Exception as exc:  # defensive
         _emit_diagnostic(state, node="fetch_and_score_article", code="EXTRACT_FAILED", message=str(exc), url=url)
-        return None
+        return None, article_attempts
 
     if extracted.char_count < 200:
         _emit_diagnostic(state, node="fetch_and_score_article", code="ARTICLE_TOO_SHORT", message="article below minimum usable text", url=url)
-        return None
+        return None, article_attempts
 
     user_message = _build_angle_user_message(extracted)
     system_prompt = deps.system_prompt.rstrip()
@@ -288,12 +293,12 @@ def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dic
         return None
 
     if out is None:
-        return None
+        return None, article_attempts
     candidate = out.model_dump()
     if not is_valid_candidate_shape(candidate):
         _emit_diagnostic(state, node="fetch_and_score_article", code="MODEL_OUTPUT_INVALID", message="model output failed shape check", url=url)
-        return None
-    return candidate
+        return None, article_attempts
+    return candidate, article_attempts
 
 
 def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
@@ -314,13 +319,15 @@ def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
     """
 
     candidates: list[dict] = []
+    attempts: list[dict] = []
     for link in state.get("article_links", []) or []:
         if not isinstance(link, dict):
             continue
-        scored = _score_one_article(state, deps, link)
+        scored, link_attempts = _score_one_article(state, deps, link)
+        attempts.extend(link_attempts)
         if scored is not None:
             candidates.append(scored)
-    return {"candidates": candidates}
+    return {"candidates": candidates, "fetch_attempts": attempts}
 
 
 def collect_candidates(state: PipelineState, deps: GraphDeps) -> dict:
@@ -385,7 +392,11 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
         if float(c.get("resonance_score", 0.0)) >= deps.min_resonance_score
     ]
     if len(above_threshold) < MIN_QUALIFIED_CANDIDATES:
-        return {"selected_angles": [], "outcome": "noop"}
+        return {
+            "selected_angles": [],
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     above_threshold.sort(
         key=lambda c: (
@@ -413,7 +424,11 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
             break
 
     if len(selected) < MIN_QUALIFIED_CANDIDATES:
-        return {"selected_angles": [], "outcome": "noop"}
+        return {
+            "selected_angles": [],
+            "outcome": "noop",
+            "outcome_reason": "no new publishable issue content since last run",
+        }
 
     return {"selected_angles": selected}
 
