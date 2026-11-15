@@ -80,6 +80,57 @@ const FLY_MACHINES_API_BASE = 'https://api.machines.dev';
  * nothing.
  */
 const PROBE_CADENCE_KEYS = ['FLY_APP_PROBE_INTERVAL_SECONDS', 'DB_PROBE_INTERVAL_SECONDS'];
+
+/**
+ * The deployed platform app's CONFIGURATION keys (task fb1240c0, AC1/AC4).
+ *
+ * FLY MASKS SECRETS. The Machines API returns an app's NON-SECRET
+ * environment only, so the deployed database and Redis URLs — which are Fly
+ * secrets — are not readable at all (verified 2026-11-16 against the
+ * staging platform app: its Machine carries nine plain values and none of
+ * the `PLATFORM_*` secret names). The plain `[env]` values the platform
+ * config declares ARE readable, and they are exactly the ones that say
+ * WHICH environment the running app was deployed as.
+ *
+ * Without them a production platform app deployed from the shared staging
+ * config passes every other gate the repository owns: the app exists, it
+ * has a release, it carries the right secret NAMES — and it still serves
+ * staging's environment id, staging's CORS allow-lists and staging's
+ * process group. These are the values that say otherwise.
+ */
+const PLATFORM_CONFIG_KEYS = [
+  'FLY_PROCESS_GROUP',
+  'PLATFORM_ENVIRONMENT_ID',
+  'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+];
+
+/**
+ * The CORS allow-list keys — the configuration values that are LISTS of
+ * origins rather than single values.
+ */
+const PLATFORM_CORS_KEYS = [
+  'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+];
+
+/**
+ * The shape a CORS origin must have to be recorded.
+ *
+ * Only an https origin with a host (and an optional port) is kept. A
+ * value that is anything else — a path, a query, userinfo, a scheme the
+ * platform does not serve — is DROPPED and counted, so an arbitrary
+ * operator-supplied string can never ride into an artifact that is
+ * committed, compared between runs and pasted into a task comment.
+ *
+ * The origins themselves are public hostnames: the manifest and the Fly
+ * config already publish them, so they are recorded plainly — unlike the
+ * probe's targets, which are secrets and are recorded as fingerprints.
+ */
+const ORIGIN_SHAPE = /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/i;
+
 const UPSTASH_API_BASE = 'https://api.upstash.com/v2';
 const GITHUB_API_BASE = 'https://api.github.com';
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
@@ -667,6 +718,118 @@ export async function readFlyAppProbeTargets(app, apiToken) {
   }
 }
 
+/**
+ * Read the DEPLOYED platform app's CONFIGURATION as facts, not values.
+ *
+ * AC1 asks whether the production platform app was deployed as the
+ * consolidated PRODUCTION platform, and AC4 asks whether its configuration
+ * values are the real production ones. The app's existence, its release
+ * and its secret NAMES are proved elsewhere in the artifact; none of them
+ * says WHICH configuration the running app was deployed with.
+ *
+ * Only the named plain `[env]` values are read, and the CORS allow-lists
+ * are reduced to validated origins at the read. The failure modes are
+ * kept apart, because they name different owners: an app that does not
+ * exist and an app with no Machine are the operator's to close, while a
+ * read that could not be made is the capture's.
+ *
+ * @param {string} app
+ * @param {string} apiToken
+ * @returns {Promise<{captured: boolean, reason?: string, environmentId?: string|null, processGroup?: string|null, corsOrigins?: object, conflictingKeys?: string[], malformedOrigins?: number, machineCount?: number, error?: string}>}
+ */
+export async function readFlyAppPlatformConfig(app, apiToken) {
+  if (!app) {
+    return {
+      captured: false,
+      reason: 'unreadable',
+      error: 'no Fly app name was supplied, so no deployed configuration could be read',
+    };
+  }
+  const inventory = await fetchFlyMachines(app, apiToken);
+  if (!inventory.read) {
+    return {
+      captured: false,
+      reason: inventory.missing ? 'app-missing' : 'unreadable',
+      error: inventory.error,
+    };
+  }
+  if (inventory.machines.length === 0) {
+    return {
+      captured: false,
+      reason: 'no-machine',
+      error: `the Fly app ${app} carries no Machine, so its deployed configuration cannot be read`,
+    };
+  }
+
+  try {
+    // key -> the set of values seen for that key
+    const values = new Map();
+    for (const machine of inventory.machines) {
+      const env = machine?.config?.env;
+      if (!env || typeof env !== 'object') continue;
+      for (const key of PLATFORM_CONFIG_KEYS) {
+        const value = env[key];
+        if (typeof value !== 'string' || value.length === 0) continue;
+        if (!values.has(key)) values.set(key, new Set());
+        values.get(key).add(value);
+      }
+    }
+
+    const conflictingKeys = [];
+    const config = {};
+    for (const key of PLATFORM_CONFIG_KEYS) {
+      const seen = values.get(key);
+      // An absent key stays absent: "the app does not carry this value"
+      // is a different fact from "the read could not look".
+      if (!seen || seen.size === 0) continue;
+      // Machines that disagree are a real state (a rolling deploy with two
+      // generations) and the gate must not pick a winner.
+      if (seen.size > 1) {
+        conflictingKeys.push(key);
+        continue;
+      }
+      config[key] = [...seen][0];
+    }
+
+    const corsOrigins = {};
+    let malformedOrigins = 0;
+    for (const key of PLATFORM_CORS_KEYS) {
+      const raw = config[key];
+      if (typeof raw !== 'string') continue;
+      const origins = [];
+      for (const chunk of raw.split(',')) {
+        const entry = chunk.trim();
+        if (!entry) continue;
+        if (!ORIGIN_SHAPE.test(entry)) {
+          malformedOrigins += 1;
+          continue;
+        }
+        origins.push(entry.toLowerCase());
+      }
+      if (origins.length > 0) corsOrigins[key] = origins;
+    }
+
+    return {
+      captured: true,
+      environmentId:
+        typeof config.PLATFORM_ENVIRONMENT_ID === 'string'
+          ? config.PLATFORM_ENVIRONMENT_ID
+          : null,
+      processGroup: typeof config.FLY_PROCESS_GROUP === 'string' ? config.FLY_PROCESS_GROUP : null,
+      corsOrigins,
+      conflictingKeys,
+      malformedOrigins,
+      machineCount: inventory.machines.length,
+    };
+  } catch (error) {
+    return {
+      captured: false,
+      reason: 'unreadable',
+      error: `the deployed configuration of the Fly app ${app} could not be read (${error.message})`,
+    };
+  }
+}
+
 async function captureFly({ platformApp, healthProbeApp }) {
   const apiToken = process.env.FLY_API_TOKEN;
   if (!apiToken) return failure('FLY_API_TOKEN is not set');
@@ -786,6 +949,12 @@ async function captureFly({ platformApp, healthProbeApp }) {
   // reduced to labels and fingerprints at the read.
   const healthProbeTargets = await readFlyAppProbeTargets(healthProbeApp, apiToken);
 
+  // The DEPLOYED platform app's CONFIGURATION is read separately from the
+  // app inventory: it is the AC1/AC4 evidence that the running app was
+  // deployed as the consolidated PRODUCTION platform, and it must be
+  // reportable even when the app does not exist.
+  const platformConfig = await readFlyAppPlatformConfig(platformApp, apiToken);
+
   return {
     captured: true,
     organization: organizations.map((organization) => organization?.name).filter(Boolean),
@@ -793,6 +962,7 @@ async function captureFly({ platformApp, healthProbeApp }) {
     secretNamesCaptured: apps.length > 0 && apps.every((app) => Array.isArray(app.secretNames)),
     healthProbeEnv,
     healthProbeTargets,
+    platformConfig,
   };
 }
 
@@ -985,7 +1155,14 @@ async function main(argv) {
     // matter how correctly production was provisioned. Version 3 also
     // recorded the probe's deployed TARGETS, so AC6's "pointed at the new
     // production targets" half can be decided.
-    schemaVersion: 4,
+    // Version 5: the deployed production PLATFORM app's configuration is
+    // recorded — the environment id, the process group Fly scheduled the
+    // Machine in, and the CORS allow-lists, reduced to validated origins.
+    // Version 4 proved the deployed PROBE's cadence and targets; nothing
+    // proved which configuration the platform app itself was deployed
+    // with, so a production app deployed from the shared staging config
+    // passed every gate the repository owns.
+    schemaVersion: 5,
     environment: 'production',
     capturedAt: new Date().toISOString(),
     providers: { neon, fly, github, upstash, cloudflare },

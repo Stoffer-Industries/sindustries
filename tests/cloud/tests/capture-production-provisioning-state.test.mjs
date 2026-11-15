@@ -22,6 +22,7 @@ import { strict as assert } from 'node:assert';
 import {
   readFlyAppEnv,
   readFlyAppMachines,
+  readFlyAppPlatformConfig,
   readFlyAppProbeTargets,
   readFlySecretNames,
   readNeonBranchEndpointFingerprints,
@@ -854,4 +855,126 @@ test('no host ever reaches the artifact from the Neon endpoint read', async () =
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes('neon.tech'), false);
   assert.equal(serialized.includes('super-secret-value'), false);
+});
+
+// --- The deployed platform app's configuration (task fb1240c0, AC1/AC4)
+//
+// FLY MASKS SECRETS: the Machines API returns an app's NON-SECRET
+// environment only, so the deployed database and Redis URLs cannot be read
+// at all. The plain [env] values are the readable part, and they are the
+// ones that say which environment the running app was deployed as.
+
+test('the deployed configuration is read from the named keys and nothing else', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          id: 'machine-1',
+          state: 'started',
+          config: {
+            env: {
+              FLY_PROCESS_GROUP: 'platform',
+              PLATFORM_ENVIRONMENT_ID: 'production',
+              PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS:
+                'https://tasks.sindustries.co.nz,https://mission-control.sindustries.co.nz',
+              PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS:
+                'https://mission-control.sindustries.co.nz',
+              PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS:
+                'https://mission-control.sindustries.co.nz',
+              // A secret and an unrelated value: neither may be recorded.
+              PLATFORM_TASKS_API_DATABASE_URL: 'postgresql://user:supersecret@db.example/db',
+              NODE_ENV: 'production',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppPlatformConfig('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.equal(result.environmentId, 'production');
+  assert.equal(result.processGroup, 'platform');
+  assert.deepEqual(result.corsOrigins.PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS, [
+    'https://tasks.sindustries.co.nz',
+    'https://mission-control.sindustries.co.nz',
+  ]);
+  assert.deepEqual(result.corsOrigins.PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS, [
+    'https://mission-control.sindustries.co.nz',
+  ]);
+
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes('supersecret'), false);
+  assert.equal(serialized.includes('postgresql'), false);
+  assert.equal(serialized.includes('NODE_ENV'), false);
+});
+
+test('a deployed value that is not an https origin is dropped and counted', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        {
+          id: 'machine-1',
+          config: {
+            env: {
+              PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS:
+                'https://mission-control.sindustries.co.nz,postgresql://user:pw@db/db,not-a-url',
+            },
+          },
+        },
+      ]),
+    () => readFlyAppPlatformConfig('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.malformedOrigins, 2);
+  assert.deepEqual(result.corsOrigins.PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS, [
+    'https://mission-control.sindustries.co.nz',
+  ]);
+  assert.equal(JSON.stringify(result).includes('postgresql'), false);
+});
+
+test('an app that does not exist is reported as app-missing, not as empty', async () => {
+  const result = await withFetch(
+    () => jsonResponse(404, { error: 'app not found' }),
+    () => readFlyAppPlatformConfig('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, false);
+  assert.equal(result.reason, 'app-missing');
+  assert.match(result.error, /does not exist/);
+});
+
+test('a configuration read that could not be made is reported as unreadable', async () => {
+  const result = await withFetch(
+    () => jsonResponse(500, { message: 'boom' }),
+    () => readFlyAppPlatformConfig('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, false);
+  assert.equal(result.reason, 'unreadable');
+});
+
+test('an app with no Machine is reported as no-machine, not as an empty configuration', async () => {
+  const result = await withFetch(
+    () => jsonResponse(200, []),
+    () => readFlyAppPlatformConfig('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, false);
+  assert.equal(result.reason, 'no-machine');
+});
+
+test('machines that disagree on the environment id are reported as a conflict', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, [
+        { id: 'machine-1', config: { env: { PLATFORM_ENVIRONMENT_ID: 'production' } } },
+        { id: 'machine-2', config: { env: { PLATFORM_ENVIRONMENT_ID: 'staging' } } },
+      ]),
+    () => readFlyAppPlatformConfig('sindustries-platform-production', 'token-abc'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.conflictingKeys, ['PLATFORM_ENVIRONMENT_ID']);
+  // The gate must not pick a winner between two generations.
+  assert.equal(result.environmentId, null);
 });
