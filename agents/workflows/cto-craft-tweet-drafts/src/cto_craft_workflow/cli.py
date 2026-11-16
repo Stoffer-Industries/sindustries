@@ -32,9 +32,13 @@ import psycopg
 
 from cto_craft_workflow.angle_model import (
     FakeAngleModel,
+    FakeTweetWriter,
     OpenClawInvocationConfig,
     OpenClawStructuredAngleModel,
+    OpenClawWriterConfig,
+    OpenClawTweetWriter,
     StructuredAngleModel,
+    TweetWriter,
     load_prompts,
 )
 from cto_craft_workflow.content_scheduler import ImportClient
@@ -117,12 +121,25 @@ def _print_failure_envelope(*, started_at: str, code: str) -> int:
 
 
 def _build_real_model(settings: Settings) -> StructuredAngleModel:
-    """Build the production angle model."""
+    """Build the production filter model (relevance/worldview/type only)."""
 
     return OpenClawStructuredAngleModel(
         config=OpenClawInvocationConfig(
             model=settings.openclaw_model,
             max_attempts=settings.openclaw_max_attempts,
+        )
+    )
+
+
+def _build_real_writer(settings: Settings) -> TweetWriter:
+    """Build the production writer model (final tweet copy per skill)."""
+
+    return OpenClawTweetWriter(
+        config=OpenClawWriterConfig(
+            model=settings.writer_model,
+            fallback_model=settings.writer_fallback_model,
+            thinking_level=settings.writer_thinking_level,
+            max_attempts=settings.writer_max_attempts,
         )
     )
 
@@ -159,6 +176,7 @@ def _build_graph(
     settings: Settings,
     import_fn,
     model: StructuredAngleModel | None = None,
+    writer: TweetWriter | None = None,
 ) -> Any:
     """Wire the graph with the configured dependencies."""
 
@@ -174,6 +192,8 @@ def _build_graph(
             max_selected_angles=settings.max_selected_angles,
             model_timeout_seconds=settings.model_timeout_seconds,
             archive_url=settings.tmw_archive_url,
+            writer=writer or _build_real_writer(settings),
+            writer_timeout_seconds=settings.model_timeout_seconds,
             import_fn=import_fn,
         )
     )
@@ -208,6 +228,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
         "fetchTimeoutSeconds": settings.fetch_timeout_seconds,
         "openclawModel": settings.openclaw_model,
         "openclawMaxAttempts": settings.openclaw_max_attempts,
+        "writerModel": settings.writer_model,
+        "writerFallbackModel": settings.writer_fallback_model,
+        "writerThinkingLevel": settings.writer_thinking_level,
+        "writerMaxAttempts": settings.writer_max_attempts,
     }
     sys.stdout.write(json.dumps(summary, separators=(",", ":")) + "\n")
     return 0
@@ -227,14 +251,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         from cto_craft_workflow.angle_model import AngleOutput
 
         model: StructuredAngleModel = FakeAngleModel(fixtures=[
-            AngleOutput(canonical_url="https://example.com/strong-1", angle="Naming the cost of slow iteration", tweet_body="Slow iteration is paid for by the team closest to the user.", evidence_excerpt="The cost is paid by the wrong group.", resonance_score=0.84, evidence_strength=0.78, worldview_axes=["anti_rent_hours"]),
-            AngleOutput(canonical_url="https://example.com/strong-2", angle="Boundaries decide ownership", tweet_body="Information architecture decides who owns the failure.", evidence_excerpt="Boundary decisions are made by the org chart.", resonance_score=0.81, evidence_strength=0.74, worldview_axes=["builder_architect"]),
-            AngleOutput(canonical_url="https://example.com/strong-3", angle="Hire for the receiver", tweet_body="Most communication advice skips the receiving role.", evidence_excerpt="Clarity of the receiving role predicts success.", resonance_score=0.72, evidence_strength=0.71, worldview_axes=["anti_fluff"]),
+            AngleOutput(canonical_url="https://example.com/strong-1", angle="Naming the cost of slow iteration", suggested_tweet_type="personal_philosophy", evidence_excerpt="The cost is paid by the wrong group.", resonance_score=0.84, evidence_strength=0.78, worldview_axes=["anti_rent_hours"]),
+            AngleOutput(canonical_url="https://example.com/strong-2", angle="Boundaries decide ownership", suggested_tweet_type="short_tip", evidence_excerpt="Boundary decisions are made by the org chart.", resonance_score=0.81, evidence_strength=0.74, worldview_axes=["builder_architect"]),
+            AngleOutput(canonical_url="https://example.com/strong-3", angle="Hire for the receiver", suggested_tweet_type="short_tip", evidence_excerpt="Clarity of the receiving role predicts success.", resonance_score=0.72, evidence_strength=0.71, worldview_axes=["anti_fluff"]),
         ])
+        writer: TweetWriter = FakeTweetWriter()
         graph = _build_graph(
             settings=settings,
             import_fn=lambda items: {"createdCount": len(items), "skippedDuplicateCount": 0, "createdIds": [], "sourceRefs": [item["sourceRef"] for item in items]},
             model=model,
+            writer=writer,
         )
         final = graph.invoke(initial, config={"configurable": {"thread_id": thread_id}})
     else:
@@ -258,6 +284,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                                     max_selected_angles=settings.max_selected_angles,
                                     model_timeout_seconds=settings.model_timeout_seconds,
                                     archive_url=settings.tmw_archive_url,
+                                    writer=_build_real_writer(settings),
+                                    writer_timeout_seconds=settings.model_timeout_seconds,
                                     import_fn=import_fn,
                                 ),
                                 checkpointer=checkpointer,

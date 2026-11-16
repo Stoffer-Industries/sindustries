@@ -6,6 +6,31 @@ documented worldview, and emits 3–5 Content Scheduler drafts (`source:
 cto_craft`, `status: draft`) per run. Runs with no new content produce no
 output and no notification.
 
+### Who writes these: two models, two jobs (2026-11-17)
+
+The pipeline splits scoring and writing across two separate raw model
+calls — no agent, no persona, no Tasks API handoff:
+
+1. **Filter** (`minimax-portal/MiniMax-M3` by default, `angle_model.py`'s
+   `OpenClawStructuredAngleModel`): scores an article's relevance against
+   `prompts/tom-worldview.md` and classifies it into one of 3 tweet types
+   (`short_tip`, `personal_philosophy`, `personality_post`). It never
+   writes final tweet copy.
+2. **Writer** (`openai/gpt-5.6-luna` by default, falling back to the
+   filter model on failure — `OpenClawTweetWriter`): takes the filter's
+   classification, loads the raw text of the matching skill file under
+   `agents/skills/content/tweet-{short-tip,personal-philosophy,
+   personality-post}/SKILL.md`, and passes that text **verbatim** into
+   its own raw model call as the prompt — no skill-loading runtime, no
+   agent session. The skill text alone decides voice, structure, and
+   whether the source URL earns a place in the tweet; this pipeline does
+   not enforce any link-inclusion rule of its own.
+
+Both model choices and the writer's fallback are env-configurable (see
+`CTO_CRAFT_OPENCLAW_MODEL` / `CTO_CRAFT_WRITER_MODEL` below) because model
+availability on the gateway fluctuates — see task `2e724316` for the
+probe results that drove the GPT Luna default.
+
 This is the Sindustries repo's first production-shaped LangGraph proof of
 concept. It exists to evaluate LangGraph's graph control flow, parallel
 fan-out, checkpoint persistence, retry behaviour, conditional no-op path,
@@ -63,8 +88,12 @@ returns `NO_REPLY`.
 | `CTO_CRAFT_FETCH_TIMEOUT_SECONDS` | Optional; default 15 |
 | `CTO_CRAFT_MODEL_TIMEOUT_SECONDS` | Optional; default 30 |
 | `CTO_CRAFT_MIN_RESONANCE_SCORE` | Optional; default 0.55 |
-| `CTO_CRAFT_OPENCLAW_MODEL` | Optional; default `minimax-portal/MiniMax-M3` |
+| `CTO_CRAFT_OPENCLAW_MODEL` | Optional; filter model, default `minimax-portal/MiniMax-M3` |
 | `CTO_CRAFT_OPENCLAW_MAX_ATTEMPTS` | Optional; default 2, max 3 |
+| `CTO_CRAFT_WRITER_MODEL` | Optional; writer model, default `openai/gpt-5.6-luna` |
+| `CTO_CRAFT_WRITER_FALLBACK_MODEL` | Optional; default `minimax-portal/MiniMax-M3` (used if the writer model fails after retries) |
+| `CTO_CRAFT_WRITER_THINKING_LEVEL` | Optional; default `low` (`gpt-5.6-luna` has no `off` level) |
+| `CTO_CRAFT_WRITER_MAX_ATTEMPTS` | Optional; default 2, max 3 |
 
 ## Tests
 
