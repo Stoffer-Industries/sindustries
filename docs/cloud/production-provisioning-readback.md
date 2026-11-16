@@ -180,3 +180,46 @@ gate is red — it is a true statement that the limit read-back does not
 exist yet, not a defect in the exposure.
 
 **Read-back artifact:** none — the step has not been performed.
+
+---
+
+## 7. Recording the read-backs in the artifact
+
+The read-backs above are this file's content. The **checker** does not
+read this file: it reads the `operatorEvidence` section of the captured
+artifact, and it compares a recorded slot against the production
+surfaces that slot must cover. Until that section carries the read-backs,
+every obligation is still reported as `operator-required` — which is why
+the live capture above shows "the artifact records no operator evidence".
+
+The repository owns the shape of that record, so nobody has to guess it:
+
+```bash
+# 1. print the blank record, with every slot's surfaces pre-filled
+node infra/cloud/scripts/print-operator-evidence-template.mjs --out operator-evidence.json
+
+# 2. fill in each slot: readBackAt (ISO-8601), scope, evidenceRef
+#    (a POINTER to the read-back, never its value) and recorded: true.
+#    The targets are already correct — do not edit them.
+
+# 3. merge the record into the artifact
+node infra/cloud/scripts/capture-production-provisioning-state.mjs \
+  --operator-evidence operator-evidence.json --out production-provisioning-state.json
+
+# 4. decide the gates
+node tests/cloud/scripts/check-production-provisioning-state.mjs production-provisioning-state.json
+```
+
+Where each read-back lives, and what to record:
+
+| Slot | Read-back | `evidenceRef` |
+| --- | --- | --- |
+| `neonSeparationDenialProof` | §1 | `docs/cloud/production-provisioning-readback.md` |
+| `productionProbeInterval` | §2 | `docs/cloud/production-provisioning-readback.md` |
+| `productionApiHealthResponses` | §3 | `docs/cloud/production-provisioning-readback.md` |
+| `dnsResolutionAndTlsReadback` | §4 | `docs/cloud/production-provisioning-readback.md` |
+| `flySpendLimit` | §6 — **not performed** | leave `recorded: false` |
+
+The spend-limit slot stays unrecorded until Tom's billing decision
+produces an actual limit read-back (see §6). Recording it now would be
+saying something that is not true.
