@@ -26,6 +26,10 @@ DEFAULT_MODEL_TIMEOUT_SECONDS = 30.0
 DEFAULT_MIN_RESONANCE_SCORE = 0.55
 DEFAULT_OPENCLAW_MODEL = "minimax-portal/MiniMax-M3"
 DEFAULT_OPENCLAW_MAX_ATTEMPTS = 2
+DEFAULT_WRITER_MODEL = "openai/gpt-5.6-luna"
+DEFAULT_WRITER_FALLBACK_MODEL = DEFAULT_OPENCLAW_MODEL
+DEFAULT_WRITER_THINKING_LEVEL = "low"
+DEFAULT_WRITER_MAX_ATTEMPTS = 2
 DEFAULT_MAX_ISSUE_BYTES = 1 * 1024 * 1024
 DEFAULT_MAX_ARTICLE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_REDIRECTS = 5
@@ -48,6 +52,10 @@ class Settings:
     min_resonance_score: float
     openclaw_model: str
     openclaw_max_attempts: int
+    writer_model: str
+    writer_fallback_model: str
+    writer_thinking_level: str
+    writer_max_attempts: int
     max_issue_bytes: int
     max_article_bytes: int
     max_redirects: int
@@ -186,6 +194,18 @@ def load_settings(*, require_secrets: bool = True) -> Settings:
         openclaw_max_attempts=_optional_attempts(
             "CTO_CRAFT_OPENCLAW_MAX_ATTEMPTS", DEFAULT_OPENCLAW_MAX_ATTEMPTS
         ),
+        writer_model=_optional_model(
+            "CTO_CRAFT_WRITER_MODEL", DEFAULT_WRITER_MODEL
+        ),
+        writer_fallback_model=_optional_model(
+            "CTO_CRAFT_WRITER_FALLBACK_MODEL", DEFAULT_WRITER_FALLBACK_MODEL
+        ),
+        writer_thinking_level=_optional_env(
+            "CTO_CRAFT_WRITER_THINKING_LEVEL", DEFAULT_WRITER_THINKING_LEVEL
+        ),
+        writer_max_attempts=_optional_attempts(
+            "CTO_CRAFT_WRITER_MAX_ATTEMPTS", DEFAULT_WRITER_MAX_ATTEMPTS
+        ),
         max_issue_bytes=_optional_int(
             "CTO_CRAFT_MAX_ISSUE_BYTES", DEFAULT_MAX_ISSUE_BYTES
         ),
@@ -220,6 +240,10 @@ __all__ = [
     "DEFAULT_MIN_RESONANCE_SCORE",
     "DEFAULT_OPENCLAW_MODEL",
     "DEFAULT_OPENCLAW_MAX_ATTEMPTS",
+    "DEFAULT_WRITER_MODEL",
+    "DEFAULT_WRITER_FALLBACK_MODEL",
+    "DEFAULT_WRITER_THINKING_LEVEL",
+    "DEFAULT_WRITER_MAX_ATTEMPTS",
     "DEFAULT_MAX_ISSUE_BYTES",
     "DEFAULT_MAX_ARTICLE_BYTES",
     "DEFAULT_MAX_REDIRECTS",

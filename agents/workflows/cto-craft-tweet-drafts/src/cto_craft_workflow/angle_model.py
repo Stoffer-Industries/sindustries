@@ -45,6 +45,19 @@ DEFAULT_OPENCLAW_MODEL = "minimax-portal/MiniMax-M3"
 DEFAULT_OPENCLAW_MAX_ATTEMPTS = 2
 MAX_OPENCLAW_MAX_ATTEMPTS = 3
 
+# Tweet types the filter model classifies candidates into. Each maps to a
+# skill directory under ``agents/skills/content/`` (PR #1007) whose raw
+# ``SKILL.md`` text is the writer model's sole style guidance — including
+# that skill's own per-article link-inclusion judgment. The pipeline does
+# not enforce a URL policy of its own; see ``_SKILL_DIR_BY_TWEET_TYPE``.
+TWEET_TYPES = ("short_tip", "personal_philosophy", "personality_post")
+
+_SKILL_DIR_BY_TWEET_TYPE = {
+    "short_tip": "tweet-short-tip",
+    "personal_philosophy": "tweet-personal-philosophy",
+    "personality_post": "tweet-personality-post",
+}
+
 
 # Locating the prompt files relative to the package avoids any
 # CWD-dependent lookup. The package layout is:
@@ -54,16 +67,23 @@ MAX_OPENCLAW_MAX_ATTEMPTS = 3
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _PROMPTS_DIR = _PACKAGE_DIR.parent.parent / "prompts"
 _REPO_ROOT = _PACKAGE_DIR.parents[4]
+_SKILLS_DIR = _REPO_ROOT / "agents" / "skills" / "content"
 
 
 class AngleOutput(BaseModel):
-    """Strict schema for one angle emitted by the model."""
+    """Strict schema for one angle emitted by the filter model.
+
+    The filter's job is relevance/worldview scoring and tweet-type
+    classification only. It never writes final tweet copy — that is the
+    writer model's job (see :class:`TweetWriterOutput` below), driven by
+    the per-type skill named in ``suggested_tweet_type``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     canonical_url: str = Field(min_length=1)
     angle: str = Field(min_length=1, max_length=200)
-    tweet_body: str = Field(min_length=1, max_length=280)
+    suggested_tweet_type: str = Field(min_length=1)
     evidence_excerpt: str = Field(min_length=1, max_length=500)
     resonance_score: float = Field(ge=0.0, le=1.0)
     evidence_strength: float = Field(ge=0.0, le=1.0)
@@ -293,7 +313,7 @@ def _build_openclaw_message(prompt: AnglePrompt) -> str:
     schema = {
         "canonical_url": "https://example.com/the-article",
         "angle": "short one-sentence description of the claim",
-        "tweet_body": "tweet body, 1-280 chars, no links",
+        "suggested_tweet_type": "one of: short_tip, personal_philosophy, personality_post",
         "evidence_excerpt": "1-2 sentence excerpt from the article",
         "resonance_score": 0.0,
         "evidence_strength": 0.0,
@@ -414,7 +434,20 @@ __all__ = [
     "DEFAULT_OPENCLAW_MODEL",
     "DEFAULT_OPENCLAW_MAX_ATTEMPTS",
     "MAX_OPENCLAW_MAX_ATTEMPTS",
+    "TWEET_TYPES",
     "load_prompts",
+    "load_skill_text",
+    "TweetWriterOutput",
+    "WriterPrompt",
+    "TweetWriter",
+    "FakeTweetWriter",
+    "OpenClawWriterConfig",
+    "OpenClawTweetWriter",
+    "DEFAULT_WRITER_COMMAND",
+    "DEFAULT_WRITER_MODEL",
+    "DEFAULT_WRITER_FALLBACK_MODEL",
+    "DEFAULT_WRITER_THINKING_LEVEL",
+    "DEFAULT_WRITER_MAX_ATTEMPTS",
 ]
 
 
@@ -430,4 +463,221 @@ def _safe_load_angle_output(raw: str) -> AngleOutput | None:
     try:
         return AngleOutput.model_validate(data)
     except ValidationError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Writer model — turns one filtered angle into final tweet copy.
+#
+# Per Tom (2026-11-17): the matching skill's SKILL.md raw text is passed
+# directly into the writer's raw model call as literal prompt text — the
+# same mechanism ``angle-evaluator.md`` uses for the filter call above. No
+# skill-loading runtime, no agent session. The skill owns voice, structure,
+# AND the per-article judgment on whether to include the source URL; this
+# module does not second-guess that judgment or enforce a link rule of its
+# own.
+
+DEFAULT_WRITER_COMMAND = "openclaw"
+DEFAULT_WRITER_MODEL = "openai/gpt-5.6-luna"
+# MiniMax is the only model confirmed always-reachable via the gateway
+# (OpenAI/Anthropic models intermittently fail on auth/rate-limit/billing —
+# see task 2e724316). Falling back to it keeps a week's batch from being
+# dropped entirely when the better writer model is unavailable.
+DEFAULT_WRITER_FALLBACK_MODEL = DEFAULT_OPENCLAW_MODEL
+# gpt-5.6-luna has no "off" thinking level; "low" is the cheapest supported.
+DEFAULT_WRITER_THINKING_LEVEL = "low"
+DEFAULT_WRITER_MAX_ATTEMPTS = 2
+
+
+class TweetWriterOutput(BaseModel):
+    """Strict schema for the writer model's final tweet copy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tweet_body: str = Field(min_length=1, max_length=280)
+
+
+@dataclass(frozen=True)
+class WriterPrompt:
+    """Everything the writer model needs for one angle."""
+
+    skill_text: str
+    angle: str
+    evidence_excerpt: str
+    canonical_url: str
+
+
+def load_skill_text(tweet_type: str) -> str:
+    """Read the raw ``SKILL.md`` text for the given tweet type.
+
+    Raises ``RuntimeError`` for an unknown type or a missing skill file —
+    both are configuration errors, not per-article failures, so they are
+    not swallowed the way a single bad model response is.
+    """
+
+    skill_dir = _SKILL_DIR_BY_TWEET_TYPE.get(tweet_type)
+    if skill_dir is None:
+        raise RuntimeError(
+            f"unknown tweet type {tweet_type!r}; expected one of {TWEET_TYPES}"
+        )
+    skill_path = _SKILLS_DIR / skill_dir / "SKILL.md"
+    if not skill_path.exists():
+        raise RuntimeError(f"missing skill file: {skill_path}")
+    return skill_path.read_text(encoding="utf-8")
+
+
+def _build_writer_message(prompt: WriterPrompt) -> str:
+    schema = {"tweet_body": "the finished tweet, 1-280 raw characters, no markdown"}
+    return (
+        "You are writing one tweet for the CTO Craft weekly batch.\n"
+        "Follow the skill below exactly — it defines voice, structure, and\n"
+        "whether this tweet should include the source URL. Do not apply any\n"
+        "link rule other than the one stated in the skill.\n"
+        "Return exactly one JSON object matching the schema below and nothing\n"
+        "else. Do not wrap it in markdown fences. Do not call tools.\n\n"
+        f"Skill:\n{prompt.skill_text}\n\n"
+        f"Angle: {prompt.angle}\n"
+        f"Evidence excerpt: {prompt.evidence_excerpt}\n"
+        f"Source URL: {prompt.canonical_url}\n\n"
+        f"Required JSON shape:\n{json.dumps(schema, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _safe_load_writer_output(raw: str) -> TweetWriterOutput | None:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return TweetWriterOutput.model_validate(data)
+    except ValidationError:
+        return None
+
+
+@runtime_checkable
+class TweetWriter(Protocol):
+    """Protocol the graph uses to write final tweet copy for one angle."""
+
+    def write_one(
+        self,
+        *,
+        prompt: WriterPrompt,
+        timeout_seconds: float,
+    ) -> str | None:
+        """Return the finished tweet body, or ``None`` on unrecoverable failure."""
+
+
+class FakeTweetWriter:
+    """Deterministic writer for tests: appends a marker to the angle text."""
+
+    def __init__(self, by_url: dict[str, str] | None = None) -> None:
+        self._by_url = by_url or {}
+
+    def write_one(self, *, prompt: WriterPrompt, timeout_seconds: float) -> str | None:
+        if prompt.canonical_url in self._by_url:
+            return self._by_url[prompt.canonical_url]
+        return f"{prompt.angle} ({prompt.canonical_url})"[:280]
+
+
+@dataclass(frozen=True)
+class OpenClawWriterConfig:
+    """Runtime configuration for the production writer adapter."""
+
+    model: str = DEFAULT_WRITER_MODEL
+    fallback_model: str = DEFAULT_WRITER_FALLBACK_MODEL
+    thinking_level: str = DEFAULT_WRITER_THINKING_LEVEL
+    openclaw_command: str = DEFAULT_WRITER_COMMAND
+    max_attempts: int = DEFAULT_WRITER_MAX_ATTEMPTS
+    cwd: str = str(_REPO_ROOT)
+
+
+class OpenClawTweetWriter:
+    """Production adapter: raw model call with the skill text as the prompt.
+
+    Tries ``model`` for ``max_attempts`` attempts; if every attempt fails
+    (timeout, process error, or invalid structured output), retries once
+    against ``fallback_model`` before giving up. The fallback keeps a
+    model outage on the primary writer from dropping the week's batch —
+    see AC3 on task 2e724316.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: OpenClawWriterConfig,
+        runner: Runner | None = None,
+    ) -> None:
+        attempts = max(1, min(config.max_attempts, MAX_OPENCLAW_MAX_ATTEMPTS))
+        self._config = OpenClawWriterConfig(
+            model=config.model.strip() or DEFAULT_WRITER_MODEL,
+            fallback_model=config.fallback_model.strip() or DEFAULT_WRITER_FALLBACK_MODEL,
+            thinking_level=config.thinking_level.strip() or DEFAULT_WRITER_THINKING_LEVEL,
+            openclaw_command=config.openclaw_command.strip() or DEFAULT_WRITER_COMMAND,
+            max_attempts=attempts,
+            cwd=config.cwd,
+        )
+        self._runner = runner or _run_openclaw
+
+    def write_one(self, *, prompt: WriterPrompt, timeout_seconds: float) -> str | None:
+        for model in (self._config.model, self._config.fallback_model):
+            result = self._try_model(model=model, prompt=prompt, timeout_seconds=timeout_seconds)
+            if result is not None:
+                return result
+            log.warning(
+                "writer model exhausted attempts, trying next model",
+                extra={"canonicalUrl": prompt.canonical_url, "model": model},
+            )
+        return None
+
+    def _try_model(self, *, model: str, prompt: WriterPrompt, timeout_seconds: float) -> str | None:
+        message = _build_writer_message(prompt)
+        args = [
+            self._config.openclaw_command,
+            "infer", "model", "run",
+            "--gateway", "--json",
+            "--thinking", self._config.thinking_level,
+            "--model", model,
+            "--prompt", "__PROMPT__",
+        ]
+        for attempt in range(1, self._config.max_attempts + 1):
+            try:
+                completed = self._runner(args, message, timeout_seconds, self._config.cwd)
+            except subprocess.TimeoutExpired:
+                log.warning(
+                    "writer model timed out",
+                    extra={"canonicalUrl": prompt.canonical_url, "model": model, "attempt": attempt},
+                )
+                if attempt < self._config.max_attempts:
+                    continue
+                return None
+            except FileNotFoundError:
+                log.error("writer model command missing", extra={"command": self._config.openclaw_command})
+                return None
+            except subprocess.CalledProcessError as exc:
+                detail = _process_error_detail(exc)
+                log.warning(
+                    "writer model invocation failed",
+                    extra={"canonicalUrl": prompt.canonical_url, "model": model, "attempt": attempt, "detail": detail[:240]},
+                )
+                if attempt < self._config.max_attempts and _is_retryable_process_error(detail):
+                    continue
+                return None
+
+            raw = _extract_model_text((completed.stdout or "").strip())
+            if not raw:
+                if attempt < self._config.max_attempts:
+                    continue
+                return None
+
+            parsed = _safe_load_writer_output(raw)
+            if parsed is not None:
+                log.info("writer model succeeded", extra={"canonicalUrl": prompt.canonical_url, "model": model, "attempt": attempt})
+                return parsed.tweet_body
+
+            if attempt < self._config.max_attempts:
+                continue
+            return None
+
         return None

@@ -4,7 +4,7 @@ import httpx
 
 from langgraph.checkpoint.memory import InMemorySaver
 
-from cto_craft_workflow.angle_model import AngleOutput, FakeAngleModel, load_prompts
+from cto_craft_workflow.angle_model import AngleOutput, FakeAngleModel, FakeTweetWriter, load_prompts
 from cto_craft_workflow.graph import GraphDeps, build_graph
 from cto_craft_workflow.safe_fetch import SafeFetcher
 from cto_craft_workflow.state import make_initial_state
@@ -21,7 +21,7 @@ def _fixtures() -> list[AngleOutput]:
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Concrete cost framing",
-            tweet_body="Slow iteration is paid for by the team closest to the user. Measure who is exposed to the delay.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="When teams track effort without measuring exposure to delay, the cost is paid by the wrong group.",
             resonance_score=0.84,
             evidence_strength=0.78,
@@ -30,7 +30,7 @@ def _fixtures() -> list[AngleOutput]:
         AngleOutput(
             canonical_url=BOUNDARY_URL,
             angle="Boundaries decide ownership",
-            tweet_body="Information architecture, not process, decides who owns the failure.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Boundary decisions are made by the org chart, not by the process doc.",
             resonance_score=0.81,
             evidence_strength=0.74,
@@ -39,7 +39,7 @@ def _fixtures() -> list[AngleOutput]:
         AngleOutput(
             canonical_url=GENERIC_URL,
             angle="Hire for the receiver",
-            tweet_body="Most 'communicate better' advice skips the receiver. Hire for the receiving role.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="The strongest predictor of team success is the clarity of the receiving role.",
             resonance_score=0.72,
             evidence_strength=0.71,
@@ -71,6 +71,8 @@ def _build_graph(*, archive_html: bytes, issue_html: bytes, article_routes: dict
         max_selected_angles=5,
         model_timeout_seconds=5.0,
         archive_url=ARCHIVE_URL,
+        writer=FakeTweetWriter(),
+        writer_timeout_seconds=5.0,
         import_fn=import_fn,
     )
     return build_graph(deps, checkpointer=checkpointer, interrupt_before=interrupt_before)

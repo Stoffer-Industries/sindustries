@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 
-from cto_craft_workflow.angle_model import AngleOutput, FakeAngleModel
+from cto_craft_workflow.angle_model import AngleOutput, FakeAngleModel, FakeTweetWriter
 from cto_craft_workflow.graph import GraphDeps, build_graph, import_drafts
 from cto_craft_workflow.safe_fetch import SafeFetcher
 from cto_craft_workflow.state import make_initial_state
@@ -111,6 +111,8 @@ def _build_graph(
         max_selected_angles=5,
         model_timeout_seconds=5.0,
         archive_url=ARCHIVE_URL,
+        writer=FakeTweetWriter(),
+        writer_timeout_seconds=5.0,
         import_fn=import_fn,
     )
     return build_graph(deps)
@@ -135,7 +137,7 @@ def test_happy_path_creates_three_drafts(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Concrete cost framing",
-            tweet_body="Slow iteration is paid for by the team closest to the user. Measure who is exposed to the delay.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="When teams track effort without measuring exposure to delay, the cost is paid by the wrong group.",
             resonance_score=0.84,
             evidence_strength=0.78,
@@ -144,7 +146,7 @@ def test_happy_path_creates_three_drafts(
         AngleOutput(
             canonical_url=BOUNDARY_URL,
             angle="Org charts are the real source of boundary decisions",
-            tweet_body="Information architecture, not process, decides who owns the failure. Cross-team incidents pull the right answer out of the org chart every time.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Boundary decisions are made by the org chart, not by the process doc.",
             resonance_score=0.81,
             evidence_strength=0.74,
@@ -153,7 +155,7 @@ def test_happy_path_creates_three_drafts(
         AngleOutput(
             canonical_url=GENERIC_URL,
             angle="Hire for the receiver, not the broadcaster",
-            tweet_body="Most 'communicate better' advice skips the part where the listener has to act on it. Hire for the receiving role.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="The strongest predictor of team success is the clarity of the receiving role.",
             resonance_score=0.72,
             evidence_strength=0.71,
@@ -256,7 +258,7 @@ def test_fewer_than_three_strong_candidates_is_noop(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Concrete cost framing",
-            tweet_body="Slow iteration is paid for by the team closest to the user.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="When teams track effort without measuring exposure to delay, the cost is paid by the wrong group.",
             resonance_score=0.84,
             evidence_strength=0.78,
@@ -295,7 +297,7 @@ def test_low_resonance_score_is_noop(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Weak",
-            tweet_body="Some weak angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="evidence",
             resonance_score=0.30,
             evidence_strength=0.20,
@@ -304,7 +306,7 @@ def test_low_resonance_score_is_noop(
         AngleOutput(
             canonical_url=BOUNDARY_URL,
             angle="Weak",
-            tweet_body="Another weak angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="evidence",
             resonance_score=0.40,
             evidence_strength=0.30,
@@ -313,7 +315,7 @@ def test_low_resonance_score_is_noop(
         AngleOutput(
             canonical_url=GENERIC_URL,
             angle="Weak",
-            tweet_body="A third weak angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="evidence",
             resonance_score=0.45,
             evidence_strength=0.35,
@@ -402,7 +404,7 @@ def test_article_fetch_502_is_skipped_and_remaining_articles_continue(
         AngleOutput(
             canonical_url=url,
             angle=f"Angle for {url}",
-            tweet_body=f"Useful point from {url}.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Evidence",
             resonance_score=0.80,
             evidence_strength=0.70,
@@ -450,7 +452,7 @@ def test_selection_dedupes_by_canonical_url(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="First",
-            tweet_body="First angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="e1",
             resonance_score=0.90,
             evidence_strength=0.80,
@@ -459,7 +461,7 @@ def test_selection_dedupes_by_canonical_url(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Duplicate",
-            tweet_body="Should not be picked.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="e2",
             resonance_score=0.85,
             evidence_strength=0.75,
@@ -468,7 +470,7 @@ def test_selection_dedupes_by_canonical_url(
         AngleOutput(
             canonical_url=BOUNDARY_URL,
             angle="Second",
-            tweet_body="Second angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="e3",
             resonance_score=0.80,
             evidence_strength=0.70,
@@ -477,7 +479,7 @@ def test_selection_dedupes_by_canonical_url(
         AngleOutput(
             canonical_url=GENERIC_URL,
             angle="Third",
-            tweet_body="Third angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="e4",
             resonance_score=0.70,
             evidence_strength=0.65,
