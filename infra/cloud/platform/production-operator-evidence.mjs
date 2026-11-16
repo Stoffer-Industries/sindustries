@@ -227,6 +227,39 @@ export function validateOperatorEvidence(value) {
 }
 
 /**
+ * A blank record for the operator to fill in.
+ *
+ * The template is the SAME contract the checker compares against, so the
+ * operator cannot fill it in wrongly by guessing: every slot carries the
+ * production surfaces it must cover, pre-filled from the repository's own
+ * facts, and the operator only has to say WHEN the read-back happened,
+ * WHAT it covered and WHERE the read-back lives.
+ *
+ * Every slot starts at `recorded: false`, which is a statement — "not yet
+ * read back" — rather than a defect, so the template validates. The
+ * capture refuses it as a record (a file that records nothing is not a
+ * read-back), and that refusal is the point: the template is a form, not
+ * an attestation.
+ *
+ * @param {Record<string, string[]>} expectedTargets the surfaces per coverage
+ * @returns {Record<string, object>}
+ */
+export function operatorEvidenceTemplate(expectedTargets) {
+  const template = {};
+  for (const entry of OPERATOR_EVIDENCE_SLOTS) {
+    const targets = expectedTargets?.[entry.coverage];
+    template[entry.slot] = {
+      recorded: false,
+      readBackAt: null,
+      scope: null,
+      evidenceRef: null,
+      targets: Array.isArray(targets) ? [...targets] : [],
+    };
+  }
+  return template;
+}
+
+/**
  * Has the operator recorded this slot?
  *
  * @param {unknown} evidence

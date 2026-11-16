@@ -59,6 +59,12 @@ import {
   operatorEvidenceSummary,
   validateOperatorEvidence,
 } from '../../../infra/cloud/platform/production-operator-evidence.mjs';
+import {
+  PRODUCTION_NEON_BRANCH,
+  loadHostnameMatrix,
+  loadOperatorTargetExpectations,
+  productionDnsSurfaces,
+} from '../../../infra/cloud/platform/production-operator-targets.mjs';
 
 const DEFAULTS = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -82,7 +88,6 @@ const NEON_DEFAULT_ROLES = new Set([
 ]);
 
 /** The name of the production Neon branch. */
-const PRODUCTION_NEON_BRANCH = 'production';
 
 /**
  * Keys whose VALUE would carry a credential if it were ever populated.
@@ -1724,22 +1729,8 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
   // the DNS expectations are read from it rather than restated here: a
   // checker that carries its own copy of the expected targets can agree with
   // a drifted matrix.
-  const matrix = JSON.parse(
-    readFileSync(join(repoRoot, 'infra/cloud/hostname-matrix.json'), 'utf8'),
-  );
-  const dnsSurfaces = (matrix.surfaces ?? [])
-    .filter(
-      (surface) =>
-        typeof surface?.cnameTargets?.production === 'string' &&
-        surface.cnameTargets.production.endsWith('.fly.dev'),
-    )
-    .map((surface) => ({
-      id: surface.id,
-      productionHostname: surface.production ?? null,
-      productionTarget: surface.cnameTargets.production,
-      stagingHostname: surface.staging ?? null,
-      stagingTarget: surface.cnameTargets.staging ?? null,
-    }));
+  const matrix = loadHostnameMatrix(repoRoot);
+  const dnsSurfaces = productionDnsSurfaces(matrix);
 
   // The production probe cadence is declared by the production health-probe
   // overlay — the file Fly actually deploys — so the expected values are
@@ -1839,20 +1830,14 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
   // production hostnames — so a read-back cannot be recorded against a
   // surface production does not use, and a surface production DOES use
   // cannot be left out of the record.
-  const productionApiHostnames = [
-    ...new Set(
-      Object.values(environment.apiBaseUrls ?? {})
-        .map((url) => hostOfTargetValue(url))
-        .filter((host) => typeof host === 'string' && host.length > 0),
-    ),
-  ];
-  const productionHostnames = [
-    ...new Set(
-      dnsSurfaces
-        .map((surface) => surface.productionHostname)
-        .filter((hostname) => typeof hostname === 'string' && hostname.length > 0),
-    ),
-  ];
+  //
+  // The derivation lives in `production-operator-targets.mjs` because the
+  // operator fills in a record against the SAME surfaces this gate
+  // compares against. Deriving them here alone left the operator with no
+  // way to learn what a correct record must name: the answer used to
+  // arrive as "it does not name X" after a re-capture of five provider
+  // APIs.
+  const expectedOperatorTargets = await loadOperatorTargetExpectations(repoRoot);
 
   return {
     platformApp: environment.platformApp,
@@ -1866,23 +1851,7 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     expectedPlatformCorsOrigins,
     expectedPlatformProcessGroups,
     expectedRedisAddon: { ...environment.redisAddon },
-    expectedOperatorTargets: {
-      // AC5 sets the limit on the PRODUCTION APP scope, so the read-back
-      // must name that app.
-      platformAppScope: [environment.platformApp],
-      // The interval must have been observed on the production probe app.
-      healthProbeApp: [environment.healthProbeApp],
-      // The health responses must come from all three production APIs.
-      productionApiHostnames,
-      // The DNS/TLS read-back must cover every production hostname.
-      productionHostnames,
-      // The denial proof must cover the production branch and BOTH the
-      // staging and the dev credential: AC2 names the staging/dev
-      // separation, so one refused credential does not prove it. These
-      // are credential KINDS from the Neon contract, not hostnames or
-      // credential values.
-      neonSeparation: [PRODUCTION_NEON_BRANCH, 'staging', 'dev'],
-    },
+    expectedOperatorTargets,
     dnsExpectations: {
       zoneName: matrix.apexDomain ?? null,
       surfaces: dnsSurfaces,

@@ -1277,6 +1277,19 @@ jobs:
       - name: Run production provisioning capture contract test
         run: node --test tests/cloud/tests/capture-production-provisioning-state.test.mjs
 
+      # Task fb1240c0 (Slice D): the five operator read-backs are recorded
+      # by a person, and the record is compared against the production
+      # surfaces it must cover. The operator had no way to learn those
+      # surface strings — the checker's answer arrived as "it does not
+      # name X" after a re-capture of five provider APIs. The template
+      # prints the record with every slot's surfaces pre-filled from the
+      # manifest and the hostname matrix, so the record and the gate can
+      # no longer disagree about what a correct record looks like. Run by
+      # explicit path so the repository-wide contract-test orphan guard
+      # sees it as executed.
+      - name: Run production operator evidence template contract test
+        run: node --test tests/cloud/tests/production-operator-evidence-template.test.mjs
+
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
 
