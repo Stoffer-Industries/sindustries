@@ -1,11 +1,27 @@
 # GitHub Actions: deploy health-probe to Fly.io staging.
 #
-# Triggered by the central CI workflow when infra/cloud/observability/**
-# or packages/otel-node/** changes land on main. Mirrors the existing
-# deploy-staging-tasks-api.yml workflow pattern:
+# Triggered by the central CI workflow when observability paths change on
+# main: infra/cloud/observability/**, infra/otel-collector/**,
+# infra/docker-compose.observability.yml, scripts/dev/**,
+# packages/otel-node/**, the root package manifests, or this workflow
+# file itself. One of the two live staging deploy surfaces (the other is
+# deploy-staging-platform.yml), and it follows the same staging deploy
+# contract:
 #   - FLY_API_TOKEN referenced as a repo secret, never hardcoded.
 #   - Canary deploy with a /healthz smoke check (the probe exposes its
 #     own health route; that is the http_check target in fly.toml).
+#
+# The health-probe keeps its OWN Fly app (sindustries-health-probe-staging)
+# and is NOT a platform child — the consolidated platform app runs one
+# supervisor process group for tasks-api, budget-api, content-scheduler-api
+# and the auto-post worker. The four per-service staging deploy workflows
+# (deploy-staging-tasks-api.yml, deploy-staging-budget-api.yml,
+# deploy-staging-content-scheduler-api.yml, deploy-staging-auto-post-worker.yml)
+# were retired at the 2026-11-07 staging consolidation: their Fly apps were
+# destroyed and their deploy jobs removed from ci.yml. They are orphaned
+# (workflow_call-only, called by nothing) and stay in the tree only until
+# the cleanup in docs/runbooks/platform-consolidation-rollback.md §5
+# deletes them. Live topology: docs/systems/cloud-platform.md.
 #
 # Stable hostname (task 5cb4a8fe; source of truth:
 # infra/cloud/hostname-matrix.json). The smoke check hits the stable
