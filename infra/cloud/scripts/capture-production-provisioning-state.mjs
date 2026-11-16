@@ -196,9 +196,11 @@ function parseArgs(argv) {
  * an unrecorded one and flips the ordering gate red with no explanation.
  *
  * @param {string} path
+ * @param {{capturedAt?: string}} [options] artifact context for cross-field
+ *   checks; `capturedAt` bounds when a read-back may have happened
  * @returns {{evidence: object|null, problems: string[]}}
  */
-export function loadOperatorEvidence(path) {
+export function loadOperatorEvidence(path, options = {}) {
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -208,7 +210,7 @@ export function loadOperatorEvidence(path) {
       problems: [`cannot read the operator evidence file ${path}: ${error.message}`],
     };
   }
-  const validation = validateOperatorEvidence(parsed);
+  const validation = validateOperatorEvidence(parsed, options);
   if (!validation.ok) {
     return { evidence: null, problems: validation.problems };
   }
@@ -1212,6 +1214,7 @@ async function main(argv) {
     captureCloudflare(dnsScope),
   ]);
 
+  const capturedAt = new Date().toISOString();
   const artifact = {
     // Version 4: the production Neon branch carries the FINGERPRINTS of the
     // hosts that serve it, read from the branch's ENDPOINTS resource, plus
@@ -1245,12 +1248,12 @@ async function main(argv) {
     // Machines-API target read could only return an empty target set.
     schemaVersion: 8,
     environment: 'production',
-    capturedAt: new Date().toISOString(),
+    capturedAt,
     providers: { neon, fly, github, cloudflare },
   };
 
   if (options.operatorEvidence) {
-    const loaded = loadOperatorEvidence(resolve(options.operatorEvidence));
+    const loaded = loadOperatorEvidence(resolve(options.operatorEvidence), { capturedAt });
     if (loaded.problems.length > 0) {
       throw new Error(
         `the operator evidence file ${options.operatorEvidence} is not usable: ${loaded.problems.join('; ')}`,

@@ -207,8 +207,10 @@ credential boundary.
   resolution/TLS read-back — are closed by an OPERATOR READ-BACK recorded
   in the provisioning-state artifact's `operatorEvidence` section
   (`capture-production-provisioning-state.mjs --operator-evidence <file>`).
-  The record carries a boolean, a read-back time, a pointer to the
-  read-back and the production surfaces it covered, never a value. The
+  The record carries a boolean, a read-back time, a required pointer to the
+  read-back and the production surfaces it covered, never a value. A record
+  without an inspectable pointer, or with a read-back stamped after the
+  artifact was captured, is refused. The
   Four are recorded in `production-provisioning-readback.md`; the Fly
   spend-limit slot remains open because Fly exposes no such control. The
   `fly.spend-limit-before-public-exposure`

@@ -123,6 +123,26 @@ const SAFE_SCOPE = /^[A-Za-z0-9 ._:/-]{1,120}$/;
 const SAFE_EVIDENCE_REF = /^[A-Za-z0-9._/-]{1,200}$/;
 
 /**
+ * Is this an inspectable pointer to a read-back?
+ *
+ * The pointer is REQUIRED for a recorded slot: without it, a boolean and a
+ * timestamp prove only that a statement was made, not that anyone can
+ * inspect the read-back behind it. The literal strings "null" and
+ * "undefined" are placeholders, not pointers, so they are refused too.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isSafeEvidenceRef(value) {
+  return (
+    typeof value === 'string' &&
+    value !== 'null' &&
+    value !== 'undefined' &&
+    SAFE_EVIDENCE_REF.test(value)
+  );
+}
+
+/**
  * A covered surface: a hostname, an app name or a credential kind.
  *
  * The targets are identifiers, never values — a hostname and an app name
@@ -153,9 +173,11 @@ function isIsoTimestamp(value) {
  * unrecorded one without saying so.
  *
  * @param {unknown} value
+ * @param {{capturedAt?: string}} [options] artifact context for cross-field
+ *   checks; `capturedAt` bounds when a read-back may have happened
  * @returns {{ok: boolean, present: boolean, problems: string[]}}
  */
-export function validateOperatorEvidence(value) {
+export function validateOperatorEvidence(value, options = {}) {
   if (value === undefined || value === null) {
     return { ok: true, present: false, problems: [] };
   }
@@ -168,6 +190,13 @@ export function validateOperatorEvidence(value) {
   }
 
   const problems = [];
+  const capturedAt = options.capturedAt;
+  const capturedAtIsUsable = capturedAt === undefined || isIsoTimestamp(capturedAt);
+  if (!capturedAtIsUsable) {
+    problems.push(
+      'the artifact capture time is invalid, so a recorded read-back cannot be bounded',
+    );
+  }
   for (const [slot, entry] of Object.entries(value)) {
     if (!OPERATOR_EVIDENCE_SLOT_NAMES.includes(slot)) {
       problems.push(`unknown operator evidence slot "${slot}"`);
@@ -193,13 +222,23 @@ export function validateOperatorEvidence(value) {
       problems.push(
         `the operator evidence slot "${slot}" records a read-back without an ISO-8601 "readBackAt"`,
       );
+    } else if (capturedAtIsUsable && capturedAt !== undefined) {
+      if (Date.parse(entry.readBackAt) > Date.parse(capturedAt)) {
+        problems.push(
+          `the operator evidence slot "${slot}" records a read-back after the artifact was captured`,
+        );
+      }
     }
-    if (entry.scope !== undefined && !SAFE_SCOPE.test(String(entry.scope))) {
+    if (
+      entry.scope !== undefined &&
+      entry.scope !== null &&
+      (typeof entry.scope !== 'string' || !SAFE_SCOPE.test(entry.scope))
+    ) {
       problems.push(`the operator evidence slot "${slot}" carries an unusable "scope"`);
     }
-    if (entry.evidenceRef !== undefined && !SAFE_EVIDENCE_REF.test(String(entry.evidenceRef))) {
+    if (!isSafeEvidenceRef(entry.evidenceRef)) {
       problems.push(
-        `the operator evidence slot "${slot}" carries an unusable "evidenceRef" — it must point at the read-back, not carry it`,
+        `the operator evidence slot "${slot}" must carry an "evidenceRef" pointer to the read-back`,
       );
     }
     if (!Array.isArray(entry.targets)) {

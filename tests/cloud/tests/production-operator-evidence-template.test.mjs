@@ -26,6 +26,8 @@
 //   5. A record that names only some of the surfaces stays open.
 //   6. The template refuses to print when the repository names no surface
 //      for a slot.
+//   7. A recorded slot without an inspectable pointer is refused.
+//   8. A read-back stamped after the artifact capture is refused.
 //
 // Run with: node --test tests/cloud/tests/production-operator-evidence-template.test.mjs
 
@@ -74,7 +76,7 @@ function filledInRecord() {
   const record = operatorEvidenceTemplate(EXPECTED_TARGETS);
   for (const entry of Object.values(record)) {
     entry.recorded = true;
-    entry.readBackAt = '2026-11-16T09:00:00Z';
+    entry.readBackAt = '2026-11-15T23:00:00Z';
     entry.scope = 'production';
     entry.evidenceRef = 'operator-evidence/read-back.txt';
   }
@@ -165,6 +167,62 @@ test('a record filled in from the template closes the five operator obligations'
   for (const row of operatorRows) {
     assert.equal(row.status, 'met', `${row.gate} is closed by the recorded read-back`);
   }
+});
+
+
+
+test('a recorded slot may omit the optional scope', () => {
+  const record = filledInRecord();
+  delete record.flySpendLimit.scope;
+
+  const validation = validateOperatorEvidence(record, {
+    capturedAt: '2026-11-16T10:00:00Z',
+  });
+  assert.equal(validation.ok, true, `scope is optional: ${validation.problems.join('; ')}`);
+});
+
+test('a recorded slot without an inspectable pointer is refused', () => {
+  const record = filledInRecord();
+  delete record.flySpendLimit.evidenceRef;
+
+  const validation = validateOperatorEvidence(record, {
+    capturedAt: '2026-11-16T10:00:00Z',
+  });
+  assert.equal(validation.ok, false, 'a record with no pointer is not an attestation');
+  assert.match(validation.problems.join(' '), /evidenceRef/);
+});
+
+test('a recorded slot with a placeholder pointer is refused', () => {
+  const record = filledInRecord();
+  record.flySpendLimit.evidenceRef = null;
+
+  const validation = validateOperatorEvidence(record, {
+    capturedAt: '2026-11-16T10:00:00Z',
+  });
+  assert.equal(validation.ok, false, 'a null pointer is not an attestation');
+  assert.match(validation.problems.join(' '), /evidenceRef/);
+});
+
+test('a recorded slot with a non-string pointer is refused', () => {
+  const record = filledInRecord();
+  record.flySpendLimit.evidenceRef = 123;
+
+  const validation = validateOperatorEvidence(record, {
+    capturedAt: '2026-11-16T10:00:00Z',
+  });
+  assert.equal(validation.ok, false, 'a non-string pointer is not an attestation');
+  assert.match(validation.problems.join(' '), /evidenceRef/);
+});
+
+test('a read-back stamped after the artifact capture is refused', () => {
+  const record = filledInRecord();
+  record.flySpendLimit.readBackAt = '2026-11-16T10:00:01Z';
+
+  const validation = validateOperatorEvidence(record, {
+    capturedAt: '2026-11-16T10:00:00Z',
+  });
+  assert.equal(validation.ok, false, 'a future read-back cannot be carried by this artifact');
+  assert.match(validation.problems.join(' '), /after the artifact was captured/);
 });
 
 test('a record that names only some of the surfaces stays open', () => {

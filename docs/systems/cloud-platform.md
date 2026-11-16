@@ -237,7 +237,7 @@ decides a `fly.spend-limit-before-public-exposure` gate: while a
 production hostname is published in DNS or the production health-probe app
 is running, an artifact with no recorded spend-limit read-back fails the
 gate. The read-back itself is operator evidence — a boolean, the time it
-was read back and a pointer to the read-back, never a value — recorded in
+was read back and a required pointer to the read-back, never a value — recorded in
 the artifact's `operatorEvidence` section by
 `infra/cloud/scripts/capture-production-provisioning-state.mjs
 --operator-evidence <file>`. The same section closes the other four
@@ -260,7 +260,11 @@ none of them, only some of them, or a surface production does not use. The
 app names and hostnames are derived from the environment manifest and the
 hostname matrix; the Neon credential kinds are fixed by the Neon contract.
 The expected sets therefore cannot drift away from the topology the
-repository uses.
+repository uses. The pointer is required, not decorative: a recorded slot
+without an inspectable `evidenceRef` is refused, and a read-back stamped
+after the artifact was captured is refused too. The capture therefore fails
+fast on an incomplete record instead of producing an artifact whose gates
+cannot be trusted.
 
 **Credential boundary.** The production credential path is the same rule as
 staging, with the `production` GitHub Environment instead of `staging`: the

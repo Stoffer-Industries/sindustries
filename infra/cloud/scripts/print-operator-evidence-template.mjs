@@ -143,7 +143,9 @@ async function main() {
     process.stderr.write(`  step ${entry.step}, owner ${entry.owner}\n`);
     process.stderr.write(`  surfaces: ${targets.join(', ')}\n`);
     process.stderr.write(`  what to do: ${entry.hint}\n`);
-    process.stderr.write('  fill in: readBackAt (ISO-8601), scope, evidenceRef (a pointer, never the value)\n');
+    process.stderr.write(
+      '  fill in: readBackAt (ISO-8601), evidenceRef (REQUIRED pointer, never the value), scope (optional)\n',
+    );
   }
 }
 
