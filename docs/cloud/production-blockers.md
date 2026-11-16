@@ -29,7 +29,7 @@ date, including the places where they disagree with the contract recorded
 in sections 1–4.
 
 **Targeted Slice D live re-read:** 2026-11-16 — Neon organization/plan,
-project allowlist, production branch, Fly app inventory, Upstash database
+project allowlist, production branch, Fly app inventory, Fly-managed Upstash database
 inventory, GitHub `production` Environment inventory, Cloudflare DNS, and
 production hostname resolution. The findings are recorded in §5 below.
 
@@ -194,8 +194,8 @@ credential boundary.
 
 | Fly app | Required secret env vars | Owner | Status |
 | --- | --- | --- | --- |
-| `sindustries-platform-production` | The 15 app-level values defined by `platform-provision-secrets.mjs`: three database URLs, six Redis URLs, two approval credentials, content-scheduler base URL, and three CORS allow-lists; plus pass-through AKAHU_* and OTEL_* values where enabled | Quinn | Pending |
-| `sindustries-health-probe-production` | HEALTH_PROBE_DATABASES, HEALTH_PROBE_FLY_APPS, HEALTH_PROBE_REDIS, OTEL_* | Quinn | Pending |
+| `sindustries-platform-production` | The 15 app-level values defined by `platform-provision-secrets.mjs`: three database URLs, six Redis URLs, two approval credentials, content-scheduler base URL, and three CORS allow-lists; plus pass-through AKAHU_* and OTEL_* values where enabled | Quinn | Live — release and 15-name inventory read back 2026-11-16 |
+| `sindustries-health-probe-production` | HEALTH_PROBE_DATABASES, HEALTH_PROBE_FLY_APPS, HEALTH_PROBE_REDIS, OTEL_* | Quinn | Live — all DB/Redis targets healthy 2026-11-16 |
 
 **Notes:**
 - The credential boundary in cloud-platform.md applies unchanged: Quinn owns
@@ -209,6 +209,8 @@ credential boundary.
   (`capture-production-provisioning-state.mjs --operator-evidence <file>`).
   The record carries a boolean, a read-back time, a pointer to the
   read-back and the production surfaces it covered, never a value. The
+  Four are recorded in `production-provisioning-readback.md`; the Fly
+  spend-limit slot remains open because Fly exposes no such control. The
   `fly.spend-limit-before-public-exposure`
   gate enforces the order the approved design makes a hard gate: while a
   production hostname is published or the production health-probe app is
@@ -295,24 +297,19 @@ credential boundary.
   (`tests/cloud/scripts/check-production-deploy-contract.mjs`) binds those
   workflows' app name, gates, rendered Fly config and secret names to the
   manifest, so a workflow cannot drift from the manifest it claims to follow.
-- The production environment does not exist yet: no production app, no
-  production DNS records and no production secrets. The rows above are the
-  target topology, not a live inventory. The live provisioning evidence is
-  Slice D of
-  `docs/specs/production-environment-provisioning-tech-design.md` and is
-  still to be captured.
-- The production Neon **branch** does exist and was re-read live from the
-  provider on 2026-11-15 (project `sindustries`, branch `production`,
-  `current_state=ready`, primary/default branch): it carries only the
-  `auth` and `public` schemas — none of `tasks_api`, `budget_api` or
-  `content_scheduler` — and it has **no service roles**: the branch's only
-  roles are Neon's four defaults (`neondb_owner`, `authenticator`,
-  `anonymous`, `authenticated`). The project-level connectivity
-  restriction is also unset: `allowed_ips.ips` is empty and
-  `block_public_connections` is false, so the branch still accepts
-  connections from anywhere. The treatment it needs is contracted in
-  `docs/cloud/production-neon-contract.md`, and the AC2 evidence gate is
-  `tests/cloud/scripts/check-production-neon-evidence.mjs`.
+- The production environment is live as of 2026-11-16: the consolidated
+  platform and health-probe apps are deployed, all four Fly-hosted production
+  DNS/TLS surfaces resolve and return 200, and all three schemas plus Redis
+  report `up=1`. See `docs/cloud/production-provisioning-readback.md`.
+- The production Neon branch now carries the three service schemas and one
+  write-capable, schema-confined role per schema. Staging and dev credentials
+  were both refused against the production endpoint. The IP allowlist remains
+  unavailable on the current Free plan and is explicitly deferred by Tom;
+  that remaining limitation is recorded in the read-back rather than hidden.
+- Redis is two separate Fly-managed Upstash Pay-as-you-go add-ons in `syd`:
+  `sindustries-staging` and `sindustries-production`. The direct-Upstash
+  staging database was retired after staging was repointed and health-checked.
+  The manifest's `redisAddon` entries are the source of truth.
   - **Provider-plan blocker (re-read 2026-11-16):** the Neon organization
     `Stoffer Industries` reports `plan=free`. Neon currently makes IP Allow
     a **Scale-plan** feature, while protected branches are available only
@@ -344,8 +341,8 @@ credential boundary.
   - **Executable read-back (task `fb1240c0`, added 2026-11-16):** the facts
     in this section are readable in one command instead of by hand —
     `node infra/cloud/scripts/capture-production-provisioning-state.mjs
-    --out <state-file>` captures the Neon, Fly, GitHub `production`
-    Environment and Upstash state as a redacted artifact (names, flags and
+    --out <state-file>` captures the Neon, Fly (including its managed
+    Upstash add-on), GitHub `production` Environment and Cloudflare state as a redacted artifact (names, flags and
     counts only), and `node
     tests/cloud/scripts/check-production-provisioning-state.mjs <state-file>`
     decides, per Slice D gate, whether the step is met and names the owner

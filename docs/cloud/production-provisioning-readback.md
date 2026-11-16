@@ -70,6 +70,12 @@ health-probe listening on :9090 (interval=30s, fly-interval=120s, db-interval=36
 Every configured target reported `up=1`: all three production Neon
 schemas and the production Redis instance.
 
+The deployed probe now also publishes value-free target identity metrics
+(`sindustries_health_probe_target_info`). The provisioning capture compares
+those fingerprints with the Fly, Neon and Redis control-plane fingerprints;
+Fly's Machines API is not used for secret values because it exposes only
+plain `[env]` entries, not Fly secret values.
+
 **Read-back artifact:** this file.
 
 ---
@@ -122,7 +128,33 @@ hostname itself, valid 2026-11-16 → 2027-02-14.
 
 ---
 
-## 5. Fly spend limit (AC5, slot `flySpendLimit`) — NOT RECORDED
+## 5. Redis topology decision and read-back
+
+Tom decided on 2026-11-17 that both environments use separate Fly-managed
+Upstash databases on Pay-as-you-go. `fly redis list --org personal` showed:
+
+| Environment | Fly-managed database | Plan | Primary region |
+| --- | --- | --- | --- |
+| staging | `sindustries-staging` | Pay-as-you-go | `syd` |
+| production | `sindustries-production` | Pay-as-you-go | `syd` |
+
+Staging was repointed to `sindustries-staging`; all three API health routes,
+the health probe and the worker readiness check passed afterward. The retired
+direct-Upstash staging database was deleted. Production was already using
+`sindustries-production`.
+
+The databases must remain separate. The BullMQ queue name is
+`content-scheduler-auto-post` without an environment suffix, so a shared Redis
+database would let staging and production workers consume each other's jobs.
+
+The repository source of truth is each environment's `redisAddon` entry in
+`infra/cloud/platform/platform-environments.mjs`. The provisioning capture
+reads the add-on through Fly GraphQL; direct Upstash account inventory is not
+part of the evidence path because Fly-managed add-ons do not appear there.
+
+---
+
+## 6. Fly spend limit (AC5, slot `flySpendLimit`) — NOT RECORDED
 
 **No read-back was recorded, and the gate stays open.**
 

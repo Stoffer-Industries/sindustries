@@ -16,6 +16,7 @@ import { metrics } from '@opentelemetry/api';
 
 import {
   configFromEnv,
+  probeTargetFingerprints,
   probeDbTargets,
   probeFlyTargets,
   probeRedisTargets,
@@ -101,6 +102,28 @@ const probeErrors = new Gauge({
   help: 'Cumulative count of probe pass errors (target failures are not errors; this counts probe-loop faults)',
   registers: [registry],
 });
+
+// The target URLs/DSNs are Fly secrets and are deliberately not readable
+// through the Machines API. Publish only a one-way host fingerprint so the
+// provisioning evidence capture can prove what the DEPLOYED probe watches
+// without exposing a credential or hostname.
+const probeTargetInfo = new Gauge({
+  name: 'sindustries_health_probe_target_info',
+  help: 'Value-free identity of each deployed health-probe target',
+  labelNames: ['kind', 'target', 'host_fingerprint'],
+  registers: [registry],
+});
+
+for (const target of probeTargetFingerprints(configFromEnv())) {
+  probeTargetInfo.set(
+    {
+      kind: target.kind,
+      target: target.target,
+      host_fingerprint: target.hostFingerprint,
+    },
+    1,
+  );
+}
 
 // prom-client serves the compatibility /metrics endpoint, but it is not
 // connected to the OTLP pipeline. Mirror the values into OTel instruments so

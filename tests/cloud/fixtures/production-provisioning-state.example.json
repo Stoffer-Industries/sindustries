@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "environment": "production",
   "capturedAt": "2026-11-16T00:30:00.000Z",
   "operatorEvidence": {
@@ -159,13 +159,24 @@
           "HEALTH_PROBE_REDIS": [
             {
               "label": "content_scheduler",
-              "hostFingerprint": "1cbe53b22532c7d0"
+              "hostFingerprint": "a64795843e668e08"
             }
           ]
         },
         "conflictingKeys": [],
         "malformedTargets": 0,
-        "machineCount": 1
+        "source": "https://health-probe.sindustries.co.nz/metrics"
+      },
+      "redis": {
+        "captured": true,
+        "exists": true,
+        "name": "sindustries-production",
+        "provider": "upstash_redis",
+        "organization": "personal",
+        "plan": "Pay-as-you-go",
+        "primaryRegion": "syd",
+        "status": "created",
+        "endpointHostFingerprint": "a64795843e668e08"
       },
       "platformConfig": {
         "captured": true,
@@ -202,21 +213,6 @@
       ],
       "variableNames": [
         "PRODUCTION_FLY_ORG"
-      ]
-    },
-    "upstash": {
-      "captured": true,
-      "databases": [
-        {
-          "name": "sindustries-content-scheduler-staging",
-          "type": "free",
-          "endpointHostFingerprint": "356d21d35ee6b7ec"
-        },
-        {
-          "name": "sindustries-content-scheduler-production",
-          "type": "free",
-          "endpointHostFingerprint": "1cbe53b22532c7d0"
-        }
       ]
     },
     "cloudflare": {
