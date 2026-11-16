@@ -200,6 +200,8 @@ node infra/cloud/scripts/print-operator-evidence-template.mjs --out operator-evi
 
 # 2. fill in each slot: readBackAt (ISO-8601), scope, evidenceRef
 #    (a POINTER to the read-back, never its value) and recorded: true.
+#    The pointer must be a repository-relative path to a file that EXISTS
+#    in the repository — a path that names nothing is refused.
 #    The targets are already correct — do not edit them.
 
 # 3. merge the record into the artifact
@@ -211,6 +213,11 @@ node tests/cloud/scripts/check-production-provisioning-state.mjs production-prov
 ```
 
 Where each read-back lives, and what to record:
+
+Every pointer below names this file, which is where the read-back lives.
+The pointer is resolved against the repository checkout, so a path that
+names no existing file is refused rather than accepted as an attestation
+nobody could inspect.
 
 | Slot | Read-back | `evidenceRef` |
 | --- | --- | --- |

@@ -78,7 +78,7 @@ function filledInRecord() {
     entry.recorded = true;
     entry.readBackAt = '2026-11-15T23:00:00Z';
     entry.scope = 'production';
-    entry.evidenceRef = 'operator-evidence/read-back.txt';
+    entry.evidenceRef = 'tests/cloud/fixtures/operator-evidence-readback.txt';
   }
   return record;
 }
@@ -177,6 +177,7 @@ test('a recorded slot may omit the optional scope', () => {
 
   const validation = validateOperatorEvidence(record, {
     capturedAt: '2026-11-16T10:00:00Z',
+    repoRoot: REPO_ROOT,
   });
   assert.equal(validation.ok, true, `scope is optional: ${validation.problems.join('; ')}`);
 });
@@ -187,6 +188,7 @@ test('a recorded slot without an inspectable pointer is refused', () => {
 
   const validation = validateOperatorEvidence(record, {
     capturedAt: '2026-11-16T10:00:00Z',
+    repoRoot: REPO_ROOT,
   });
   assert.equal(validation.ok, false, 'a record with no pointer is not an attestation');
   assert.match(validation.problems.join(' '), /evidenceRef/);
@@ -198,6 +200,7 @@ test('a recorded slot with a placeholder pointer is refused', () => {
 
   const validation = validateOperatorEvidence(record, {
     capturedAt: '2026-11-16T10:00:00Z',
+    repoRoot: REPO_ROOT,
   });
   assert.equal(validation.ok, false, 'a null pointer is not an attestation');
   assert.match(validation.problems.join(' '), /evidenceRef/);
@@ -209,9 +212,34 @@ test('a recorded slot with a non-string pointer is refused', () => {
 
   const validation = validateOperatorEvidence(record, {
     capturedAt: '2026-11-16T10:00:00Z',
+    repoRoot: REPO_ROOT,
   });
   assert.equal(validation.ok, false, 'a non-string pointer is not an attestation');
   assert.match(validation.problems.join(' '), /evidenceRef/);
+});
+
+test('a recorded slot whose pointer names no existing file is refused', () => {
+  const record = filledInRecord();
+  record.flySpendLimit.evidenceRef = 'tests/cloud/fixtures/does-not-exist.txt';
+
+  const validation = validateOperatorEvidence(record, {
+    capturedAt: '2026-11-16T10:00:00Z',
+    repoRoot: REPO_ROOT,
+  });
+  assert.equal(validation.ok, false, 'a pointer to no file is not an attestation');
+  assert.match(validation.problems.join(' '), /existing file/);
+});
+
+test('a recorded slot whose pointer escapes the repository is refused', () => {
+  const record = filledInRecord();
+  record.flySpendLimit.evidenceRef = '../outside-the-repository.txt';
+
+  const validation = validateOperatorEvidence(record, {
+    capturedAt: '2026-11-16T10:00:00Z',
+    repoRoot: REPO_ROOT,
+  });
+  assert.equal(validation.ok, false, 'a pointer outside the repository is not inspectable');
+  assert.match(validation.problems.join(' '), /repository-relative/);
 });
 
 test('a read-back stamped after the artifact capture is refused', () => {
@@ -220,6 +248,7 @@ test('a read-back stamped after the artifact capture is refused', () => {
 
   const validation = validateOperatorEvidence(record, {
     capturedAt: '2026-11-16T10:00:00Z',
+    repoRoot: REPO_ROOT,
   });
   assert.equal(validation.ok, false, 'a future read-back cannot be carried by this artifact');
   assert.match(validation.problems.join(' '), /after the artifact was captured/);

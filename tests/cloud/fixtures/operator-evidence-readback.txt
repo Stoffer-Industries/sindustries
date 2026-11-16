@@ -1,0 +1,5 @@
+Synthetic operator read-back fixture for production provisioning contract tests.
+
+This file contains no credential, production value, or live observation. It
+exists only so the fixture's evidenceRef points to an inspectable repository
+file rather than a synthetic path that a reviewer could not open.

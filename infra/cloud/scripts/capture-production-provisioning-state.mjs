@@ -196,8 +196,9 @@ function parseArgs(argv) {
  * an unrecorded one and flips the ordering gate red with no explanation.
  *
  * @param {string} path
- * @param {{capturedAt?: string}} [options] artifact context for cross-field
- *   checks; `capturedAt` bounds when a read-back may have happened
+ * @param {{capturedAt?: string, repoRoot?: string}} [options] artifact context
+ *   for cross-field checks; `capturedAt` bounds when a read-back may have
+ *   happened and `repoRoot` makes every recorded pointer inspectable
  * @returns {{evidence: object|null, problems: string[]}}
  */
 export function loadOperatorEvidence(path, options = {}) {
@@ -210,7 +211,14 @@ export function loadOperatorEvidence(path, options = {}) {
       problems: [`cannot read the operator evidence file ${path}: ${error.message}`],
     };
   }
-  const validation = validateOperatorEvidence(parsed, options);
+  // The pointer is resolved inside the repository, so the root defaults to
+  // the checkout this script lives in: a read-back that names a file in the
+  // repository is inspectable without the caller having to know where the
+  // repository is.
+  const validation = validateOperatorEvidence(parsed, {
+    ...options,
+    repoRoot: options.repoRoot ?? REPO_ROOT_DEFAULT,
+  });
   if (!validation.ok) {
     return { evidence: null, problems: validation.problems };
   }
@@ -1253,7 +1261,10 @@ async function main(argv) {
   };
 
   if (options.operatorEvidence) {
-    const loaded = loadOperatorEvidence(resolve(options.operatorEvidence), { capturedAt });
+    const loaded = loadOperatorEvidence(resolve(options.operatorEvidence), {
+      capturedAt,
+      repoRoot: options.repoRoot,
+    });
     if (loaded.problems.length > 0) {
       throw new Error(
         `the operator evidence file ${options.operatorEvidence} is not usable: ${loaded.problems.join('; ')}`,

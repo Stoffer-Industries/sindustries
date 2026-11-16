@@ -273,6 +273,16 @@ test('a recorded read-back without an inspectable pointer fails', () => {
   );
 });
 
+test('a recorded read-back whose pointer names no existing file fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.flySpendLimit.evidenceRef =
+        'tests/cloud/fixtures/does-not-exist.txt';
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
 test('a read-back stamped after the artifact capture fails', () => {
   assertFails(
     mutate((state) => {
