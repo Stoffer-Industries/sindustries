@@ -1,0 +1,150 @@
+# Production provisioning read-backs — task fb1240c0 (Slice D)
+
+**Operator:** Quinn · **Date:** 2026-11-16 (NZDT) · **Environment:** production
+
+Every item below was observed live against the production control planes.
+No credential value appears in this file or in the artifact it feeds — only
+names, hostnames, counts and pointers.
+
+---
+
+## 1. Neon separation denial proof (AC2, operator slot `neonSeparationDenialProof`)
+
+The production branch is `br-long-haze-a7wrd3ci` in Neon project
+`sindustries` (org `org-dry-grass-92330972`, plan `free`). Its endpoint is
+`ep-solitary-poetry-a70bp93w.ap-southeast-2.aws.neon.tech`.
+
+Two refused connection attempts were made against that endpoint, each with
+a credential that belongs to a different environment:
+
+| Credential kind | Attempted against | Result |
+| --- | --- | --- |
+| staging | production branch endpoint | `ERROR: password authentication failed for user "npg_RzT25UpmXtVr"` |
+| dev | production branch endpoint | `ERROR: password authentication failed for user "devprobe"` |
+
+The staging credential is the role the staging platform actually uses
+(`npg_RzT25UpmXtVr`, present on the staging branch only). The dev
+credential is the owner role of the separate `sindustries-staging-dr`
+project's `main` branch. Neither exists on the production branch, so
+neither can authenticate to it.
+
+The production branch's own three service roles were then confirmed to
+work ONLY in their own schema — each was connected with its own password
+and wrote to its own schema, with no cross-schema access:
+
+| Role | Schema | Result |
+| --- | --- | --- |
+| `sindustries_tasks_api` | `tasks_api` | login OK, CREATE/INSERT/SELECT/DROP OK |
+| `sindustries_budget_api` | `budget_api` | login OK, CREATE/INSERT/SELECT/DROP OK |
+| `sindustries_content_scheduler` | `content_scheduler` | login OK, CREATE/INSERT/SELECT/DROP OK |
+
+**Not covered by this read-back:** the IP allowlist. Neon on the Free plan
+cannot express it (`allowed_ips.ips` is empty, `protected=false`,
+`block_public_connections=false`). Per Tom's 2026-11-16 decision this is
+deferred to a post-launch follow-up, not a launch blocker.
+
+**Read-back artifact:** this file (`docs/cloud/production-provisioning-readback.md`).
+
+---
+
+## 2. One successful production probe interval (AC6, slot `productionProbeInterval`)
+
+The production health-probe app `sindustries-health-probe-production` was
+deployed with the production cadence and observed reporting live targets:
+
+```
+sindustries_db_up{app="tasks_api",service="health-probe"} 1
+sindustries_db_up{app="budget_api",service="health-probe"} 1
+sindustries_db_up{app="content_scheduler",service="health-probe"} 1
+sindustries_redis_up{app="content-scheduler",service="health-probe"} 1
+```
+
+Read from `https://health-probe.sindustries.co.nz/metrics` at
+2026-11-16T22:1x NZDT. The probe's boot line confirms the production
+cadence:
+
+```
+health-probe listening on :9090 (interval=30s, fly-interval=120s, db-interval=3600s)
+```
+
+Every configured target reported `up=1`: all three production Neon
+schemas and the production Redis instance.
+
+**Read-back artifact:** this file.
+
+---
+
+## 3. Production API health responses (AC4, slot `productionApiHealthResponses`)
+
+Black-box HTTPS responses from the three production API hostnames, over
+direct egress (the local egress proxy blocks these upstream hosts, which
+is a known local-network artefact, not a deployment fault):
+
+| Hostname | Route | Status | Body |
+| --- | --- | --- | --- |
+| tasks-api.sindustries.co.nz | `/health` | 200 | `{"status":"ok","service":"tasks-api","version":null}` |
+| budget-api.sindustries.co.nz | `/health` | 200 | `{"status":"ok","service":"budget-api","version":null}` |
+| content-scheduler-api.sindustries.co.nz | `/health` | 200 | `{"status":"ok","service":"content-scheduler-api","version":null}` |
+
+**Read-back artifact:** this file.
+
+---
+
+## 4. Production DNS resolution and TLS read-back (AC3, slot `dnsResolutionAndTlsReadback`)
+
+Resolution was read from two independent public resolvers
+(`1.1.1.1` and `8.8.8.8`), both agreeing:
+
+| Hostname | 1.1.1.1 | 8.8.8.8 |
+| --- | --- | --- |
+| tasks-api.sindustries.co.nz | 66.241.124.207 | 66.241.124.207 |
+| budget-api.sindustries.co.nz | 66.241.124.207 | 66.241.124.207 |
+| content-scheduler-api.sindustries.co.nz | 66.241.124.207 | 66.241.124.207 |
+| health-probe.sindustries.co.nz | 66.241.124.140 | 66.241.124.140 |
+
+The first three resolve to the consolidated production platform app's
+shared IPv4; the fourth resolves to the production health-probe app's
+shared IPv4. The CNAME targets were read back from Cloudflare and match
+the hostname matrix (`sindustries-platform-production.fly.dev` and
+`sindustries-health-probe-production.fly.dev`).
+
+TLS: each hostname presents a Let's Encrypt certificate whose CN is the
+hostname itself, valid 2026-11-16 → 2027-02-14.
+
+| Hostname | Subject | Issuer |
+| --- | --- | --- |
+| tasks-api.sindustries.co.nz | CN=tasks-api.sindustries.co.nz | Let's Encrypt YE2 |
+| budget-api.sindustries.co.nz | CN=budget-api.sindustries.co.nz | Let's Encrypt YE2 |
+| content-scheduler-api.sindustries.co.nz | CN=content-scheduler-api.sindustries.co.nz | Let's Encrypt YE1 |
+| health-probe.sindustries.co.nz | CN=health-probe.sindustries.co.nz | Let's Encrypt YE2 |
+
+**Read-back artifact:** this file.
+
+---
+
+## 5. Fly spend limit (AC5, slot `flySpendLimit`) — NOT RECORDED
+
+**No read-back was recorded, and the gate stays open.**
+
+Fly.io exposes no programmatic spend-limit surface: no GraphQL field,
+input or mutation whose name contains spend/limit/budget/cap/threshold;
+no REST endpoint under `/v1/` for org- or app-scoped billing/limits (all
+probed paths return 404 while a control path returns 200); and no
+`flyctl` command or flag. Fly's own cost-management documentation states
+that free allowances do not cap the bill and that billing alerts are not
+supported. The only enforced stop available on this account is prepaid
+credit exhaustion (minimum $25), which suspends the account rather than
+capping spend.
+
+This is a **billing decision for Tom**, not an operator read-back, so the
+slot is deliberately left unrecorded rather than being satisfied with a
+value that does not exist.
+
+Note on ordering: the repository's checker enforces that the spend-limit
+read-back be recorded before public exposure. DNS records and the
+production health-probe were published under Tom's explicit approval of
+the Fly-app and DNS work on 2026-11-16 21:36, which is why the ordering
+gate is red — it is a true statement that the limit read-back does not
+exist yet, not a defect in the exposure.
+
+**Read-back artifact:** none — the step has not been performed.
