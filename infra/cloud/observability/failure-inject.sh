@@ -422,7 +422,19 @@ scenario_deploy_failed() {
   if [ "${DRY_RUN}" = true ]; then
     echo "    [dry-run] gh workflow run deploy-staging-health-probe.yml \\"
     echo "                -f image=registry.fly.io/sindustries-health-probe-staging:does-not-exist"
-    echo "    (or: gh workflow run deploy-staging-tasks-api.yml -f image=...)"
+    # The alternative workflow this drill used to offer was retired at the
+    # 2026-11-07 staging consolidation (task 219fb673): the four per-service
+    # staging Fly apps and their deploy workflows are gone. The two live
+    # staging deploy workflows (deploy-staging-platform.yml and
+    # deploy-staging-health-probe.yml) are workflow_call-only, so `gh workflow
+    # run` cannot dispatch them either. Printed guidance only — the command
+    # above is unchanged.
+    echo "    NOTE: this drill has no runnable path today. The four per-service"
+    echo "          staging deploy workflows were retired at the 2026-11-07"
+    echo "          consolidation (task 219fb673), and the two live staging"
+    echo "          deploy workflows are workflow_call-only, so \`gh workflow run\`"
+    echo "          cannot dispatch them. The sindustries-deploy-failed alert"
+    echo "          file was removed as well (task 2c782afb AC3) — see --help."
     cat <<NOTE
 
     Wait ~6m (alert \`for=5m\` + 60s scrape interval + buffer), then capture
@@ -448,6 +460,9 @@ scenario_deploy_restored() {
   require_dry_run_or_token
   if [ "${DRY_RUN}" = true ]; then
     echo "    [dry-run] gh workflow run deploy-staging-health-probe.yml (no image override)"
+    echo "    NOTE: same dispatch caveat as deploy-failed — the live staging"
+    echo "          deploy workflows are workflow_call-only, so \`gh workflow run\`"
+    echo "          cannot dispatch them."
     return 0
   fi
   command -v gh >/dev/null 2>&1 || { echo "::error::gh CLI not found" >&2; exit 1; }
