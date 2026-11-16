@@ -262,7 +262,11 @@ hostname matrix; the Neon credential kinds are fixed by the Neon contract.
 The expected sets therefore cannot drift away from the topology the
 repository uses. The pointer is required, not decorative: a recorded slot
 without an inspectable `evidenceRef` is refused, and a read-back stamped
-after the artifact was captured is refused too. The capture therefore fails
+after the artifact was captured is refused too. A pointer is only
+inspectable if it RESOLVES: it must be a repository-relative path to a
+file that exists in the checkout, and a path that escapes the repository
+or names nothing is refused. A slot therefore cannot close on a pointer
+nobody could open. The capture therefore fails
 fast on an incomplete record instead of producing an artifact whose gates
 cannot be trusted.
 

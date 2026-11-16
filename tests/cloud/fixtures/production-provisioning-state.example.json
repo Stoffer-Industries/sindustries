@@ -7,7 +7,7 @@
       "recorded": true,
       "readBackAt": "2026-11-15T22:05:00.000Z",
       "scope": "personal organization - production app scope",
-      "evidenceRef": "operator-evidence/fly-spend-limit-readback.txt",
+      "evidenceRef": "tests/cloud/fixtures/operator-evidence-readback.txt",
       "targets": [
         "sindustries-platform-production"
       ]
@@ -15,7 +15,7 @@
     "neonSeparationDenialProof": {
       "recorded": true,
       "readBackAt": "2026-11-15T22:10:00.000Z",
-      "evidenceRef": "operator-evidence/neon-separation-denial.txt",
+      "evidenceRef": "tests/cloud/fixtures/operator-evidence-readback.txt",
       "targets": [
         "production",
         "staging",
@@ -25,7 +25,7 @@
     "productionProbeInterval": {
       "recorded": true,
       "readBackAt": "2026-11-15T23:00:00.000Z",
-      "evidenceRef": "operator-evidence/production-probe-interval.txt",
+      "evidenceRef": "tests/cloud/fixtures/operator-evidence-readback.txt",
       "targets": [
         "sindustries-health-probe-production"
       ]
@@ -33,7 +33,7 @@
     "productionApiHealthResponses": {
       "recorded": true,
       "readBackAt": "2026-11-15T23:10:00.000Z",
-      "evidenceRef": "operator-evidence/production-api-health.txt",
+      "evidenceRef": "tests/cloud/fixtures/operator-evidence-readback.txt",
       "targets": [
         "tasks-api.sindustries.co.nz",
         "budget-api.sindustries.co.nz",
@@ -43,7 +43,7 @@
     "dnsResolutionAndTlsReadback": {
       "recorded": true,
       "readBackAt": "2026-11-15T23:20:00.000Z",
-      "evidenceRef": "operator-evidence/production-dns-tls.txt",
+      "evidenceRef": "tests/cloud/fixtures/operator-evidence-readback.txt",
       "targets": [
         "tasks-api.sindustries.co.nz",
         "budget-api.sindustries.co.nz",

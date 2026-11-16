@@ -394,6 +394,11 @@ export function evaluateProvisioningState(state, options = {}) {
   // explanation of why.
   const operatorEvidenceValidation = validateOperatorEvidence(state.operatorEvidence, {
     capturedAt: state.capturedAt,
+    // The pointer is resolved inside the repository, so the root defaults to
+    // the checkout this checker lives in: a read-back that names a file in
+    // the repository is inspectable without the caller having to know where
+    // the repository is.
+    repoRoot: options.repoRoot ?? DEFAULTS,
   });
   if (!operatorEvidenceValidation.ok) {
     add(
@@ -1842,6 +1847,7 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
   const expectedOperatorTargets = await loadOperatorTargetExpectations(repoRoot);
 
   return {
+    repoRoot,
     platformApp: environment.platformApp,
     healthProbeApp: environment.healthProbeApp,
     requiredSourceNames: manifest.requiredSourceNames(environment),

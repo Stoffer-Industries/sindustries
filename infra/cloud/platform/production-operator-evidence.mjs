@@ -53,6 +53,9 @@
 //   import { validateOperatorEvidence, operatorEvidenceRecorded } from
 //     './production-operator-evidence.mjs';
 
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
+
 /** The operator obligations and the evidence slot that closes each one. */
 export const OPERATOR_EVIDENCE_SLOTS = [
   {
@@ -143,6 +146,77 @@ function isSafeEvidenceRef(value) {
 }
 
 /**
+ * Is this a repository-relative path with no traversal or empty segment?
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isSafeEvidencePath(value) {
+  if (!isSafeEvidenceRef(value)) return false;
+  return value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+}
+
+/**
+ * Why this evidence reference cannot be inspected, or null when it can.
+ *
+ * A safe-looking string is not yet an inspectable attestation: the path
+ * may name a file that does not exist, may escape the repository, or may
+ * point at a directory. The pointer is resolved inside the repository
+ * root, so an artifact copied to another checkout still names a file a
+ * reviewer can open there.
+ *
+ * @param {unknown} value
+ * @param {unknown} repoRoot
+ * @returns {string|null}
+ */
+function evidenceRefProblem(value, repoRoot) {
+  if (!isSafeEvidencePath(value)) {
+    return 'must carry a safe repository-relative "evidenceRef" pointer to the read-back';
+  }
+  if (typeof repoRoot !== 'string' || repoRoot.trim().length === 0) {
+    return 'cannot verify the "evidenceRef" pointer without a repository root';
+  }
+
+  const root = resolve(repoRoot);
+  const candidate = resolve(root, value);
+  const relativeCandidate = relative(root, candidate);
+  if (
+    relativeCandidate === '' ||
+    relativeCandidate === '..' ||
+    relativeCandidate.startsWith(`..${sep}`) ||
+    isAbsolute(relativeCandidate)
+  ) {
+    return 'must point inside the repository';
+  }
+  if (!existsSync(candidate)) {
+    return 'does not point to an existing file in the repository';
+  }
+  if (!statSync(candidate).isFile()) {
+    return 'does not point to a regular file in the repository';
+  }
+
+  // A symlink inside the repository may still point outside it. Compare
+  // the real paths so the pointer cannot escape through a link.
+  try {
+    const realRoot = realpathSync(root);
+    const realCandidate = realpathSync(candidate);
+    const relativeRealCandidate = relative(realRoot, realCandidate);
+    if (
+      relativeRealCandidate === '' ||
+      relativeRealCandidate === '..' ||
+      relativeRealCandidate.startsWith(`..${sep}`) ||
+      isAbsolute(relativeRealCandidate)
+    ) {
+      return 'must point inside the repository';
+    }
+  } catch {
+    return 'cannot be inspected in the repository';
+  }
+
+  return null;
+}
+
+/**
  * A covered surface: a hostname, an app name or a credential kind.
  *
  * The targets are identifiers, never values — a hostname and an app name
@@ -173,8 +247,9 @@ function isIsoTimestamp(value) {
  * unrecorded one without saying so.
  *
  * @param {unknown} value
- * @param {{capturedAt?: string}} [options] artifact context for cross-field
- *   checks; `capturedAt` bounds when a read-back may have happened
+ * @param {{capturedAt?: string, repoRoot?: string}} [options] artifact context
+ *   for cross-field checks; `capturedAt` bounds when a read-back may have
+ *   happened and `repoRoot` makes every recorded pointer inspectable
  * @returns {{ok: boolean, present: boolean, problems: string[]}}
  */
 export function validateOperatorEvidence(value, options = {}) {
@@ -236,10 +311,9 @@ export function validateOperatorEvidence(value, options = {}) {
     ) {
       problems.push(`the operator evidence slot "${slot}" carries an unusable "scope"`);
     }
-    if (!isSafeEvidenceRef(entry.evidenceRef)) {
-      problems.push(
-        `the operator evidence slot "${slot}" must carry an "evidenceRef" pointer to the read-back`,
-      );
+    const evidenceRefIssue = evidenceRefProblem(entry.evidenceRef, options.repoRoot);
+    if (evidenceRefIssue) {
+      problems.push(`the operator evidence slot "${slot}" ${evidenceRefIssue}`);
     }
     if (!Array.isArray(entry.targets)) {
       problems.push(`the operator evidence slot "${slot}" must carry a "targets" array`);

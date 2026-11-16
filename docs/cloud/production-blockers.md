@@ -239,7 +239,13 @@ credential boundary.
   | neonSeparationDenialProof | `production`, `staging`, `dev` — the production branch and BOTH refused credentials |
 
   The operator evidence file therefore looks like this (the timestamps and
-  pointers are the operator's own):
+  pointers are the operator's own). Every `evidenceRef` is a repository-
+  relative path to a file that EXISTS in the repository: the pointer is
+  resolved against the checkout and a path that names nothing is refused,
+  so a slot cannot close on a pointer nobody could open. The read-backs
+  for these four slots live in
+  `docs/cloud/production-provisioning-readback.md`, which is the file the
+  pointers below name.
 
   ```json
   {
@@ -247,25 +253,25 @@ credential boundary.
       "recorded": true,
       "readBackAt": "2026-11-16T09:00:00.000Z",
       "scope": "personal organization - production app scope",
-      "evidenceRef": "operator-evidence/fly-spend-limit-readback.txt",
+      "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": ["sindustries-platform-production"]
     },
     "neonSeparationDenialProof": {
       "recorded": true,
       "readBackAt": "2026-11-16T09:10:00.000Z",
-      "evidenceRef": "operator-evidence/neon-separation-denial.txt",
+      "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": ["production", "staging", "dev"]
     },
     "productionProbeInterval": {
       "recorded": true,
       "readBackAt": "2026-11-16T09:20:00.000Z",
-      "evidenceRef": "operator-evidence/production-probe-interval.txt",
+      "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": ["sindustries-health-probe-production"]
     },
     "productionApiHealthResponses": {
       "recorded": true,
       "readBackAt": "2026-11-16T09:30:00.000Z",
-      "evidenceRef": "operator-evidence/production-api-health.txt",
+      "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": [
         "tasks-api.sindustries.co.nz",
         "budget-api.sindustries.co.nz",
@@ -275,7 +281,7 @@ credential boundary.
     "dnsResolutionAndTlsReadback": {
       "recorded": true,
       "readBackAt": "2026-11-16T09:40:00.000Z",
-      "evidenceRef": "operator-evidence/production-dns-tls.txt",
+      "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": [
         "tasks-api.sindustries.co.nz",
         "budget-api.sindustries.co.nz",

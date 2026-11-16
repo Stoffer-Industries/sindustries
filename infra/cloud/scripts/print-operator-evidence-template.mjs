@@ -144,7 +144,7 @@ async function main() {
     process.stderr.write(`  surfaces: ${targets.join(', ')}\n`);
     process.stderr.write(`  what to do: ${entry.hint}\n`);
     process.stderr.write(
-      '  fill in: readBackAt (ISO-8601), evidenceRef (REQUIRED pointer, never the value), scope (optional)\n',
+      '  fill in: readBackAt (ISO-8601), evidenceRef (REQUIRED repo-relative path to an existing file, never the value), scope (optional)\n',
     );
   }
 }

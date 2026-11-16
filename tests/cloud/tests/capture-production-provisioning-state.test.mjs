@@ -33,6 +33,8 @@ import {
   readNeonBranchEndpointFingerprints,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
 
+const REPO_ROOT = new URL('../../..', import.meta.url).pathname;
+
 /**
  * Run `fn` with `globalThis.fetch` replaced by a stub.
  *
@@ -905,7 +907,7 @@ test('a recorded operator read-back is carried into the artifact', () => {
       recorded: true,
       readBackAt: '2026-11-16T00:00:00.000Z',
       scope: 'personal organization',
-      evidenceRef: 'operator-evidence/fly-spend-limit.txt',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
       targets: ['sindustries-platform-production'],
     },
   });
@@ -946,7 +948,7 @@ test('an operator evidence file stamped after the capture is refused', () => {
       recorded: true,
       readBackAt: '2026-11-16T01:00:01.000Z',
       scope: 'personal organization',
-      evidenceRef: 'operator-evidence/fly-spend-limit.txt',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
       targets: ['sindustries-platform-production'],
     },
   });
@@ -1013,7 +1015,7 @@ test('a recorded operator read-back with no production surface is refused', () =
       recorded: true,
       readBackAt: '2026-11-16T00:00:00.000Z',
       scope: 'personal organization',
-      evidenceRef: 'operator-evidence/fly-spend-limit.txt',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
     },
   });
   try {
