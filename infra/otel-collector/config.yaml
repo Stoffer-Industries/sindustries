@@ -50,6 +50,25 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 1024
+  # Cardinality trim (2026-11-16): the OpenClaw gateway's own RPC-pipeline
+  # histograms (admission/handler/first-response/queue-wait timing, each
+  # broken down per agent/session) are internal plumbing detail that no
+  # dashboard in this repo reads (verified: no `gateway_rpc` reference in
+  # infra/cloud/observability/grafana/dashboards/). Alone they were ~3,364 of
+  # the ~12,203 active series that pushed the Grafana Cloud free tier (10k)
+  # over its limit the day after the local->cloud cutover (task a7938522) —
+  # these metrics were previously free on the local, cap-free Prometheus and
+  # only started counting once the collector started exporting to the metered
+  # tenant. Dropped here rather than at the source so OpenClaw's own gateway
+  # code and local dev visibility (`:8888` self-telemetry) are unaffected.
+  filter/drop_high_cardinality_gateway_rpc:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name == "openclaw_gateway_rpc_admission_ms_milliseconds_bucket"'
+        - 'name == "openclaw_gateway_rpc_handler_ms_milliseconds_bucket"'
+        - 'name == "openclaw_gateway_rpc_first_response_ms_milliseconds_bucket"'
+        - 'name == "openclaw_gateway_rpc_queue_wait_ms_milliseconds_bucket"'
 
 exporters:
   # Grafana Cloud is the telemetry destination for every local span and metric.
@@ -85,7 +104,7 @@ service:
       exporters: [otlphttp/grafana_cloud, spanmetrics]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [batch, filter/drop_high_cardinality_gateway_rpc]
       exporters: [otlphttp/grafana_cloud]
     metrics/spanmetrics:
       receivers: [spanmetrics]
