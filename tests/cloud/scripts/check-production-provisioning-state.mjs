@@ -392,7 +392,9 @@ export function evaluateProvisioningState(state, options = {}) {
   // a read-back. Dropping a malformed section would turn a recorded spend
   // limit into an unrecorded one and flip the ordering gate red with no
   // explanation of why.
-  const operatorEvidenceValidation = validateOperatorEvidence(state.operatorEvidence);
+  const operatorEvidenceValidation = validateOperatorEvidence(state.operatorEvidence, {
+    capturedAt: state.capturedAt,
+  });
   if (!operatorEvidenceValidation.ok) {
     add(
       row('artifact.operator-evidence', 'unmet', {

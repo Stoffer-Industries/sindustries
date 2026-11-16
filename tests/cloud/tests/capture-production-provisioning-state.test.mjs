@@ -919,6 +919,48 @@ test('a recorded operator read-back is carried into the artifact', () => {
   }
 });
 
+
+test('an operator evidence file without an inspectable pointer is refused', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: {
+      recorded: true,
+      readBackAt: '2026-11-16T00:00:00.000Z',
+      scope: 'personal organization',
+      targets: ['sindustries-platform-production'],
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path, {
+      capturedAt: '2026-11-16T01:00:00.000Z',
+    });
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /evidenceRef/);
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('an operator evidence file stamped after the capture is refused', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: {
+      recorded: true,
+      readBackAt: '2026-11-16T01:00:01.000Z',
+      scope: 'personal organization',
+      evidenceRef: 'operator-evidence/fly-spend-limit.txt',
+      targets: ['sindustries-platform-production'],
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path, {
+      capturedAt: '2026-11-16T01:00:00.000Z',
+    });
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /after the artifact was captured/);
+  } finally {
+    file.cleanup();
+  }
+});
+
 test('an operator evidence file that cannot be read is refused', () => {
   const { evidence, problems } = loadOperatorEvidence('/tmp/does-not-exist-operator-evidence.json');
   assert.equal(evidence, null);

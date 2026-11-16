@@ -94,6 +94,8 @@
 //  73. A non-surface operator evidence target fails the shape gate.
 //  74. A repeated operator evidence target fails the shape gate.
 //  75. An operator obligation with no expected surface stays open.
+//  76. A recorded read-back without an inspectable pointer fails.
+//  77. A read-back stamped after the artifact capture fails.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -254,6 +256,27 @@ test('a recorded read-back with no read-back time fails', () => {
   assertFails(
     mutate((state) => {
       delete state.operatorEvidence.flySpendLimit.readBackAt;
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+
+test('a recorded read-back without an inspectable pointer fails', () => {
+  // A boolean, timestamp and target list still prove only that a statement
+  // was made. Without a pointer to the read-back, nobody can inspect it.
+  assertFails(
+    mutate((state) => {
+      delete state.operatorEvidence.flySpendLimit.evidenceRef;
+    }),
+    'artifact.operator-evidence',
+  );
+});
+
+test('a read-back stamped after the artifact capture fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.operatorEvidence.flySpendLimit.readBackAt = '2099-01-01T00:00:00.000Z';
     }),
     'artifact.operator-evidence',
   );
