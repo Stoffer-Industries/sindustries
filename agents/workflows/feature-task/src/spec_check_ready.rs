@@ -431,6 +431,24 @@ pub(crate) fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
 /// post-merge test (`run_post_merge_worktree_cleanup`) consumes the
 /// helpers via `crate::git_worktree::*` paths per the W37 carve
 /// convention.
+/// True when the `qa_agent` gate is open for ordinary reasons: delivery is
+/// complete, QA has not verified it, and none of the genuine-handoff or
+/// evidence-failure arms in `workflow_attention_owner` apply. This is the
+/// exact condition under which that function resolves to no explicit owner
+/// (task `fb9a7a3e`, Tom 2026-11-16) and the queue's gate-owner fallback is
+/// the correct actionable signal instead. Exposed separately so
+/// `reconciled_attention_owners` can also clear a *different* stale managed
+/// head (e.g. a leftover `Quinn` row) in this state, not just skip writing
+/// a new `Ash` row.
+fn ash_qa_gate_open_without_escalation(task: &Task) -> bool {
+    !product_spec_parsing::implementer_pr_urls(task).is_empty()
+        && !task_approvals::qa_agent_verified(task)
+        && !task_approvals::qa_agent_deferred(task)
+        && !task_approvals::qa_agent_deferred_capability_extension_complete(task)
+        && !latest_lobster_delivery_failure(task)
+        && !task_approvals::qa_agent_blocked_after_latest_delivery(task)
+}
+
 pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
     match task.status.as_str() {
         "ready"
@@ -479,17 +497,22 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
             // delivery assignee on every sweep.
             task.assignee.clone()
         }
-        "doing"
-            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
-                && !task_approvals::qa_agent_verified(task)
-                && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(task)
-                && !ash_was_last_commenter(task) =>
-        {
-            // The QA gate is open and nobody has verified the delivery, so
-            // the gate owner is the actor who must act next. Task
-            // `dbce028f`: this is where a generic QA-gate prompt lands —
-            // it names Ash, so the stack names Ash.
-            Some("Ash".to_string())
+        "doing" if ash_qa_gate_open_without_escalation(task) && !ash_was_last_commenter(task) => {
+            // The QA gate is open and nobody has verified the delivery, but
+            // this is ordinary workflow progression, not a genuine blocker
+            // or cross-role handoff: nobody was ever stuck, so there is
+            // nothing to hand off. Ash is the gate owner for `qa_agent`, and
+            // the queue's gate-owner fallback already surfaces this task to
+            // her the moment the gate opens (`agent_task_queue.py`: "the
+            // exact current outstanding workflow-gate owner is actionable"
+            // when `attentionOwners` is empty). Writing an explicit `Ash`
+            // row here duplicates that fallback for no behavioural gain and
+            // re-pages her on every sweep, exactly the pattern the
+            // `qa_agent_verified` arm below already avoids (task
+            // `1e8a430a`, decision D3). Task `fb9a7a3e` (Tom, 2026-11-16):
+            // resolve to `None` and let the gate-owner fallback do the
+            // work, consistent with D3.
+            None
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
@@ -711,7 +734,16 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     } else if owners.first().is_some_and(|owner| {
         managed_owner_reason_satisfied(task, owner)
             || automated_delivery_checklist_slot(task, owner)
+            || (is_managed_attention_owner(task, owner) && ash_qa_gate_open_without_escalation(task))
     }) {
+        // The third disjunct covers task `fb9a7a3e`: once the ordinary
+        // `qa_agent` gate is open with no genuine blocker, any stale managed
+        // head left over from an earlier stage (most commonly a `Quinn` row
+        // whose own reason is already satisfied by a different check) is
+        // cleared rather than stranded. The gate-owner fallback, not an
+        // explicit row, is the correct signal here -- same outcome as the
+        // baseline Tom-acceptance-gate removal above, generalised to Ash's
+        // baseline `doing` gate.
         owners.remove(0);
     }
     enforce_tom_acceptance_only(task, &mut owners);
@@ -1421,8 +1453,13 @@ mod tests {
             Vec::<String>::new()
         );
     }
+    /// Task `fb9a7a3e` (Tom, 2026-11-16): the ordinary `qa_agent` gate-open
+    /// no longer writes an explicit `Ash` row -- the queue's gate-owner
+    /// fallback already surfaces Ash once Lobster's criteria are met in
+    /// `doing`. The stale `Rowan` head is cleared (Rowan is the delivery
+    /// assignee, a managed owner), not replaced with `Ash`.
     #[test]
-    fn routing_replaces_implementer_with_ash_after_delivery() {
+    fn routing_clears_implementer_head_after_delivery_relying_on_the_gate_fallback() {
         let mut task = routing_task("doing", &["Rowan", "Tom"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1435,7 +1472,7 @@ mod tests {
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Ash"]
+            Vec::<String>::new()
         );
     }
 
@@ -1520,8 +1557,12 @@ mod tests {
         );
     }
 
+    /// Task `fb9a7a3e`: the capability-resolution resumption also relies on
+    /// the gate fallback now -- once `[qa-agent-capability-resolved]` makes
+    /// `qa_agent_deferred` false, this is the ordinary open gate, so the
+    /// stale `Quinn` head is cleared rather than replaced with `Ash`.
     #[test]
-    fn routing_sends_resolved_capability_deferral_to_ash_then_stops_paging_the_assignee() {
+    fn routing_clears_quinn_head_on_resolved_capability_deferral_then_stops_paging_the_assignee() {
         let mut task = routing_task("doing", &["Quinn", "Tom"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1544,7 +1585,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(reconciled_attention_owners(&task), vec!["Ash"]);
+        assert_eq!(reconciled_attention_owners(&task), Vec::<String>::new());
 
         task.comments.push(TaskComment {
             author: Some("Ash".to_string()),
@@ -1663,10 +1704,15 @@ mod tests {
 
     // ---- task dbce028f: QA-gate prompt vs evidence verdict ----
 
-    /// AC1: a generic QA-gate prompt on a delivery-complete task routes to
-    /// the QA gate owner, never to the delivery assignee.
+    /// AC1 (superseded by task `fb9a7a3e`): a generic QA-gate prompt on a
+    /// delivery-complete task must not select the delivery assignee, and
+    /// must not write an explicit `Ash` escalation row either — the QA
+    /// gate owner is already actionable through the queue's gate-owner
+    /// fallback (`agent_task_queue.py`), so an ordinary gate-open with no
+    /// real blocker resolves to no explicit attention owner, same as the
+    /// `qa_agent_verified` arm (task `1e8a430a`, decision D3).
     #[test]
-    fn qa_gate_prompt_routes_to_the_qa_gate_owner() {
+    fn qa_gate_prompt_routes_to_no_explicit_owner_relying_on_the_gate_fallback() {
         let task: Task = serde_json::from_str(include_str!(
             "../fixtures/qa_routing/2c782afb-qa-gate-prompt.json"
         ))
@@ -1674,13 +1720,17 @@ mod tests {
 
         assert_eq!(
             workflow_attention_owner(&task),
-            Some("Ash".to_string()),
-            "a generic QA-gate prompt must route to the QA gate owner"
+            None,
+            "a generic QA-gate prompt must not write an explicit escalation row; the gate-owner fallback already surfaces Ash"
         );
         let stack = reconciled_attention_owners(&task);
         assert!(
             !stack.iter().any(|owner| owner.eq_ignore_ascii_case("Rowan")),
             "the sweep must not re-add the delivery assignee: {stack:?}"
+        );
+        assert!(
+            stack.is_empty(),
+            "an ordinary QA-gate-open state must not carry an explicit Ash row either: {stack:?}"
         );
     }
 
@@ -1739,8 +1789,12 @@ mod tests {
         );
     }
 
+    /// Task `fb9a7a3e`: the legacy `[quinn-resolved]` resumption also
+    /// relies on the gate fallback now. Once the comment makes
+    /// `qa_agent_deferred` false again, this is just the ordinary open gate
+    /// -- the stale `Quinn` head is cleared, not replaced with `Ash`.
     #[test]
-    fn routing_accepts_legacy_quinn_resolved_capability_marker() {
+    fn routing_clears_quinn_head_on_legacy_resolved_capability_marker() {
         let mut task = routing_task("doing", &["Quinn"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1761,7 +1815,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(reconciled_attention_owners(&task), vec!["Ash"]);
+        assert_eq!(reconciled_attention_owners(&task), Vec::<String>::new());
     }
 
     #[test]
@@ -1918,8 +1972,11 @@ mod tests {
             vec!["Rowan"]
         );
     }
+    /// Task `fb9a7a3e`: resuming delivery after a stale block also relies
+    /// on the gate fallback now -- Rowan's re-delivery reopens the ordinary
+    /// `qa_agent` gate, which no longer writes an explicit `Ash` row.
     #[test]
-    fn routing_resumes_ash_after_delivery_comments_again() {
+    fn routing_clears_implementer_head_after_delivery_comments_again() {
         let mut task = routing_task("doing", &["Rowan", "Tom"]);
         task.comments.push(TaskComment {
             author: Some("Ash".to_string()),
@@ -1944,7 +2001,7 @@ mod tests {
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Ash"]
+            Vec::<String>::new()
         );
     }
     /// A stack headed by the delivery assignee at the baseline acceptance gate
@@ -2103,12 +2160,15 @@ mod tests {
         );
     }
 
-    /// AC3 (task `91a6a3ea`): the removal is scoped to the baseline
-    /// `acceptance -> accepted` gate. Everywhere else a managed head is still
-    /// *replaced* by the owner the workflow wants to route to, so the
-    /// `doing`-stage QA handoff is untouched.
+    /// AC3 (task `91a6a3ea`, updated by task `fb9a7a3e`): the removal is
+    /// scoped to the baseline `acceptance -> accepted` gate, but the
+    /// `doing`-stage QA handoff no longer replaces a managed head with an
+    /// explicit `Ash` row either — ordinary gate-open is not a genuine
+    /// blocker, so a stale Quinn head is cleared (not replaced) and the QA
+    /// gate owner is surfaced through the queue's gate-owner fallback
+    /// instead (task `1e8a430a`, decision D3).
     #[test]
-    fn routing_still_replaces_managed_head_outside_the_baseline_gate() {
+    fn routing_clears_managed_head_at_the_doing_stage_qa_handoff_instead_of_replacing_it() {
         let mut task = routing_task("doing", &["Quinn"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -2118,10 +2178,10 @@ mod tests {
             ),
             ..Default::default()
         });
-        assert_eq!(workflow_attention_owner(&task), Some("Ash".to_string()));
+        assert_eq!(workflow_attention_owner(&task), None);
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Ash"]
+            Vec::<String>::new()
         );
     }
 
