@@ -460,6 +460,8 @@ pub(crate) fn qa_agent_deferred_waiting_on_capability_extension(task: &Task) -> 
     task.dependency_blocked && qa_agent_deferred(task)
 }
 
+
+
 /// True when the dependency that carried a deferred capability gap has
 /// completed. The original task is ready for Ash to rerun; the stale Quinn
 /// handoff must not survive the completed dependency.
