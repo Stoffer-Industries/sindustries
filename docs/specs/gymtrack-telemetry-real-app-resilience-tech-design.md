@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 8c3aa401-fed8-4f51-a93c-6ab69eea6419
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 1003
+shipped_date: 2026-11-16
 ---
 
 # GymTrack telemetry resilience — real-application proof — Tech Design
