@@ -5,9 +5,15 @@
 # This script exists so the staging deploy interface is exercisable from a
 # laptop by a human operator (Quinn / Tom) **and** from automation that
 # already has flyctl authenticated. It is **not** a replacement for the
-# reusable `deploy-staging-<service>.yml` GitHub Actions workflows — those
-# remain the canonical deploy path for main-branch changes. The bin/ scripts
-# are for ad-hoc canaries, rehearsal, and incident-time hotfixes.
+# canonical main-branch deploy path: `.github/workflows/deploy-staging-platform.yml`
+# (plus `deploy-staging-health-probe.yml` for the separate health-probe app),
+# which is what `.github/workflows/ci.yml` calls after the merge gate. The
+# four per-service `deploy-staging-<service>.yml` workflows were retired at
+# the 2026-11-07 staging consolidation (task 219fb673) — their deploy jobs
+# were removed from `ci.yml`, they are `workflow_call`-only with no caller,
+# and they stay in the tree only until the cleanup in
+# `docs/runbooks/platform-consolidation-rollback.md` §5 deletes them. The
+# bin/ scripts are for ad-hoc canaries, rehearsal, and incident-time hotfixes.
 #
 # Per the cloud-staging-environment tech design:
 # - pin an immutable image / commit SHA — `latest` is forbidden
