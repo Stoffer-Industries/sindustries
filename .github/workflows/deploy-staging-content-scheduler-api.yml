@@ -1,5 +1,23 @@
 # GitHub Actions: deploy content-scheduler-api to Fly.io staging.
 #
+# RETIRED — orphaned per-service staging deploy workflow.
+#
+# The 2026-11-07 staging consolidation (task 219fb673) destroyed the four
+# per-service staging Fly apps and moved staging onto the ONE consolidated
+# platform app. The live staging deploy path is
+# `.github/workflows/deploy-staging-platform.yml` (config
+# `infra/cloud/fly/platform.fly.toml`); `.github/workflows/ci.yml` calls only
+# that workflow and `deploy-staging-health-probe.yml`, so nothing calls this
+# one any more. It is retained because
+# `tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs` still
+# requires the file to exist, and its deletion is tracked in
+# `docs/runbooks/platform-consolidation-rollback.md` §5. The FLY_APP and
+# FLY_CONFIG values below still name the retired per-service app and its
+# retired spec — they are left unchanged because the static checks read them,
+# not because they are a live deploy path.
+#
+# Live topology: `docs/systems/cloud-platform.md`.
+#
 # Stable hostname (task 5cb4a8fe; source of truth:
 # infra/cloud/hostname-matrix.json). The smoke check hits the stable
 # staging hostname (content-scheduler-api.staging.sindustries.co.nz).
