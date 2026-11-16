@@ -32,7 +32,7 @@ The local keys are the operator-facing convenience documented in [`infra/cloud/e
 | `PRODUCTION_TASKS_API_DATABASE_URL` | `TASKS_API_DATABASE_URL` | `PLATFORM_TASKS_API_DATABASE_URL` (schema `tasks_api`) | yes | Quinn (Neon production) | 90d or on-incident |
 | `PRODUCTION_BUDGET_API_DATABASE_URL` | `BUDGET_API_DATABASE_URL` | `PLATFORM_BUDGET_API_DATABASE_URL` (schema `budget_api`) | yes | Quinn (Neon production) | 90d or on-incident |
 | `PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL` | `AUTO_POST_WORKER_DATABASE_URL` | `PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL` (schema `content_scheduler`) | no — derived from the tasks-api DSN when absent | Quinn (Neon production) | with the database |
-| `PRODUCTION_HEALTH_PROBE_REDIS` | `HEALTH_PROBE_REDIS` (or `TASKS_API_CONTENT_SCHEDULER_REDIS_URL`) | `PLATFORM_CONTENT_SCHEDULER_REDIS_URL`, `PLATFORM_AUTO_POST_WORKER_REDIS_URL`, `PLATFORM_HEALTH_PROBE_REDIS_URL` | yes | Quinn (Upstash production, TLS) | per-deploy |
+| `PRODUCTION_HEALTH_PROBE_REDIS` | `HEALTH_PROBE_REDIS` (or `TASKS_API_CONTENT_SCHEDULER_REDIS_URL`) | `PLATFORM_CONTENT_SCHEDULER_REDIS_URL`, `PLATFORM_AUTO_POST_WORKER_REDIS_URL`, `PLATFORM_HEALTH_PROBE_REDIS_URL` | yes | Quinn (Fly-managed Upstash `sindustries-production`, Pay-as-you-go, `syd`) | per-deploy |
 | `PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `PLATFORM_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | yes | Quinn | per-deploy |
 | `PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `PLATFORM_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | yes | Quinn | per-deploy |
 
@@ -58,7 +58,11 @@ redis://:<password>@<upstash-host>:6379
 <opaque token>
 ```
 
-**Redis caveat:** the Redis source must be the **live** production instance. A URL pointing at a deleted instance still parses as a `redis://` URL, so the shape check passes; only the supervisor's first queue operation would fail. Verify the instance answers before bootstrapping.
+**Redis caveat:** the Redis source must be the live `sindustries-production`
+Fly-managed add-on, never `sindustries-staging`. The queue name is not
+environment-suffixed, so sharing one database would allow a worker to consume
+the other environment's jobs. The provisioning-state capture verifies the
+production add-on's name, plan, region and deployed probe target fingerprint.
 
 ---
 

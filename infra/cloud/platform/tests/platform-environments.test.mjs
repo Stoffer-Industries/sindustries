@@ -147,6 +147,7 @@ describe('platform environment manifest', () => {
       assert.ok(environment.platformApp, `${environment.id} needs a platform app name`);
       assert.ok(environment.healthProbeApp, `${environment.id} needs a health-probe app name`);
       assert.ok(environment.githubEnvironment, `${environment.id} needs a GitHub environment`);
+      assert.ok(environment.redisAddon?.name, `${environment.id} needs a Redis add-on name`);
       assert.ok(environment.schemas.tasks, `${environment.id} needs a tasks schema`);
       assert.ok(environment.schemas.budget, `${environment.id} needs a budget schema`);
       assert.ok(
@@ -179,6 +180,22 @@ describe('platform environment manifest', () => {
       assert.ok(!url.includes('staging'), `${url} must not be a staging URL`);
       assert.ok(url.startsWith('https://'), `${url} must be an https URL`);
     }
+  });
+
+  it('pins separate Fly-managed Pay-as-you-go Redis add-ons', () => {
+    assert.deepEqual(STAGING.redisAddon, {
+      provider: 'upstash_redis',
+      name: 'sindustries-staging',
+      plan: 'Pay-as-you-go',
+      primaryRegion: 'syd',
+    });
+    assert.deepEqual(PRODUCTION.redisAddon, {
+      provider: 'upstash_redis',
+      name: 'sindustries-production',
+      plan: 'Pay-as-you-go',
+      primaryRegion: 'syd',
+    });
+    assert.notEqual(PRODUCTION.redisAddon.name, STAGING.redisAddon.name);
   });
 
   it('matches the deployed staging health-probe app and hostname matrix', () => {
@@ -298,6 +315,17 @@ describe('assertEnvironmentManifest', () => {
   it('refuses a production manifest that reuses the staging app name', () => {
     const broken = { ...PRODUCTION, platformApp: STAGING.platformApp };
     assert.throws(() => assertEnvironmentManifest(broken), /must not reuse the staging platform app/);
+  });
+
+  it('refuses a production manifest that reuses the staging Redis add-on', () => {
+    assert.throws(
+      () =>
+        assertEnvironmentManifest({
+          ...PRODUCTION,
+          redisAddon: { ...PRODUCTION.redisAddon, name: STAGING.redisAddon.name },
+        }),
+      /must not reuse the staging Redis add-on name/,
+    );
   });
 
   it('refuses a production manifest that reuses a staging base URL', () => {

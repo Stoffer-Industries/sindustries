@@ -5,16 +5,53 @@ import {
   parseDbTargets,
   parseHttpTargets,
   parseRedisTargets,
+  probeTargetFingerprints,
   probeDb,
   probeDbTargets,
   probeFlyApp,
   probeFlyTargets,
   probeRedis,
   probeRedisTargets,
+  targetHostFingerprint,
 } from '../src/probe.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('deployed target fingerprints', () => {
+  it('drops credentials and normalises Neon pooler hosts', () => {
+    expect(
+      targetHostFingerprint(
+        'postgresql://service:secret@ep-cool-blue-123-pooler.us-east-2.aws.neon.tech/db',
+      ),
+    ).toBe('7750912778cbba46');
+    expect(targetHostFingerprint('rediss://default:secret@redis.example.test:6379')).toBe(
+      'd77ea2576b36bcd8',
+    );
+  });
+
+  it('publishes only target labels, kinds and host fingerprints', () => {
+    expect(
+      probeTargetFingerprints(
+        configFromEnv({
+          HEALTH_PROBE_DATABASES:
+            'tasks=postgresql://service:secret@ep-cool-blue-123-pooler.us-east-2.aws.neon.tech/db',
+          HEALTH_PROBE_FLY_APPS: 'tasks=https://tasks-api.example.test/health',
+          HEALTH_PROBE_REDIS:
+            'content-scheduler=rediss://default:secret@redis.example.test:6379',
+        }),
+      ),
+    ).toEqual([
+      { kind: 'database', target: 'tasks', hostFingerprint: '7750912778cbba46' },
+      { kind: 'fly-app', target: 'tasks', hostFingerprint: 'ef41e767e22b29b6' },
+      {
+        kind: 'redis',
+        target: 'content-scheduler',
+        hostFingerprint: 'd77ea2576b36bcd8',
+      },
+    ]);
+  });
 });
 
 describe('parseDbTargets', () => {

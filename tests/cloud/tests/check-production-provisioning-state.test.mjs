@@ -57,7 +57,7 @@
 //  43. A deployed probe pointed at another environment's database fails.
 //  44. A deployed probe pointed at the staging Redis fails.
 //  45. A deployed probe that carries no target list for a key fails.
-//  46. Machines that disagree on a target fail.
+//  46. Duplicate target metrics that disagree fail.
 //  47. An unreadable deployed probe target capture fails.
 //  48. An expectation set with no production host fails the probe target gate.
 //  49. A deployed CORS allow-list that names a staging origin fails.
@@ -589,14 +589,22 @@ test('a missing production Environment source secret fails', () => {
   );
 });
 
-test('no production Redis database fails', () => {
+test('a missing Fly-managed production Redis database fails', () => {
   assertFails(
     mutate((state) => {
-      state.providers.upstash.databases = [
-        { name: 'sindustries-content-scheduler-staging', type: 'free', endpointHostFingerprint: '356d21d35ee6b7ec' },
-      ];
+      state.providers.fly.redis.exists = false;
     }),
-    'upstash.production-redis-database',
+    'fly.production-redis-database',
+  );
+});
+
+test('a Fly-managed production Redis database on the wrong plan or region fails', () => {
+  assertFails(
+    mutate((state) => {
+      state.providers.fly.redis.plan = 'Free';
+      state.providers.fly.redis.primaryRegion = 'iad';
+    }),
+    'fly.production-redis-database',
   );
 });
 
@@ -1007,7 +1015,7 @@ test('a deployed probe that carries no target list for a key fails', () => {
   );
 });
 
-test('machines that disagree on a probe target fail', () => {
+test('duplicate deployed target metrics that disagree fail', () => {
   assertFails(
     mutate((state) => {
       state.providers.fly.healthProbeTargets.conflictingKeys = ['HEALTH_PROBE_REDIS'];

@@ -21,6 +21,7 @@
  * so Quinn can reconfigure without redeploying the probe image.
  */
 
+import { createHash } from 'node:crypto';
 import pg from 'pg';
 import IORedis, { type Redis } from 'ioredis';
 
@@ -42,6 +43,56 @@ export type ProbeResult = {
   fly: Array<{ app: string; up: 0 | 1; error?: string }>;
   redis: Array<{ app: string; up: 0 | 1; error?: string }>;
 };
+
+export type ProbeTargetFingerprint = {
+  kind: 'database' | 'fly-app' | 'redis';
+  target: string;
+  hostFingerprint: string;
+};
+
+/**
+ * Reduce a target URL/DSN to the same value-free host fingerprint used by
+ * the production evidence capture. Credentials, ports, paths and query
+ * strings never leave this function. Neon's direct and pooler hostnames are
+ * normalised to the same endpoint id before hashing.
+ */
+export function targetHostFingerprint(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const schemeAt = raw.indexOf('://');
+  const afterScheme = schemeAt >= 0 ? raw.slice(schemeAt + 3) : raw;
+  const authority = afterScheme.split(/[/?#]/)[0];
+  const withoutUserInfo = authority.includes('@')
+    ? authority.slice(authority.lastIndexOf('@') + 1)
+    : authority;
+  const host = withoutUserInfo.startsWith('[')
+    ? withoutUserInfo.slice(0, withoutUserInfo.indexOf(']') + 1)
+    : withoutUserInfo.split(':')[0];
+  const normalized = host.trim().toLowerCase();
+  if (!normalized) return null;
+  const firstLabel = normalized.split('.')[0];
+  const identity = /^ep-[a-z0-9]+(?:-[a-z0-9]+)*(?:-pooler)?$/i.test(firstLabel)
+    ? firstLabel.replace(/-pooler$/i, '')
+    : normalized;
+  return createHash('sha256').update(identity).digest('hex').slice(0, 16);
+}
+
+/** The deployed target identities safe to publish on `/metrics`. */
+export function probeTargetFingerprints(config: ProbeConfig): ProbeTargetFingerprint[] {
+  const rows: ProbeTargetFingerprint[] = [];
+  const append = (
+    kind: ProbeTargetFingerprint['kind'],
+    target: string,
+    value: string,
+  ): void => {
+    const hostFingerprint = targetHostFingerprint(value);
+    if (hostFingerprint) rows.push({ kind, target, hostFingerprint });
+  };
+  for (const target of config.dbs) append('database', target.app, target.connectionString);
+  for (const target of config.flyApps) append('fly-app', target.app, target.url);
+  for (const target of config.redis) append('redis', target.app, target.url);
+  return rows;
+}
 
 /** Format a JSON-safe error message without leaking the connection string. */
 function safeError(err: unknown): string {

@@ -30,7 +30,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | HTTP services (tasks-api, budget-api, content-scheduler-api) | One Fly app, four child processes behind the nginx router's path-prefix routes; `http_checks` on the platform app | Rowan | `infra/cloud/fly/platform.fly.toml` (+ `infra/cloud/platform/nginx.conf.template`) |
 | Long-running worker              | Child process inside the platform app (no HTTP listener) | Rowan  | `infra/cloud/platform/platform-services.mjs`                 |
 | Primary database                 | Neon managed Postgres (syd region, branch-per-env)       | Quinn  | Neon dashboard (URLs in `infra/cloud/env/*.env.example`)      |
-| Queue + cache                    | Upstash managed Redis (TLS, pay-per-request)             | Quinn  | Upstash dashboard (URLs in `infra/cloud/env/*.env.example`)   |
+| Queue + cache                    | Separate Fly-managed Upstash Redis add-ons for staging and production, both Pay-as-you-go in `syd` | Quinn | Fly Redis (`fly redis list --org personal`); names/plan/region in `platform-environments.mjs` |
 | Object storage                   | (not used yet)                                           | —      | —                                                             |
 | Observability                    | OpenTelemetry via `@sindustries/otel-node` → collector   | Shared | `infra/cloud/env/*.env.example` (OTEL_EXPORTER_OTLP_ENDPOINT) |
 | Domain                           | `sindustries.co.nz` (apex for production; `*.staging.sindustries.co.nz` for staging) — supersedes the foundation's `sindustries.dev` reservation per task `5cb4a8fe` | Quinn  | DNS provider + `infra/cloud/hostname-matrix.json` (machine-readable source of truth) |
@@ -57,12 +57,12 @@ All env-var **names** referenced by deploy workflows are reviewable in the repo.
 
 ## Why Fly.io (and what we considered)
 
-**Decision:** Fly.io for compute, Neon for Postgres, Upstash for Redis.
+**Decision:** Fly.io for compute, Neon for Postgres, and Fly-managed Upstash Redis.
 
 ### Fly.io
 
 - **Pros.** Fast deploys from a Dockerfile (no platform-specific buildpack). Built-in canary deploys + releases history. Generous free tier + simple shared-cpu pricing. Sydney region available (matches Tom/Quinn geography + Akahu/NZ latency profile). Process-group isolation matches our `gymtrack-mcp` precedent (one Fly app per service). No VPC/networking setup required to start.
-- **Cons.** Tied to Fly's machine image + supervisor model. No first-party managed Redis (would have to add Upstash anyway). VM-only — no scale-to-zero for HTTP services without `auto_stop_machines=stop`, which we use for staging cost control.
+- **Cons.** Tied to Fly's machine image + supervisor model. The Redis add-on is Upstash operated through Fly rather than a native Fly data service. VM-only — no scale-to-zero for HTTP services without `auto_stop_machines=stop`, which we use for staging cost control.
 - **Alternatives considered.**
   - **Render** — easy deploys but no canary strategy out of the box; the team has no operational history with Render.
   - **Railway** — opinionated runtime; would constrain the Dockerfile-based build pattern; no canary.
@@ -78,11 +78,12 @@ Fly.io is the right shape for the foundation milestone: low operational overhead
 - **Cons.** Vendor lock-in for the branch workflow. Serverless-tier cold start (~500ms) on first query.
 - **Alternatives considered.** Fly Postgres (single-region only, shared cluster), Supabase (more about auth + storage, not our shape), RDS (heavier than we need for staging), self-hosted (operational burden).
 
-### Upstash
+### Fly-managed Upstash Redis
 
-- **Pros.** Serverless Redis with TLS by default; scales to zero so the staging queue costs near-nothing when idle. Sydney region. Keeps the existing `REDIS_URL` env-var contract (the `services/tasks-api` BullMQ adapter from PR #411 and `services/gymtrack-mcp` Redis consumers work as-is).
-- **Cons.** Vendor lock-in for the serverless-pricing model. REST API surface as an alternative to `rediss://` for locked-down environments.
-- **Alternatives considered.** Fly Redis (would couple queue vendor to compute vendor — explicit non-goal for foundation), self-hosted Redis (operational burden), Memcached (no persistence, no BullMQ).
+- **Pros.** Serverless Redis with TLS by default, provisioned and billed through the same Fly organization as compute. Sydney region. Keeps the existing `REDIS_URL` contract unchanged.
+- **Isolation.** `sindustries-staging` and `sindustries-production` are distinct Pay-as-you-go databases. They must never be collapsed: the BullMQ queue name is not environment-suffixed, so sharing one Redis would let either worker consume the other environment's jobs.
+- **Cons.** The database still runs on Upstash, while lifecycle and billing are mediated by Fly. Direct Upstash account APIs cannot inventory these add-ons; the production evidence reads Fly's add-on GraphQL surface instead.
+- **Alternatives considered.** Direct Upstash account databases (retired for staging and not the production source of truth), self-hosted Redis (operational burden), Memcached (no persistence, no BullMQ).
 
 ---
 
@@ -107,12 +108,12 @@ Current staging cost (4 services, near-idle):
 | ----------------------------------------------- | ------------------------ | ---------------------------------------------------- |
 | Fly — 4 × `shared-cpu-1x` 1 GB machines         | ~$20/mo                  | HTTP services stop when idle; the worker stays available for queued jobs |
 | Neon — staging branch (free tier)               | $0                       | Free tier covers staging; production will move to Pro |
-| Upstash — staging Redis (free tier)             | $0                       | Pay-per-request model; staging won't exceed free     |
+| Fly-managed Upstash — staging Redis (Pay-as-you-go) | usage-based           | Dedicated `sindustries-staging` database in `syd`    |
 | Domain — `sindustries.co.nz` (annual)           | ~$15/yr (~$1.25/mo)      | Quinn-registered; replaces the foundation's `sindustries.dev` reservation per task `5cb4a8fe` |
 | GH Actions (deploys on push to main)            | $0                       | Within repo free tier                                |
 | **Total staging**                               | **~$21/mo**              |                                                      |
 
-Production cost projection (when traffic is real): dominated by Neon compute-hours + Upstash request volume. Re-estimate when the production cutover task (`020f423e`) starts.
+Production cost projection: dominated by Neon compute-hours + Fly-managed Upstash request volume. Production uses its own `sindustries-production` Pay-as-you-go database in `syd`.
 
 ### Consolidated platform (task `219fb673`)
 
@@ -263,8 +264,8 @@ repository uses.
 
 **Credential boundary.** The production credential path is the same rule as
 staging, with the `production` GitHub Environment instead of `staging`: the
-live values (`FLY_API_TOKEN`, the Neon production DSNs, the Upstash
-production Redis URLs, the DNS provider token) are owned and registered by
+live values (`FLY_API_TOKEN`, the Neon production DSNs, the Fly-managed
+Upstash production Redis URL, the DNS provider token) are owned and registered by
 Quinn as masked secrets and never enter the repo. The repository carries
 only the *names* the manifest requires (the `PRODUCTION_*` source names) and
 the provisioning contract that maps them onto the app-level `PLATFORM_*`
@@ -275,13 +276,11 @@ dry-run mode prints secret *names* only — never values. See
 [Credential boundary](#credential-boundary) for the full boundary and the
 repair path for a missing `FLY_API_TOKEN`.
 
-**Nothing is live yet.** As of this writing the production environment does
-not exist: no production Fly app, no production Neon branch, no production
-DNS records, no production secrets. Everything above describes the target
-topology and the contract that will create it; the live provisioning
-evidence is Slice D of the tech design, and the operator-facing blocker
-list lives in
-[`docs/cloud/production-blockers.md`](../cloud/production-blockers.md).
+**Production is live.** On 2026-11-16 the consolidated platform, production
+health probe, Neon branch, dedicated Fly-managed Redis add-on and the four
+Fly-hosted production DNS/TLS surfaces were provisioned. The value-free live
+read-backs are in
+[`docs/cloud/production-provisioning-readback.md`](../cloud/production-provisioning-readback.md).
 
 ---
 
@@ -489,9 +488,9 @@ remain blocked on task `5cb4a8fe`).
 
 | Asset                                | Owner  | How it's paid                                |
 | ------------------------------------ | ------ | -------------------------------------------- |
-| Fly.io organisation `sindustries`    | Quinn  | Quinn's personal card; will move to SIndustries billing once that's a legal entity |
+| Fly.io organisation `personal`       | Quinn  | Quinn's personal card; will move to SIndustries billing once that's a legal entity |
 | Neon account + projects              | Quinn  | Same                                         |
-| Upstash account                      | Quinn  | Same                                         |
+| Fly-managed Redis add-ons            | Quinn  | Billed through the `personal` Fly organization |
 | `sindustries.dev` domain             | Quinn  | Same                                         |
 | GH repo secrets (`FLY_API_TOKEN`)    | Quinn  | n/a (no cost)                                |
 | GH Actions minutes                   | GitHub | Within the org's plan                        |
@@ -685,13 +684,13 @@ The register's §9 records the live state of the DNS, TLS and Vercel control pla
 
 The `.openclaw` boundary Quinn confirmed on the PR #508 review (merged `d6ee2d8`):
 
-- **Quinn owns** the live values: `FLY_API_TOKEN`, Neon `DATABASE_URL` / `DIRECT_URL`, Upstash `REDIS_URL` / `CONTENT_SCHEDULER_REDIS_URL`, DNS provider token. These never enter the repo.
+- **Quinn owns** the live values: `FLY_API_TOKEN`, Neon `DATABASE_URL` / `DIRECT_URL`, Fly-managed Upstash `REDIS_URL` / `CONTENT_SCHEDULER_REDIS_URL`, DNS provider token. These never enter the repo.
 - **Quinn registers** `FLY_API_TOKEN` through GitHub's masked secret UI under the `staging` and `production` environments as applicable. Workflow YAML references `secrets.FLY_API_TOKEN` by name and performs a fail-fast presence check before installing or invoking Fly tooling.
 - **Rowan ships** only env-var names, Fly app specs, Dockerfiles, and deploy workflows. The workflow templates include `FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}` so the deploy job picks up Quinn's value at job time.
 - **Quinn runs** `infra/cloud/scripts/bootstrap-staging.sh` once. It reads `infra/cloud/.env.local` (gitignored), translates Quinn's per-service prefixed values into the source names the platform provisioner reads, and hands them to `infra/cloud/platform/platform-provision-secrets.mjs`, which registers the app-level `PLATFORM_*` secrets. The provisioner is the single implementation of that mapping, so the local bootstrap and the CI provisioning path cannot register different secrets on the same app.
 - **Quinn rotates** any secret out-of-band. Rotation procedure for tokens with downstream ciphertext rows (e.g. Akahu) was previously `docs/runbooks/rotate-akahu-access-tokens.md` (retired in PR #583; the procedure steps should be regenerated as a new runbook at `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` if Quinn needs to rotate Akahu tokens); no rotation procedure is needed for non-derived secrets.
 
-A new operator joining Quinn's seat gets the same out-of-band onboarding path: 1Password (or equivalent) handoff for `FLY_API_TOKEN` + Neon + Upstash + DNS, plus the `infra/cloud/.env.local` template.
+A new operator joining Quinn's seat gets the same out-of-band onboarding path: 1Password (or equivalent) handoff for `FLY_API_TOKEN` + Neon + DNS and the Fly-generated Redis connection URLs, plus the `infra/cloud/.env.local` template.
 
 If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only through **GitHub → Settings → Environments → staging/production → Environment secrets**. Never paste the value into an issue, task, PR, workflow-dispatch input, command argument, URL, or chat. Re-run the failed gated deployment after the masked value is restored.
 

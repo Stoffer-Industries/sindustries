@@ -220,6 +220,8 @@ export function buildEnvironmentFacts(id = DEFAULT_ENVIRONMENT_ID) {
     healthProbeDeployGateVariable:
       `${environment.id.toUpperCase()}_HEALTH_PROBE_DEPLOY_ENABLED`,
     defaultFlyOrg: DEFAULT_FLY_ORG,
+    /** The Fly-managed Upstash database dedicated to this environment. */
+    redisAddon: environment.redisAddon,
     sourceNames: environment.sourceNames,
     requiredSourceKeys: environment.requiredSourceNames ?? [],
     requiredSourceNames: requiredSourceNames(environment),

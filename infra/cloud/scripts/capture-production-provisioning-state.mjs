@@ -11,9 +11,11 @@
 // tell a reviewer which of the nine Slice D steps is still open.
 //
 // This script is that capture path. It performs READ-ONLY requests against
-// the production control planes — Neon, Fly, the GitHub `production`
-// Environment, Upstash and Cloudflare DNS — and writes a REDACTED artifact:
-// names, flags and counts only. It never writes a value. It creates nothing,
+// the production control planes — Neon, Fly (including its managed Upstash
+// add-on), the GitHub `production` Environment and Cloudflare DNS — and
+// writes a REDACTED artifact:
+// names, flags, counts and one-way host fingerprints only. It never writes a
+// credential value. It creates nothing,
 // changes nothing, and deletes nothing; there is no mutation call anywhere in
 // this file.
 //
@@ -42,8 +44,6 @@
 // Credentials (read from the environment, never from a file in the repo):
 //   NEON_API_KEY          Neon management API
 //   FLY_API_TOKEN         Fly GraphQL API
-//   UPSTASH_API_EMAIL     Upstash REST API (email)
-//   UPSTASH_API_KEY       Upstash REST API (key)
 //   GITHUB_TOKEN          GitHub API (falls back to `gh auth token`)
 //   CLOUDFLARE_API_TOKEN  Cloudflare DNS API (zone records read)
 
@@ -54,8 +54,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   PROBE_TARGET_KEYS,
-  fingerprintProbeTargets,
   hostFingerprint,
+  hostOfTargetValue,
 } from '../platform/probe-target-facts.mjs';
 import { validateOperatorEvidence } from '../platform/production-operator-evidence.mjs';
 
@@ -138,7 +138,6 @@ const PLATFORM_CORS_KEYS = [
  */
 const ORIGIN_SHAPE = /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/i;
 
-const UPSTASH_API_BASE = 'https://api.upstash.com/v2';
 const GITHUB_API_BASE = 'https://api.github.com';
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
@@ -666,7 +665,7 @@ export async function readFlyAppEnv(app, apiToken, keys) {
 }
 
 /**
- * Read the DEPLOYED probe's targets as fingerprints, never as values.
+ * Read the DEPLOYED probe's target fingerprints from its public metrics.
  *
  * AC6 says the production health probe must be "pointed at the new
  * production targets". The capture can prove the deployed cadence; it
@@ -676,59 +675,57 @@ export async function readFlyAppEnv(app, apiToken, keys) {
  * wrong environment — the same false green the cadence gate exists to
  * remove.
  *
- * The target values are secrets (a Postgres DSN, a Redis URL), so only
- * the LABEL of each target and a fingerprint of the service it names are
- * kept. The raw value never leaves this function, and the artifact never
- * carries a host.
+ * Fly deliberately masks secret values from the Machines API: config.env
+ * contains only the plain `[env]` block. The probe therefore publishes a
+ * value-free info metric derived inside the running process, where the
+ * secrets are actually resolved. This reader keeps only the metric's target
+ * label, target kind and 16-hex host fingerprint.
  *
- * The failure modes are kept apart, because they name different owners: an
- * app that does not exist (the operator has not created it), a read that
- * failed (the provider could not be looked at), and an app with no Machine
- * (there is nothing deployed to read a target from).
- *
- * @param {string} app
- * @param {string} apiToken
+ * @param {string} baseUrl
  * @returns {Promise<{captured: boolean, targets?: object, conflictingKeys?: string[], malformedTargets?: number, error?: string}>}
  */
-export async function readFlyAppProbeTargets(app, apiToken) {
-  if (!app) {
+export async function readHealthProbeTargets(baseUrl) {
+  if (!baseUrl) {
     return {
       captured: false,
-      error: 'no Fly app name was supplied, so no probe target could be read',
-    };
-  }
-  const inventory = await fetchFlyMachines(app, apiToken);
-  if (!inventory.read) {
-    return { captured: false, error: inventory.error };
-  }
-  if (inventory.machines.length === 0) {
-    return {
-      captured: false,
-      error: `the Fly app ${app} carries no Machine, so its deployed targets cannot be read`,
+      error: 'no health-probe base URL was supplied, so no deployed target could be read',
     };
   }
 
   try {
-    // key -> label -> the set of fingerprints seen for that label
+    const metricsUrl = new URL('/metrics', baseUrl).href;
+    const response = await fetch(metricsUrl, {
+      headers: { Accept: 'text/plain' },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = await response.text();
+    const keyForKind = {
+      'fly-app': 'HEALTH_PROBE_FLY_APPS',
+      database: 'HEALTH_PROBE_DATABASES',
+      redis: 'HEALTH_PROBE_REDIS',
+    };
     const byKey = new Map();
     let malformed = 0;
-
-    for (const machine of inventory.machines) {
-      const env = machine?.config?.env;
-      if (!env || typeof env !== 'object') continue;
-      for (const key of PROBE_TARGET_KEYS) {
-        const raw = env[key];
-        if (typeof raw !== 'string' || raw.length === 0) continue;
-        const parsed = fingerprintProbeTargets(raw);
-        malformed += parsed.malformed;
-        const byLabel = byKey.get(key) ?? new Map();
-        for (const target of parsed.targets) {
-          const seen = byLabel.get(target.label) ?? new Set();
-          seen.add(target.hostFingerprint);
-          byLabel.set(target.label, seen);
-        }
-        byKey.set(key, byLabel);
+    for (const line of body.split('\n')) {
+      if (!line.startsWith('sindustries_health_probe_target_info{')) continue;
+      const labels = {};
+      const block = line.slice(line.indexOf('{') + 1, line.indexOf('}'));
+      for (const match of block.matchAll(/([a-z_]+)="((?:\\.|[^"])*)"/g)) {
+        labels[match[1]] = match[2]
+          .replace(/\\n/g, '\n')
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, '\\');
       }
+      const key = keyForKind[labels.kind];
+      if (!key || !labels.target || !/^[a-f0-9]{16}$/.test(labels.host_fingerprint ?? '')) {
+        malformed += 1;
+        continue;
+      }
+      const byLabel = byKey.get(key) ?? new Map();
+      const seen = byLabel.get(labels.target) ?? new Set();
+      seen.add(labels.host_fingerprint);
+      byLabel.set(labels.target, seen);
+      byKey.set(key, byLabel);
     }
 
     const targets = {};
@@ -756,12 +753,12 @@ export async function readFlyAppProbeTargets(app, apiToken) {
       targets,
       conflictingKeys: [...conflictingKeys],
       malformedTargets: malformed,
-      machineCount: inventory.machines.length,
+      source: metricsUrl,
     };
   } catch (error) {
     return {
       captured: false,
-      error: `the deployed targets of the Fly app ${app} could not be read (${error.message})`,
+      error: `the deployed health-probe target metrics could not be read (${error.message})`,
     };
   }
 }
@@ -878,7 +875,53 @@ export async function readFlyAppPlatformConfig(app, apiToken) {
   }
 }
 
-async function captureFly({ platformApp, healthProbeApp }) {
+/** Read one Fly-managed Upstash add-on without recording its URL/password. */
+export async function readFlyRedisAddon(addon, apiToken) {
+  if (!addon?.name || !addon?.provider) {
+    return { captured: false, exists: false, error: 'the Redis add-on manifest is incomplete' };
+  }
+  try {
+    const response = await fetch(FLY_GRAPHQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query:
+          'query($name: String, $provider: String) { addOn(name: $name, provider: $provider) { name publicUrl status primaryRegion addOnPlan { displayName } organization { slug } } }',
+        variables: { name: addon.name, provider: addon.provider },
+      }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.errors?.length) {
+      throw new Error(payload.errors.map((error) => error?.message).join('; '));
+    }
+    const actual = payload?.data?.addOn ?? null;
+    if (!actual) return { captured: true, exists: false, name: addon.name };
+    return {
+      captured: true,
+      exists: true,
+      name: actual.name ?? null,
+      provider: addon.provider,
+      organization: actual.organization?.slug ?? null,
+      plan: actual.addOnPlan?.displayName ?? null,
+      primaryRegion: actual.primaryRegion ?? null,
+      status: actual.status ?? null,
+      endpointHostFingerprint: hostFingerprint(hostOfTargetValue(actual.publicUrl)),
+    };
+  } catch (error) {
+    return {
+      captured: false,
+      exists: false,
+      name: addon.name,
+      error: `the Fly-managed Redis add-on ${addon.name} could not be read (${error.message})`,
+    };
+  }
+}
+
+async function captureFly({ platformApp, healthProbeApp, healthProbeBaseUrl, redisAddon }) {
   const apiToken = process.env.FLY_API_TOKEN;
   if (!apiToken) return failure('FLY_API_TOKEN is not set');
 
@@ -993,9 +1036,11 @@ async function captureFly({ platformApp, healthProbeApp }) {
   );
 
   // The probe's TARGETS are read separately from its cadence: the cadence
-  // is a number and is safe to record, the targets are secrets and are
-  // reduced to labels and fingerprints at the read.
-  const healthProbeTargets = await readFlyAppProbeTargets(healthProbeApp, apiToken);
+  // comes from plain Machine env, while target values are Fly secrets and
+  // never appear there. The running probe publishes only labels and host
+  // fingerprints on /metrics.
+  const healthProbeTargets = await readHealthProbeTargets(healthProbeBaseUrl);
+  const redis = await readFlyRedisAddon(redisAddon, apiToken);
 
   // The DEPLOYED platform app's CONFIGURATION is read separately from the
   // app inventory: it is the AC1/AC4 evidence that the running app was
@@ -1010,6 +1055,7 @@ async function captureFly({ platformApp, healthProbeApp }) {
     secretNamesCaptured: apps.length > 0 && apps.every((app) => Array.isArray(app.secretNames)),
     healthProbeEnv,
     healthProbeTargets,
+    redis,
     platformConfig,
   };
 }
@@ -1052,33 +1098,6 @@ async function captureGitHub({ repo, environment }) {
       environment,
       secretNames: (secrets?.secrets ?? []).map((secret) => secret?.name).filter(Boolean),
       variableNames: (variables?.variables ?? []).map((variable) => variable?.name).filter(Boolean),
-    };
-  } catch (error) {
-    return failure(error.message);
-  }
-}
-
-async function captureUpstash() {
-  const email = process.env.UPSTASH_API_EMAIL;
-  const key = process.env.UPSTASH_API_KEY;
-  if (!email || !key) return failure('UPSTASH_API_EMAIL / UPSTASH_API_KEY are not set');
-
-  try {
-    const authorization = Buffer.from(`${email}:${key}`).toString('base64');
-    const databases = await fetchJson(`${UPSTASH_API_BASE}/redis/databases`, {
-      headers: { Authorization: `Basic ${authorization}` },
-    });
-    const rows = Array.isArray(databases) ? databases : (databases?.databases ?? []);
-    return {
-      captured: true,
-      // Each database is recorded by name, type and the FINGERPRINT of its
-      // endpoint host. The fingerprint is what proves the deployed probe
-      // points at THIS production Redis and not at staging's.
-      databases: rows.map((row) => ({
-        name: row?.database_name ?? null,
-        type: row?.database_type ?? row?.type ?? 'unknown',
-        endpointHostFingerprint: hostFingerprint(row?.host ?? row?.endpoint ?? null),
-      })),
     };
   } catch (error) {
     return failure(error.message);
@@ -1181,14 +1200,15 @@ async function main(argv) {
   const environment = manifest.getPlatformEnvironment('production');
   const dnsScope = readDnsScope(options.repoRoot);
 
-  const [neon, fly, github, upstash, cloudflare] = await Promise.all([
+  const [neon, fly, github, cloudflare] = await Promise.all([
     captureNeon({ projectName: options.neonProject }),
     captureFly({
       platformApp: environment.platformApp,
       healthProbeApp: environment.healthProbeApp,
+      healthProbeBaseUrl: environment.healthProbeBaseUrl,
+      redisAddon: environment.redisAddon,
     }),
     captureGitHub({ repo: options.githubRepo, environment: options.githubEnvironment }),
-    captureUpstash(),
     captureCloudflare(dnsScope),
   ]);
 
@@ -1219,10 +1239,14 @@ async function main(argv) {
     // AC5 could not be satisfied even after the operator had set the
     // limit. Version 6 carries the operator's value-free read-backs, and
     // the checker binds them to the obligations they close.
-    schemaVersion: 7,
+    // Version 8: Redis is read from Fly's managed Upstash add-on API, and
+    // deployed probe targets come from the probe's value-free info metric.
+    // Fly never exposes secret values in Machine config.env, so version 7's
+    // Machines-API target read could only return an empty target set.
+    schemaVersion: 8,
     environment: 'production',
     capturedAt: new Date().toISOString(),
-    providers: { neon, fly, github, upstash, cloudflare },
+    providers: { neon, fly, github, cloudflare },
   };
 
   if (options.operatorEvidence) {

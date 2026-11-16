@@ -1250,13 +1250,13 @@ jobs:
 
       # Task fb1240c0 (Slice D): the production provisioning state had NO
       # capture path in the repository. Every heartbeat re-read the Neon,
-      # Fly, GitHub Environment and Upstash APIs by hand and wrote the result
+      # Fly (including managed Redis) and GitHub Environment APIs by hand and wrote the result
       # into prose, so no reviewer could tell which of the nine Slice D
       # steps was still open, no two runs could be compared, and no CI job
       # could fail on it. The capture script
       # (infra/cloud/scripts/capture-production-provisioning-state.mjs)
-      # writes a REDACTED artifact — names, flags and counts only, never a
-      # value — and this checker decides, per gate, whether the step is met
+      # writes a REDACTED artifact — names, flags, counts and one-way host
+      # fingerprints only, never a credential value — and this checker decides, per gate, whether the step is met
       # and names the owner of the step that is not. The example artifact is
       # a redacted, value-free illustration of the shape.
       - name: Check production provisioning state contract

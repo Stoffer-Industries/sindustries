@@ -66,7 +66,7 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 7;
+export const SUPPORTED_SCHEMA_VERSION = 8;
 
 /** The operator obligation gate → the evidence slot that closes it. */
 const OPERATOR_EVIDENCE_SLOT_BY_GATE = new Map(
@@ -278,6 +278,7 @@ export function processGroupNames(configText) {
  * @param {string} [options.expectedPlatformEnvironmentId]
  * @param {object} [options.expectedPlatformCorsOrigins]
  * @param {string[]} [options.expectedPlatformProcessGroups]
+ * @param {object} [options.expectedRedisAddon]
  * @returns {{ok: boolean, failures: object[], rows: object[]}}
  */
 export function evaluateProvisioningState(state, options = {}) {
@@ -299,6 +300,7 @@ export function evaluateProvisioningState(state, options = {}) {
     ...(options.expectedProductionHostFingerprints ?? []),
   ].filter((fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0);
   const dnsExpectations = options.dnsExpectations ?? { zoneName: null, surfaces: [] };
+  const expectedRedisAddon = options.expectedRedisAddon ?? {};
 
   // The surfaces each operator obligation must have been read back
   // against. They are supplied by the caller — derived from the
@@ -960,33 +962,36 @@ export function evaluateProvisioningState(state, options = {}) {
     }
   }
 
-  // --- Upstash: AC4 — a production Redis database -------------------------
+  // --- Fly-managed Upstash: AC4 — the dedicated production database ------
 
-  if (providerCaptured('upstash')) {
-    const databaseNames = asArray(providers.upstash.databases)
-      .map((database) => database?.name)
-      .filter(Boolean);
-    const productionDatabases = databaseNames.filter((name) =>
-      /production/i.test(String(name)),
-    );
-    if (productionDatabases.length === 0) {
+  if (providerCaptured('fly')) {
+    const actual = providers.fly.redis ?? null;
+    const expected = expectedRedisAddon;
+    const mismatches = [];
+    if (actual?.captured !== true) mismatches.push(actual?.error ?? 'the add-on read failed');
+    if (actual?.exists !== true) mismatches.push('the add-on does not exist');
+    for (const key of ['name', 'provider', 'plan', 'primaryRegion']) {
+      if (actual?.[key] !== expected?.[key]) {
+        mismatches.push(`${key} is ${JSON.stringify(actual?.[key] ?? null)}, expected ${JSON.stringify(expected?.[key] ?? null)}`);
+      }
+    }
+    if (actual?.status !== 'created') mismatches.push(`status is ${JSON.stringify(actual?.status ?? null)}, expected "created"`);
+    if (mismatches.length > 0) {
       add(
-        row('upstash.production-redis-database', 'unmet', {
+        row('fly.production-redis-database', 'unmet', {
           step: 'Slice D step 4',
           owner: 'Quinn (operator)',
-          label: 'Production Redis database',
-          reason: `no production Redis database found (databases present: ${
-            databaseNames.length > 0 ? databaseNames.join(', ') : 'none'
-          })`,
+          label: 'Fly-managed production Redis database',
+          reason: mismatches.join('; '),
         }),
       );
     } else {
       add(
-        row('upstash.production-redis-database', 'met', {
+        row('fly.production-redis-database', 'met', {
           step: 'Slice D step 4',
           owner: 'Quinn (operator)',
-          label: 'Production Redis database',
-          reason: `production Redis database(s) present: ${productionDatabases.join(', ')}`,
+          label: 'Fly-managed production Redis database',
+          reason: `${actual.name} exists on ${actual.plan} in ${actual.primaryRegion}`,
         }),
       );
     }
@@ -1197,9 +1202,7 @@ export function evaluateProvisioningState(state, options = {}) {
       .filter((fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0);
     const neonEndpointHostsReadError =
       providers.neon?.branch?.endpointHostsReadError ?? null;
-    const productionRedisFingerprints = asArray(providers.upstash?.databases)
-      .filter((database) => /production/i.test(String(database?.name ?? '')))
-      .map((database) => database?.endpointHostFingerprint)
+    const productionRedisFingerprints = [providers.fly.redis?.endpointHostFingerprint]
       .filter((fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0);
 
     const targetSpecs = [
@@ -1862,6 +1865,7 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     expectedPlatformEnvironmentId,
     expectedPlatformCorsOrigins,
     expectedPlatformProcessGroups,
+    expectedRedisAddon: { ...environment.redisAddon },
     expectedOperatorTargets: {
       // AC5 sets the limit on the PRODUCTION APP scope, so the read-back
       // must name that app.

@@ -69,6 +69,13 @@ export const PLATFORM_ENVIRONMENTS = {
     githubEnvironment: 'staging',
     /** The repository variable that names the Fly org for this environment. */
     flyOrgVariable: 'STAGING_FLY_ORG',
+    /** The Fly-managed Upstash database dedicated to this environment. */
+    redisAddon: {
+      provider: 'upstash_redis',
+      name: 'sindustries-staging',
+      plan: 'Pay-as-you-go',
+      primaryRegion: 'syd',
+    },
     /**
      * The schema names on this environment's database. Staging runs one
      * Neon database with three schemas (confirmed by Quinn on task
@@ -155,6 +162,12 @@ export const PLATFORM_ENVIRONMENTS = {
     healthProbeApp: 'sindustries-health-probe-production',
     githubEnvironment: 'production',
     flyOrgVariable: 'PRODUCTION_FLY_ORG',
+    redisAddon: {
+      provider: 'upstash_redis',
+      name: 'sindustries-production',
+      plan: 'Pay-as-you-go',
+      primaryRegion: 'syd',
+    },
     schemas: {
       tasks: 'tasks_api',
       budget: 'budget_api',
@@ -450,6 +463,11 @@ export function assertEnvironmentManifest(environment) {
     throw new Error('platform environment manifest is missing');
   }
   const sourceNames = Object.values(environment.sourceNames ?? {});
+  for (const key of ['provider', 'name', 'plan', 'primaryRegion']) {
+    if (!environment.redisAddon?.[key]) {
+      throw new Error(`platform environment "${environment.id}" has no Redis add-on ${key}`);
+    }
+  }
   const requiredKeys = ['tasksDatabaseUrl', 'budgetDatabaseUrl', 'redisUrl'];
   for (const key of requiredKeys) {
     if (!environment.sourceNames?.[key]) {
@@ -488,6 +506,9 @@ export function assertEnvironmentManifest(environment) {
     }
     if (environment.platformApp === staging.platformApp) {
       throw new Error('production must not reuse the staging platform app name');
+    }
+    if (environment.redisAddon.name === staging.redisAddon.name) {
+      throw new Error('production must not reuse the staging Redis add-on name');
     }
     const stagingHosts = Object.values(staging.apiBaseUrls);
     const productionHosts = Object.values(environment.apiBaseUrls ?? {});
