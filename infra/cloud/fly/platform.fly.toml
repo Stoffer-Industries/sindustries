@@ -10,12 +10,18 @@
 #
 # All four now live in `sindustries-platform-staging`.
 #
-# Stable hostnames (source of truth: infra/cloud/hostname-matrix.json —
-# currently still records the four per-service apps, because the cutover has
-# not happened yet):
-#   tasks-api.staging.sindustries.co.nz
-#   budget-api.staging.sindustries.co.nz
-#   content-scheduler-api.staging.sindustries.co.nz
+# Stable hostnames (source of truth: infra/cloud/hostname-matrix.json).
+# The cutover happened on 2026-11-07 (task 219fb673): the four per-service
+# staging apps were destroyed, and this app is the only staging Fly app for
+# these services. The matrix records the consolidated platform app as the
+# staging CNAME target for all three API surfaces:
+#   tasks-api.staging.sindustries.co.nz             (routed by Host header)
+#   budget-api.staging.sindustries.co.nz            (routed by Host header)
+#   content-scheduler-api.staging.sindustries.co.nz  (routed by Host header)
+# The provider host serves the same three surfaces behind one path prefix
+# each (/tasks-api, /budget-api, /content-scheduler-api); the router is
+# infra/cloud/platform/nginx.conf.
+# stable-fallback: sindustries-platform-staging.fly.dev — the provider host behind the stable hostnames.
 #
 # WHY ONE [[services]] BLOCK AND NOT THREE
 # ---------------------------------------
@@ -34,7 +40,8 @@
 #
 # The build context is the repo root (`../../..`) so the Dockerfile's
 # `COPY services/…` references resolve from the repo root, matching the
-# per-service fly.toml files.
+# retired per-service fly.toml files (retained only until the §5 cleanup in
+# docs/runbooks/platform-consolidation-rollback.md).
 #
 # MIGRATIONS
 # ----------
@@ -61,7 +68,8 @@ kill_timeout = '30s'
 
 [build]
   # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
-  # so `../../..` is the repo root. Matches the per-service fly.toml files.
+  # so `../../..` is the repo root. Matches the retired per-service fly.toml
+  # files.
   context = '../../..'
   dockerfile = '../docker/platform.Dockerfile'
 

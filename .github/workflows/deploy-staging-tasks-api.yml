@@ -1,13 +1,34 @@
 # GitHub Actions: deploy tasks-api to Fly.io staging.
 #
+# RETIRED — orphaned per-service staging deploy workflow.
+#
+# The 2026-11-07 staging consolidation (task 219fb673) destroyed the four
+# per-service staging Fly apps and moved staging onto the ONE consolidated
+# platform app. The live staging deploy path is
+# `.github/workflows/deploy-staging-platform.yml` (config
+# `infra/cloud/fly/platform.fly.toml`); `.github/workflows/ci.yml` calls only
+# that workflow and `deploy-staging-health-probe.yml`, so nothing calls this
+# one any more. It is retained because
+# `tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs` still
+# requires the file to exist, and its deletion is tracked in
+# `docs/runbooks/platform-consolidation-rollback.md` §5. The FLY_APP and
+# FLY_CONFIG values below still name the retired per-service app and its
+# retired spec — they are left unchanged because the static checks read them,
+# not because they are a live deploy path.
+#
+# Live topology: `docs/systems/cloud-platform.md`.
+#
 # Quinn-approved design (PR #508): FLY_API_TOKEN referenced as a repo
 # secret; the workflow YAML itself stays secret-name-only. The central
-# CI workflow owns changed-path selection and calls this workflow only
-# after the aggregate merge gate succeeds.
+# CI workflow owned changed-path selection and called this workflow only
+# after the aggregate merge gate succeeded; since the consolidation it calls
+# neither this workflow nor any other per-service deploy workflow.
 #
 # `fly deploy --strategy canary` matches the rollback story in
-# docs/runbooks/cloud-deployment-rollback.md (Fly's image flag plus the
-# canary strategy). The post-deploy `/health` curl is the smoke check
+# docs/specs/cloud-deployment-foundation-tech-design.md "Rollback" section
+# (Fly's image flag plus the canary strategy; the prior
+# docs/runbooks/cloud-deployment-rollback.md was retired in PR #583). The
+# post-deploy `/health` curl is the smoke check
 # referenced in docs/specs/cloud-deployment-foundation-tech-design.md
 # (test plan: automated tests → smoke test). The route is `/health` —
 # tasks-api mounts the health router at `/health` in src/app.ts; we hit

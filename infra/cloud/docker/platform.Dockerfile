@@ -13,6 +13,11 @@
 #   infra/cloud/docker/content-scheduler-api.Dockerfile
 #   infra/cloud/docker/auto-post-worker.Dockerfile
 #
+# Those four are RETIRED historical templates (each now carries a RETIRED
+# banner); this file is the live staging build path, so the union is a
+# provenance statement, not a set of files to keep in sync. Their pending
+# deletion is tracked in docs/runbooks/platform-consolidation-rollback.md §5.
+#
 # The four service workspaces are copied verbatim — no service source,
 # Prisma schema, route or env var name is changed by this consolidation
 # (AC1). The only new code is infra: the supervisor, the router config and

@@ -1,9 +1,13 @@
 # health-probe Dockerfile — staging.
 #
-# Mirror of infra/cloud/docker/tasks-api.Dockerfile adapted for the
-# single-purpose health-probe service. Same npm-workspace install
-# pattern, same node:22-alpine base, no Prisma (probe does not touch
-# application schemas).
+# Mirror of the npm-workspace install pattern in
+# infra/cloud/docker/platform.Dockerfile (the live consolidated staging
+# image), adapted for the single-purpose health-probe service. Same
+# npm-workspace install pattern, same node:22-alpine base, no Prisma (probe
+# does not touch application schemas). It was originally mirrored from
+# infra/cloud/docker/tasks-api.Dockerfile, which is a RETIRED template — the
+# health probe keeps its own Fly app (sindustries-health-probe-staging) and
+# is NOT a child of the consolidated platform app.
 #
 # Probe deps: @sindustries/otel-node, express, ioredis, pg, prom-client.
 # Quinn-owned secrets are read at runtime from Fly secrets — they
