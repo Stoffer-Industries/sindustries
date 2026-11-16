@@ -190,23 +190,71 @@ Supporting (already-delivered) layers, unchanged and still valid:
 | `release` resolution (explicit tag → Vercel commit → deployment id → never `dev` in production) | `apps/gymtrack/src/lib/browserTelemetry.test.js` § "release identifier" (unit) + `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` (harness, browser) |
 | Telemetry module behaviour in a real browser (uncaught exception, auth failure, blocked relay) | `apps/gymtrack/test/e2e/telemetry-resilience.spec.ts` (harness group) — retained |
 
+### Recorded outcome — implementation, 2026-11-16
+
+**Step 1 spike: the stubbed session WORKS.** `auth-js` 2.118.0 accepted the stubbed GoTrue `200` response, `onAuthStateChange` fired, and the app established a real signed-in session and rendered the `AuthGate`-protected `/workout` route. **AC3 therefore uses the strongest form defined in the decision rule** — an *authenticated* routed navigation into a protected route — and not the unauthenticated `/login` → `/signup` fallback. The fallback is not used and no weaker claim is recorded in its place.
+
+**Two corrections to the plan above, both forced by evidence:**
+
+1. **S2 must be HTTP 422, not 400.** The stub table above says S2 is `400` with a body carrying `code: 422`, while the AC2 row asserts `status='422'`. Those cannot both hold: `auth-js` builds the error as `new AuthApiError(data.msg, response.status, data.error_code)`, so `error.status` is the **HTTP status**. The stub answers **HTTP 422** — which is what GoTrue actually returns for a duplicate registration — so the event carries `status: '422'` and `errorCode: 'user_already_exists'` as the AC requires. The AC2 assertion is unchanged; only the stub's HTTP status is corrected to the one that can satisfy it.
+2. **A failed sign-up does not clear the password field.** The AC2 row above says the form is "re-enabled and password cleared as it is today". The app does not clear it — `SignUpPage.handleSubmit` sets the error and returns, leaving both fields intact. The assertion therefore checks that the form is re-enabled and the **email** survives (which is what the app does), and does not assert a password clear that never happened.
+
+**AC1 / AC2 / AC3 — all three pass against the real application.** `npm run e2e:telemetry-real-app` → **3 passed**.
+
+**Negative controls (the suite is proved able to go red).** A test that cannot fail asserts nothing, so both failure modes were exercised against the real suite:
+
+| Control | Change | Result |
+|---|---|---|
+| Relay not aborted | The relay route was changed from `route.abort('failed')` to `route.fulfill({ status: 204 })` | **All three tests fail** on the `relayAborted > 0` assertion — the relay really is on the network path and the "relay was reached and killed" claim is live, not vacuous. |
+| Wrong safe-context field | The expected `errorCode` was changed to a sentinel | **AC1 fails** with `Expected: "WRONG_CODE_CONTROL" / Received: "invalid_credentials"`; AC2 and AC3 still pass, so the assertion is correctly scoped to the case that owns it. |
+
+**Evidence summary (AC4).** The three cases import **no** telemetry module and call **no** telemetry function. They touch only the app's own routes and the network boundary — the app's real `LoginScreen`, `SignUpPage`, `supabase.auth.*` calls, `AuthGate`, and `react-router` `<Link>` navigation. The relay payload is read from the intercepted request body, so each assertion proves the browser *sent* the safe event even though the network then killed it.
+
+**Fail-closed guard, exercised.** Every provider request that no stub claims is aborted and recorded in `unstubbed`; the suite fails if the browser contacts any host other than the local dev server or the stubbed provider; and `pageErrors` is asserted empty, so an uncaught exception anywhere in the run fails the test.
+
 ### Running the suite
 
-- The real-app suite is gated by `GT_TELEMETRY_E2E=1`, matching the existing telemetry suite convention, so it does not run in an ordinary `npm test`.
-- **No credentials are required.** The suite must pass with an empty environment apart from `GT_TELEMETRY_E2E=1`.
-- `playwright.config.ts` already boots the dev server with the placeholder Supabase env (`VITE_SUPABASE_URL=https://telemetry-e2e.invalid`, `VITE_SUPABASE_ANON_KEY=telemetry-e2e-placeholder-key`) and `VITE_TELEMETRY_ENABLED=1` with a synthetic `VERCEL_GIT_COMMIT_SHA`. The only config change needed is making sure `VITE_AUTH_PROVIDER=supabase` is explicit rather than implicit (see "Implementation plan → files in scope"), so the provider under test is stated rather than inferred from a default.
-- `apps/gymtrack/package.json` gains a script for the real-app suite, e.g. `e2e:telemetry-real-app`, so it can be run and CI-invoked independently of the harness suite.
+- **Run it with `npm run e2e:telemetry-real-app`** (→ `playwright test --config=playwright.real-app.config.ts`). The dedicated config is the opt-in: the suite lives in its own config, so it is never collected by `npm run test:e2e` (shared config) and is never run by `npm test` (vitest). No environment gate is needed for that, and none is used.
+- **No credentials are required.** The suite passes with an empty environment. It needs no `CLERK_TEST_URL`, no `CLERK_TEST_EMAIL`, no `CLERK_TEST_PASSWORD`, and no live identity provider — and it is structurally unable to use them, because its config pins `baseURL` to the local dev server and starts that server itself (see "The configuration split" above).
+- `playwright.real-app.config.ts` boots the dev server with the placeholder Supabase env (`VITE_SUPABASE_URL=https://telemetry-e2e.invalid`, `VITE_SUPABASE_ANON_KEY=telemetry-e2e-placeholder-key`), `VITE_TELEMETRY_ENABLED=1` with a synthetic `VERCEL_GIT_COMMIT_SHA`, and `VITE_AUTH_PROVIDER=supabase` pinned explicitly — so the provider under test is stated rather than inferred from a default, and the build under test is the one the assertions describe.
+- `reuseExistingServer: false` is deliberate: a dev server left running on port 5179 by another worktree is a build with an unknown provider and an unknown telemetry flag, and silently reusing it would mean the suite proved something other than what it claims.
+- The suite is **not yet wired into CI.** The CI e2e job (`ci.yml`) runs the `apps/tasks` Playwright suite only, and the GymTrack Playwright suite is not part of CI today. Adding a CI job for it is a separate change and is recorded as a follow-up rather than smuggled into this test-only PR.
 
 ### Files in scope
 
 | File | Change |
 |---|---|
-| `apps/gymtrack/test/e2e/telemetry-real-app.spec.ts` | **New.** The three real-application cases. |
-| `apps/gymtrack/test/e2e/telemetry-env.ts` | **Modified.** Shared constants for the stub endpoints, the synthetic session/user bodies, and the synthetic test identity. Keeps the spec and any config in one place so they cannot drift. |
-| `apps/gymtrack/playwright.config.ts` | **Modified.** Make `VITE_AUTH_PROVIDER=supabase` explicit in the telemetry dev-server command; nothing else changes. |
-| `apps/gymtrack/package.json` | **Modified.** Add the `e2e:telemetry-real-app` script. |
-| `apps/gymtrack/SPEC.md` | **Modified.** The § "Browser telemetry — release identifier and coverage mapping" table gains rows for the three real-application cases and replaces the row pointing at the credential-gated Clerk case with a note that the credential-free Supabase-path suite is the proof (the Clerk case remains as an optional additional case if the operator provisions credentials). |
+| `apps/gymtrack/test/e2e/telemetry-real-app.spec.ts` | **New.** The three real-application cases, the stub catalogue and the fail-closed network guard. |
+| `apps/gymtrack/playwright.real-app.config.ts` | **New.** A dedicated Playwright config for this suite. **This replaced the planned edit to `playwright.config.ts`** — see "The configuration split (why a second config file)" below. |
+| `apps/gymtrack/playwright.config.ts` | **Unchanged.** The shared config is left exactly as it was. |
+| `apps/gymtrack/test/e2e/telemetry-env.ts` | **Unchanged.** The synthetic session/user bodies live in the spec itself, because they are used by exactly one file; sharing them with the harness suite would couple two suites with different scopes for no benefit. |
+| `apps/gymtrack/package.json` | **Modified.** Adds the `e2e:telemetry-real-app` script. |
+| `apps/gymtrack/SPEC.md` | **Modified.** The § "Browser telemetry — release identifier and coverage mapping" table gains a row for the three real-application cases. The credential-gated Clerk row is **kept**, not replaced: it remains valid evidence, it is simply no longer the only application-level proof. |
+| `docs/systems/observability.md` | **Modified.** § "Browser-side error telemetry" → "Ownership and verification" gains the credential-free in-repo proof and its isolation guarantees. |
 | `apps/gymtrack/src/**` | **No production change.** This task adds verification, not behaviour. If the spike or a test uncovers a real defect in the app's error handling, that defect is filed as its own task (as `ca999d95` was) rather than fixed inside this PR — keeping this PR to test-only scope and keeping the parent task's redaction/boundary contract untouched. |
+
+### The configuration split (why a second config file)
+
+The plan above originally said to modify `playwright.config.ts` to make `VITE_AUTH_PROVIDER=supabase` explicit. **That was wrong, and the implementation took a different shape because of it.**
+
+`playwright.config.ts` derives *both* the base URL and the dev-server decision from `CLERK_TEST_URL`:
+
+```ts
+use:       { baseURL: process.env.CLERK_TEST_URL ?? 'http://localhost:5179' }
+webServer: process.env.CLERK_TEST_URL ? undefined : { … }
+```
+
+`CLERK_TEST_URL` **is set** in the agent runtime, pointing at the live production app `https://gymtrack.sindustries.co.nz`. So that config drives **production** and never starts a local dev server. That is correct for the credentialed Clerk suite — it is meant to run against the deployed app — but it is exactly wrong for this suite, which is credential-free by design and must prove the claim against a local build.
+
+The first spike was written against the shared config and did exactly that: it navigated to `https://gymtrack.sindustries.co.nz/login` and sent a **live sign-in attempt to Clerk's API** with a synthetic `@example.invalid` address and a wrong password. No account was created, no email was sent and no real user was touched, but a credential-free suite must not be able to do that at all.
+
+The isolation is therefore **structural rather than conditional**, in a dedicated `playwright.real-app.config.ts`:
+
+- `baseURL` is a hard-coded literal (`http://localhost:5179`). No environment variable can point this suite at a deployed app.
+- `webServer` is unconditionally defined, so the suite always runs against a local build it started itself, with `VITE_AUTH_PROVIDER=supabase` pinned on the command.
+- `reuseExistingServer: false`, so a dev server left running on port 5179 by another worktree — a build with an unknown provider and an unknown telemetry flag — can never be silently reused. Failing loudly is the correct outcome.
+
+`apps/gymtrack/playwright.config.ts` is left untouched, so the credentialed production-driving suite keeps its current behaviour.
 
 ## Ownership boundary check
 
@@ -229,7 +277,7 @@ None. This design requires **no** change outside the repository — which is the
 
 ## Open questions
 
-1. **Does a stubbed `200` session establish a usable session in auth-js 2.118.0?** Resolved by the Step 1 spike; the fallback (unauthenticated routed navigation) is defined in advance so AC3 is never blocked on it.
+1. **Does a stubbed `200` session establish a usable session in auth-js 2.118.0?** **Resolved by the Step 1 spike: yes.** AC3 uses the authenticated form; the fallback was not needed.
 2. **Should the credential-gated Clerk case be kept?** Proposal: keep it, but demote it from "the proof" to "an optional additional case when the operator provisions Clerk e2e credentials", and update `SPEC.md` accordingly. This is a coverage-table wording change, not a behaviour change. Needs Quinn's confirmation at approval time.
 3. **Should the harness suite stay?** Proposal: yes — it is fast, credential-free module-level evidence and it is already referenced by `SPEC.md`. The parent task's AC4 needs the *application* proof, not the harness removed. The two suites have different scopes and both are useful.
 

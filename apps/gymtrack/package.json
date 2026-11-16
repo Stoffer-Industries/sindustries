@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "e2e:telemetry-real-app": "playwright test --config=playwright.real-app.config.ts",
     "check:clerk-profiles-readiness": "node scripts/check-clerk-profiles-readiness.js"
   },
   "dependencies": {
