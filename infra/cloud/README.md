@@ -14,11 +14,12 @@ infra/cloud/
 │   ├── budget-api.fly.toml
 │   ├── auto-post-worker.fly.toml
 │   └── platform.fly.toml       # consolidated staging app (task 219fb673)
-├── docker/                     # Service Dockerfiles (referenced by the fly.toml files)
-│   ├── tasks-api.Dockerfile
-│   ├── budget-api.Dockerfile
-│   ├── auto-post-worker.Dockerfile
-│   └── platform.Dockerfile     # combined image for all four processes
+├── docker/                     # Dockerfiles
+│   ├── tasks-api.Dockerfile    # RETIRED template (2026-11-07 cutover)
+│   ├── budget-api.Dockerfile   # RETIRED template (2026-11-07 cutover)
+│   ├── content-scheduler-api.Dockerfile # RETIRED template (2026-11-07 cutover)
+│   ├── auto-post-worker.Dockerfile # RETIRED template (2026-11-07 cutover)
+│   └── platform.Dockerfile     # LIVE staging image for all four processes
 ├── platform/                   # Consolidated platform code (task 219fb673)
 │   ├── platform-services.mjs   # service registry + env mapping (single source of truth)
 │   ├── platform-supervisor.mjs # entrypoint: spawns the children + the router
