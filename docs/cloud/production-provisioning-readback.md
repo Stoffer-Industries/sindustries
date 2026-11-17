@@ -154,9 +154,9 @@ part of the evidence path because Fly-managed add-ons do not appear there.
 
 ---
 
-## 6. Production spend bound (AC5, slot `flySpendLimit`) — NOT RECORDED
+## 6. Production spend bound (AC5, slot `flySpendLimit`) — RECORDED
 
-**No read-back was recorded, and the gate stays open.**
+**The read-back is recorded below, while the separate ordering-deviation acceptance remains a human gate.**
 
 Fly.io exposes no programmatic spend-limit surface: no GraphQL field,
 input or mutation whose name contains spend/limit/budget/cap/threshold;
@@ -183,15 +183,27 @@ A recorded spend slot that names no control, or names a control outside
 this list, is refused: a read-back that does not say what bounded the
 spend cannot be checked against what was actually set.
 
-**What is still owed.** The card is not active yet, so there is nothing
-to read back: the slot stays `recorded: false` and the ordering gate
-stays red. When the card is active, the operator records the read-back
-with `"control": "prepaid-capped-billing-method"` and points
-`evidenceRef` at this section.
+**Operator read-back (2026-11-17 20:38 NZDT).** Tom confirmed that the
+Fly production billing method is now a limited card capped at NZ$30/month.
+This is the approved `prepaid-capped-billing-method` control for the
+production app scope. The artifact records `readBackAt` as
+`2026-11-17T07:38:00.000Z` and points `evidenceRef` at this file.
 
-This is a **billing decision for Tom**, not an operator read-back, so the
-slot is deliberately left unrecorded rather than being satisfied with a
-value that does not exist.
+Artifact record:
+
+```json
+{
+  "recorded": true,
+  "readBackAt": "2026-11-17T07:38:00.000Z",
+  "scope": "production app scope",
+  "control": "prepaid-capped-billing-method",
+  "evidenceRef": "docs/cloud/production-provisioning-readback.md",
+  "targets": ["sindustries-platform-production"]
+}
+```
+
+This records the operator read-back without storing card details or any
+credential value.
 
 Note on ordering — and what the repository now checks. The approved
 design makes the spend bound a hard gate BEFORE any public exposure. The
@@ -228,9 +240,10 @@ Tom/QA's decision** — accept the retroactive bound, or roll the exposure
 back until the bound is in place. The repository does not record it on
 anyone's behalf.
 
-**Read-back artifact:** none for the spend bound itself — the step has not
-been performed (the card is not active yet). The exposure timestamps above
-were read live from Cloudflare and Fly on 2026-11-17 (06:30Z).
+**Read-back artifact:** `docs/cloud/production-provisioning-readback.md`
+(this section; `readBackAt=2026-11-17T07:38:00.000Z`). The exposure
+timestamps above were read live from Cloudflare and Fly on 2026-11-17
+(06:30Z).
 
 ---
 
@@ -276,10 +289,8 @@ nobody could inspect.
 | `productionProbeInterval` | §2 | `docs/cloud/production-provisioning-readback.md` |
 | `productionApiHealthResponses` | §3 | `docs/cloud/production-provisioning-readback.md` |
 | `dnsResolutionAndTlsReadback` | §4 | `docs/cloud/production-provisioning-readback.md` |
-| `flySpendLimit` | §6 — **not performed** | leave `recorded: false` |
+| `flySpendLimit` | §6 — capped card confirmed 2026-11-17 20:38 NZDT | `docs/cloud/production-provisioning-readback.md` |
 
-The spend-bound slot stays unrecorded until Tom's billing decision
-produces an actual read-back (see §6). Recording it now would be saying
-something that is not true. When it is performed, the record must also
-carry `"control": "prepaid-capped-billing-method"` — the control that
-bounded production spend — or the capture refuses the record.
+The spend-bound slot is now recorded from Tom's billing confirmation (see §6).
+The record carries the approved `control`, the production app scope target,
+and the repository-relative pointer to this read-back.
