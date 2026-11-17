@@ -250,11 +250,19 @@ timestamps above were read live from Cloudflare and Fly on 2026-11-17
 ## 7. Recording the read-backs in the artifact
 
 The read-backs above are this file's content. The **checker** does not
-read this file: it reads the `operatorEvidence` section of the captured
-artifact, and it compares a recorded slot against the production
-surfaces that slot must cover. Until that section carries the read-backs,
-every obligation is still reported as `operator-required` — which is why
-the live capture above shows "the artifact records no operator evidence".
+read this file directly: it reads the `operatorEvidence` section of the
+captured artifact, and it compares a recorded slot against the production
+surfaces that slot must cover. The committed record at
+`infra/cloud/evidence/production-operator-evidence.json` now carries the
+four read-backs in §1–§4, so a normal capture closes those four
+obligations without a manual flag.
+
+The `readBackAt` time for those four slots is
+**2026-11-16T10:31:58.000Z** — the author time of Quinn's operator-record
+commit `9c2c2e8d`, when the read-back was written down. It is
+deliberately the recording time, not a reconstructed observation time;
+the observations themselves are the text above. The spend slot in §6
+carries its own later read-back time.
 
 The repository owns the shape of that record, so nobody has to guess it:
 
@@ -294,6 +302,10 @@ nobody could inspect.
 | `dnsResolutionAndTlsReadback` | §4 | `docs/cloud/production-provisioning-readback.md` |
 | `flySpendLimit` | §6 — capped card confirmed 2026-11-17 20:38 NZDT | `docs/cloud/production-provisioning-readback.md` |
 
-The spend-bound slot is now recorded from Tom's billing confirmation (see §6).
-The record carries the approved `control`, the production app scope target,
-and the repository-relative pointer to this read-back.
+The §1–§4 slots and the §6 spend slot are recorded in the committed
+operator-evidence file. `flySpendOrderingDeviation` is deliberately
+absent: recording it is Tom/QA's acceptance of the retroactive spend
+bound, not a repository inference.
+
+The spend-bound record carries the approved `control`, the production app
+scope target, and the repository-relative pointer to this read-back.
