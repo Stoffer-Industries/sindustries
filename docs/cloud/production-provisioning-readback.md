@@ -223,6 +223,7 @@ the card is read back, the gate would have reported "met" and its reason
 would have read as though the bound preceded the cutover.
 
 The capture now records the exposure times (the Cloudflare record's
+creation time, the consolidated production platform app's release
 creation time and the probe app's release creation time) and the checker
 decides a second gate, `fly.spend-bound-ordering`:
 
@@ -235,7 +236,10 @@ decides a second gate, `fly.spend-bound-ordering`:
 Because the order cannot be un-violated, the closure path is a recorded
 acceptance: the `flySpendOrderingDeviation` operator slot carries the
 same value-free shape as every other read-back (a boolean, a time, a
-pointer to the acceptance and the exposed surfaces it covers). **This is
+pointer to the acceptance and the exposed surfaces it covers — every
+production hostname, the production health-probe app and the consolidated
+production platform app, which serves all three production API hostnames
+and is publicly reachable before any DNS record exists). **This is
 Tom/QA's decision** — accept the retroactive bound, or roll the exposure
 back until the bound is in place. The repository does not record it on
 anyone's behalf.

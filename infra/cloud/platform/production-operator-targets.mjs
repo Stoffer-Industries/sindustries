@@ -133,12 +133,25 @@ export async function loadOperatorTargetExpectations(repoRoot) {
     productionApiHostnames,
     productionHostnames,
     // The surfaces a spend-bound ORDERING deviation is accepted for: the
-    // production hostnames that were published and the production
+    // production hostnames that were published, the production
     // health-probe app that was running while production spend was still
-    // unbounded. The acceptance is a statement about the exposure that
-    // happened, so it must name every exposed surface — the same rule
-    // every other slot follows.
-    productionExposure: [...productionHostnames, environment.healthProbeApp],
+    // unbounded, and the consolidated production PLATFORM app.
+    //
+    // The platform app belongs in this set because it IS public
+    // exposure: every production API hostname points at it, and Fly
+    // gives it its own public .fly.dev hostname, so it is reachable
+    // before a single DNS record is published. An acceptance that named
+    // the hostnames and the probe but not the app serving all of them
+    // would cover only part of the exposure it claims to accept.
+    //
+    // The acceptance is a statement about the exposure that happened, so
+    // it must name every exposed surface — the same rule every other
+    // slot follows.
+    productionExposure: [
+      ...productionHostnames,
+      environment.healthProbeApp,
+      environment.platformApp,
+    ],
     // The denial proof must cover the production branch and BOTH the
     // staging and the dev credential: AC2 names the staging/dev
     // separation, so one refused credential does not prove it. These
