@@ -708,21 +708,23 @@ Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the co
 
 ## Vercel env var matrix (task `5cb4a8fe`)
 
-The **Vercel half** of AC3 — the contract between the hostname matrix and the VITE_* env vars the two Vercel frontends consume at build time — lives at [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json). The contract records, per Vercel project, per environment, which VITE_* env vars to set and what value to set them to. Every matrix-derived value is the production or staging hostname from `infra/cloud/hostname-matrix.json`; the static check `tests/cloud/scripts/check-vercel-env-matrix.mjs` enforces that on every CI run.
+The **Vercel half** of AC3 — the contract between the hostname matrix and the VITE_* env vars the two Vercel frontends consume at build time — lives at [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json). The contract records, per Vercel project, which Sindustries environment its production deployment target serves, which VITE_* env vars to set and what value to set them to. Every matrix-derived value is the production or staging hostname from `infra/cloud/hostname-matrix.json`; the static check `tests/cloud/scripts/check-vercel-env-matrix.mjs` enforces that on every CI run.
 
-| Vercel project | App | Production env | Preview env (staging) |
+| Vercel project | App | Serves | Build-time vars |
 | --- | --- | --- | --- |
-| `sindustries-mission-control` | `apps/mission-control` | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` |
-| `sindustries-tasks` | `apps/tasks` | `VITE_TASKS_API_BASE_URL` | `VITE_TASKS_API_BASE_URL` |
+| `sindustries-mission-control` | `apps/mission-control` | production | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` |
+| `sindustries-mission-control-staging` | `apps/mission-control` | staging | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` |
+| `sindustries-tasks` | `apps/tasks` | production | `VITE_TASKS_API_BASE_URL` |
+| `sindustries-tasks-app-staging` | `apps/tasks` | staging | `VITE_TASKS_API_BASE_URL` |
 
 Out of scope for this matrix (recorded in `outOfScope[]`):
 
 - `sindustries-gymtrack` — owned by the Clerk cutover (task `bb09eaed`); GymTrack's VITE_SUPABASE_URL / VITE_AUTH_PROVIDER / VITE_GYMTRACK_MCP_BASE_URL env vars are not in scope for `5cb4a8fe`.
 - `sindustries-website` — static marketing content with no API surface; no VITE_* env vars.
 
-Quinn sets the actual values in the Vercel dashboard per the contract; the contract itself is the engineer's responsibility and is the part this slice ships.
+Quinn sets the actual values in the Vercel dashboard per the contract; the contract itself is the engineer's responsibility. The project is the environment boundary: each of the four projects has exactly one Vercel production target, and there is no shared-project preview target carrying staging.
 
-The custom domains Vercel serves each project on (production: `mission-control.sindustries.co.nz` / `tasks.sindustries.co.nz`; preview → staging: `mission-control.staging.sindustries.co.nz` / `tasks.staging.sindustries.co.nz`) are also recorded in the matrix JSON and enforced by the same static check, so a typo in either the env var value or the custom domain fails CI rather than silently shipping to Vercel.
+The custom domain each project serves is also recorded in the matrix JSON and enforced by the same static check, so a typo in either the env var value or the custom domain fails CI rather than silently shipping to Vercel.
 
 ## Production blockers (task `5cb4a8fe`)
 
@@ -732,7 +734,7 @@ The static checks above are the cross-environment safety net: a staging URL acci
 
 `tests/cloud/scripts/check-production-blockers-register.mjs` closes the last gap in that net: the register and the matrix are two files, and a rename in the matrix that did not reach the register would leave the operator-facing document pointing at a project that does not exist. The check asserts every surface with a production hostname has a row in the register and that the row carries the matrix's exact project/app identifier.
 
-The register's §9 records the live state of the DNS, TLS and Vercel control planes as observed on 2026-11-11, including the two places where they disagree with the contract: the matrix names Vercel projects (`sindustries-mission-control`, `sindustries-tasks`) that are not in the Vercel team, while the staging deployments that do exist sit under `sindustries-mission-control-staging` / `sindustries-tasks-app-staging` and hold the verified custom-domain bindings. The project-model decision that reconciles the two is Quinn's, and it gates the two frontend rows of the register.
+The production projects `sindustries-mission-control` and `sindustries-tasks` were provisioned on 2026-11-18 with their production custom domains and VITE_* values. `infra/cloud/vercel-env-matrix.json` records that observed state with `provisioned: true`; the blockers register remains the evidence surface for first-deployment TLS and live-bundle verification.
 
 ---
 
@@ -754,7 +756,14 @@ If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only 
 
 ## Deploy procedure (reference)
 
-`.github/workflows/ci.yml` is the deployment orchestrator. It detects changed deployable surfaces, runs CI, and emits one stable `CI / merge gate` result. The active `main` ruleset requires that result. Deploy workflows expose `workflow_call` only, so they cannot race or bypass the CI run for the same commit.
+`.github/workflows/ci.yml` is the deployment orchestrator. It detects changed deployable surfaces, runs CI, and emits one stable `CI / merge gate` result. The active `main` ruleset requires that result. Automated deploys are downstream of that gate; the production frontend workflow additionally exposes an operator-only manual dispatch.
+
+- Mission Control and the Tasks app share the manually dispatchable, reusable `deploy-production-vercel-frontends.yml` workflow. A dispatch selects one surface, preserving independent project concurrency and rollback boundaries.
+- The workflow resolves the Vercel project, app path, workspace name and custom domain from `hostname-matrix.json` plus `vercel-env-matrix.json` through `vercel-project-facts.mjs`; those values are never duplicated in workflow YAML.
+- `PRODUCTION_VERCEL_DEPLOY_ENABLED=true` in the production GitHub environment is the explicit deploy gate. A matrix row with `provisioned: false`, a missing credential, or a closed gate fails or skips before a Vercel mutation.
+- The workflow installs from the repository root lockfile, tests and builds the selected workspace, then links the selected project with an explicit team scope. It deploys a production-target candidate with `--skip-domain`, smoke-checks that candidate, and promotes that exact deployment.
+- After promotion it verifies the stable hostname over HTTPS, checks the certificate hostname, and inspects the emitted JavaScript bundle. Every production VITE_* value must be present and no staging hostname may appear.
+- `check-production-vercel-deploy-contract.mjs` protects this sequence in the merge gate. `verify-live-vercel-bundle.mjs` is both the deployment-time AC4 check and an offline-tested verifier.
 
 - Pull-request website staging starts only after the merge gate succeeds.
 - A website change on `main` deploys a production-configured candidate to staging, smoke-checks that exact deployment URL, then promotes the same deployment to production.
@@ -766,11 +775,12 @@ If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only 
 
 ### Vercel credential topology
 
-`VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `VERCEL_TOKEN` are **repository-level** secrets. Neither the `staging` nor the `production` GitHub environment defines Vercel secrets of its own, so both website deploy jobs authenticate with the same token against the same team — the environment a job runs in does not select a team.
+`VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `VERCEL_TOKEN` are **repository-level** secrets. The website deploy uses all three. The production frontend workflow uses only `VERCEL_ORG_ID` and `VERCEL_TOKEN`: its project name is non-secret repo-owned contract data resolved from the Vercel env matrix. The production GitHub environment supplies the deployment gate and environment protection; selecting that environment does not itself select a Vercel team or project.
 
-That makes the team scope something the workflow has to state, not something it can infer: the token's own default scope is the personal account that owns the team, not the team itself, and an unscoped request resolves the deployment under that default. Two consequences for anyone touching these jobs:
+That makes the team scope something each workflow has to state, not something it can infer: the token's own default scope is the personal account that owns the team, not the team itself, and an unscoped request resolves the deployment under that default. Three consequences for anyone touching these jobs:
 
 - A job that must act on a deployment created by another job needs the project context and the team scope explicitly (`vercel link --project "$VERCEL_PROJECT_ID" --scope "$VERCEL_ORG_ID"`, or `--scope "$VERCEL_ORG_ID"` on the mutating call itself). The production promotion job is the case in point.
+- A frontend production job binds by the matrix-owned project name and carries `--scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"` on every Vercel link, pull, build, deploy and promote call. Never replace either value with a literal.
 - The scope must stay bound to the job-scope secret. A literal team id or slug in a workflow is a second source of truth, and it is the one that drifts when the team changes.
 
 Fly reusable workflows run a credential preflight, install a commit-pinned setup action and version-pinned `flyctl`, run `flyctl deploy --strategy canary`, then smoke-check:

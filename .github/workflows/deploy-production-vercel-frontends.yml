@@ -1,0 +1,174 @@
+name: Deploy production Vercel frontend
+
+on:
+  workflow_dispatch:
+    inputs:
+      surface:
+        description: Frontend surface to deploy
+        required: true
+        type: choice
+        options:
+          - mission-control
+          - tasks-app
+  workflow_call:
+    inputs:
+      surface:
+        description: Frontend surface to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production-vercel-${{ inputs.surface }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+  VERCEL_CLI_VERSION: '54.2.0'
+  VERCEL_TARGET: production
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.surface }} to Vercel production
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Resolve production project facts
+        id: facts
+        run: |
+          set -euo pipefail
+          surface="${{ inputs.surface }}"
+          echo "project=$(node infra/cloud/scripts/vercel-project-facts.mjs --surface "$surface" --field vercelProjectId)" >> "$GITHUB_OUTPUT"
+          echo "app_path=$(node infra/cloud/scripts/vercel-project-facts.mjs --surface "$surface" --field appPath)" >> "$GITHUB_OUTPUT"
+          echo "workspace=$(node infra/cloud/scripts/vercel-project-facts.mjs --surface "$surface" --field workspaceName)" >> "$GITHUB_OUTPUT"
+          echo "domain=$(node infra/cloud/scripts/vercel-project-facts.mjs --surface "$surface" --field customDomain)" >> "$GITHUB_OUTPUT"
+          provisioned="$(node infra/cloud/scripts/vercel-project-facts.mjs --surface "$surface" --field provisioned)"
+          if [ "$provisioned" != true ]; then
+            echo "::error::The production Vercel project is not provisioned. Close the project row in docs/cloud/production-blockers.md before deploying."
+            exit 1
+          fi
+
+      - name: Check production deploy gate
+        id: gate
+        env:
+          PRODUCTION_VERCEL_DEPLOY_ENABLED: ${{ vars.PRODUCTION_VERCEL_DEPLOY_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$PRODUCTION_VERCEL_DEPLOY_ENABLED" = true ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Production Vercel deploy skipped. Set PRODUCTION_VERCEL_DEPLOY_ENABLED=true in the production environment to enable it."
+          fi
+
+      - name: Require Vercel credentials
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          if [ -z "${VERCEL_TOKEN:-}" ] || [ -z "${VERCEL_ORG_ID:-}" ]; then
+            echo "::error::VERCEL_TOKEN and VERCEL_ORG_ID must be configured in the production GitHub environment."
+            exit 1
+          fi
+
+      - name: Install workspace dependencies
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm ci
+
+      - name: Test frontend
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm test --workspace "${{ steps.facts.outputs.workspace }}"
+
+      - name: Build frontend
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm run build --workspace "${{ steps.facts.outputs.workspace }}"
+
+      - name: Install Vercel CLI
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm install --global vercel@${{ env.VERCEL_CLI_VERSION }}
+
+      - name: Bind production project and pull environment
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: ${{ steps.facts.outputs.app_path }}
+        run: |
+          set -euo pipefail
+          vercel link --yes --project "${{ steps.facts.outputs.project }}" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment="$VERCEL_TARGET" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+
+      - name: Build production candidate
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: ${{ steps.facts.outputs.app_path }}
+        run: vercel build --target="$VERCEL_TARGET" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+
+      - name: Deploy production candidate
+        if: steps.gate.outputs.enabled == 'true'
+        id: candidate
+        working-directory: ${{ steps.facts.outputs.app_path }}
+        run: |
+          set -euo pipefail
+          candidate_url="$(vercel deploy --prebuilt --target="$VERCEL_TARGET" --skip-domain --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN")"
+          echo "url=$candidate_url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke candidate
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          CANDIDATE_URL: ${{ steps.candidate.outputs.url }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error --max-time 15 "$CANDIDATE_URL/" >/dev/null; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Candidate smoke failed after 20 attempts."
+          exit 1
+
+      - name: Promote candidate
+        if: steps.gate.outputs.enabled == 'true'
+        run: vercel promote "${{ steps.candidate.outputs.url }}" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+
+      - name: Verify stable hostname, TLS, and live bundle
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          DOMAIN: ${{ steps.facts.outputs.domain }}
+        run: |
+          set -euo pipefail
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          export NO_PROXY='*' no_proxy='*'
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error --max-time 15 "https://$DOMAIN/" >/dev/null; then break; fi
+            if [ "$attempt" -eq 20 ]; then
+              echo "::error::Stable hostname smoke failed after 20 attempts."
+              exit 1
+            fi
+            sleep 5
+          done
+          openssl s_client -connect "$DOMAIN:443" -servername "$DOMAIN" </dev/null 2>/dev/null | openssl x509 -noout -checkhost "$DOMAIN"
+          node tests/cloud/scripts/verify-live-vercel-bundle.mjs --surface "${{ inputs.surface }}" --url "https://$DOMAIN/"
+
+      - name: Write deployment summary
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          {
+            echo "### Production Vercel deployment"
+            echo "- Surface: ${{ inputs.surface }}"
+            echo "- Project: ${{ steps.facts.outputs.project }}"
+            echo "- Stable hostname: https://${{ steps.facts.outputs.domain }}/"
+            echo "- Candidate: ${{ steps.candidate.outputs.url }}"
+            echo "- Commit: ${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
