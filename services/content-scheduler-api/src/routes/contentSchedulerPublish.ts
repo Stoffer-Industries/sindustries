@@ -309,10 +309,11 @@ export class RealXClient implements XClient {
  * "missing credential" error.
  *
  * Selection rules:
- *  - X_CLIENT=fake (default in dev/test): returns FakeXClient
+ *  - X_CLIENT=fake: returns FakeXClient (tests/staging only; explicit)
  *  - X_CLIENT=real: requires X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN,
  *    X_ACCESS_TOKEN_SECRET; returns null if any are missing
- *  - X_CLIENT unset: defaults to fake
+ *  - X_CLIENT unset or unknown: returns null, so a missing publishing
+ *    configuration cannot be recorded as a successful X post
  */
 // getXClient reads X_CLIENT/X_API_KEY/etc. from process.env at call time
 // rather than the parsed config snapshot. Tests toggle these values per
@@ -321,7 +322,8 @@ export class RealXClient implements XClient {
 // contract — missing OAuth credentials at boot are a ConfigValidationError,
 // not a silent null from this function.
 export function getXClient(): XClient | null {
-  const kind = (process.env.X_CLIENT ?? 'fake').toLowerCase();
+  const kind = (process.env.X_CLIENT ?? '').toLowerCase();
+  if (kind === 'fake') return new FakeXClient();
   if (kind === 'real') {
     const apiKey = process.env.X_API_KEY;
     const apiSecret = process.env.X_API_SECRET;
@@ -331,7 +333,7 @@ export function getXClient(): XClient | null {
     const handle = process.env.X_HANDLE ?? 'sindustries';
     return new RealXClient(apiKey, apiSecret, accessToken, accessTokenSecret, handle);
   }
-  return new FakeXClient();
+  return null;
 }
 
 /**
