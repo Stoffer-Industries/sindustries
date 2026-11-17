@@ -1,0 +1,12 @@
+{
+  "flySpendLimit": {
+    "recorded": true,
+    "readBackAt": "2026-11-17T07:38:00.000Z",
+    "scope": "production app scope",
+    "control": "prepaid-capped-billing-method",
+    "evidenceRef": "docs/cloud/production-provisioning-readback.md",
+    "targets": [
+      "sindustries-platform-production"
+    ]
+  }
+}
