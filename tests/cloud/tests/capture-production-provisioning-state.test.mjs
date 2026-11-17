@@ -36,7 +36,11 @@ import {
   resolveOperatorEvidencePath,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
 
+import { loadProductionExpectations } from '../scripts/check-production-provisioning-state.mjs';
+
 const REPO_ROOT = new URL('../../..', import.meta.url).pathname;
+
+const EXPECTATIONS = await loadProductionExpectations(REPO_ROOT);
 
 /**
  * Run `fn` with `globalThis.fetch` replaced by a stub.
@@ -916,7 +920,7 @@ test('the committed operator evidence is the default capture input', () => {
   );
 
   const { evidence, problems } = loadOperatorEvidence(path, {
-    capturedAt: '2026-11-17T09:00:00.000Z',
+    capturedAt: '2026-11-17T19:00:00.000Z',
   });
   assert.deepEqual(problems, []);
   assert.equal(evidence.flySpendLimit.recorded, true);
@@ -968,12 +972,36 @@ test('the committed operator evidence is the default capture input', () => {
     );
   }
 
-  // The retroactive spend-bound acceptance is Tom/QA's decision. The
-  // repository records it; it does not infer it.
-  assert.notEqual(
+  // Tom's 2026-11-18 decisions close the two human gates: the retroactive
+  // spend-bound ordering is accepted with the capped card as the external
+  // financial control, and Neon stays on Free with schema-scoped service
+  // roles as the accepted connectivity control. The repository records the
+  // decisions; it does not infer them.
+  assert.equal(
     evidence.flySpendOrderingDeviation?.recorded,
     true,
-    'the spend-bound ordering deviation is not recorded by the repository',
+    'the spend-bound ordering deviation acceptance is recorded',
+  );
+  assert.equal(
+    evidence.flySpendOrderingDeviation.readBackAt,
+    '2026-11-17T18:28:00.000Z',
+  );
+  assert.equal(
+    evidence.neonFreeTierIsolationAcceptance?.recorded,
+    true,
+    'the Neon Free-tier isolation acceptance is recorded',
+  );
+  assert.equal(
+    evidence.neonFreeTierIsolationAcceptance.control,
+    'schema-scoped-service-roles',
+  );
+  // The acceptance has to cover exactly the surfaces the checker compares
+  // against, so the assertion is derived from the manifest rather than
+  // repeated as a literal: a new production schema must break this test
+  // instead of silently leaving the committed record short of coverage.
+  assert.deepEqual(
+    evidence.neonFreeTierIsolationAcceptance.targets,
+    [...EXPECTATIONS.expectedOperatorTargets.neonConnectivityRestriction],
   );
 });
 

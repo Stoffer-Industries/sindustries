@@ -15,16 +15,20 @@
 //   5. A schema with two roles fails.
 //   6. A read-only role fails.
 //   7. A role that cannot log in fails.
-//   8. An unconfigured IP allowlist fails.
-//   9. An empty IP allowlist fails.
-//  10. A staging role that could still connect fails.
-//  11. A dev role that could still connect fails.
-//  12. A non-production branch fails.
-//  13. A staging environment fails.
-//  14. A missing timestamp fails.
-//  15. An artifact carrying a credential URL fails.
-//  16. An artifact carrying a populated secret-named field fails.
-//  17. An artifact that does not declare its redaction fails.
+//   8. A role that is not schema-scoped fails.
+//   9. The IP-allowlist path rejects an unconfigured allowlist.
+//  10. The IP-allowlist path rejects an empty allowlist.
+//  11. The accepted Free-tier path rejects an unknown control.
+//  12. The accepted Free-tier path rejects a false IP-allowlist claim.
+//  13. The accepted Free-tier path rejects a non-Free plan.
+//  14. A staging role that could still connect fails.
+//  15. A dev role that could still connect fails.
+//  16. A non-production branch fails.
+//  17. A staging environment fails.
+//  18. A missing timestamp fails.
+//  19. An artifact carrying a credential URL fails.
+//  20. An artifact carrying a populated secret-named field fails.
+//  21. An artifact that does not declare its redaction fails.
 //
 // Run with: node --test tests/cloud/tests/check-production-neon-evidence.test.mjs
 
@@ -129,22 +133,92 @@ test('a role that cannot log in is rejected', () => {
   );
 });
 
-test('an unconfigured IP allowlist is rejected', () => {
+test('a role that is not scoped to its schema is rejected', () => {
   assertFails(
     mutate((evidence) => {
+      evidence.roles[0].scopedToSchema = false;
+    }),
+    'role_not_schema_scoped',
+  );
+});
+
+test('an unconfigured IP allowlist is rejected on the IP-allowlist path', () => {
+  assertFails(
+    mutate((evidence) => {
+      evidence.database.plan = 'scale';
+      delete evidence.connectivity.control;
       evidence.connectivity.ipAllowlistConfigured = false;
+      evidence.connectivity.ipAllowlistEntryCount = 2;
     }),
     'ip_allowlist_not_configured',
   );
 });
 
-test('an empty IP allowlist is rejected', () => {
+test('an empty IP allowlist is rejected on the IP-allowlist path', () => {
   assertFails(
     mutate((evidence) => {
+      evidence.database.plan = 'scale';
+      delete evidence.connectivity.control;
+      evidence.connectivity.ipAllowlistConfigured = true;
       evidence.connectivity.ipAllowlistEntryCount = 0;
     }),
     'ip_allowlist_empty',
   );
+});
+
+test('the accepted Free-tier path rejects an unknown connectivity control', () => {
+  assertFails(
+    mutate((evidence) => {
+      evidence.connectivity.control = 'ip-allowlist';
+    }),
+    'connectivity_control_unknown',
+  );
+});
+
+test('a Neon Free artifact without the accepted control is rejected', () => {
+  assertFails(
+    mutate((evidence) => {
+      delete evidence.connectivity.control;
+    }),
+    'free_plan_requires_connectivity_control',
+  );
+});
+
+test('the accepted Free-tier path rejects a false IP-allowlist claim', () => {
+  assertFails(
+    mutate((evidence) => {
+      evidence.connectivity.ipAllowlistConfigured = true;
+    }),
+    'free_tier_control_claims_ip_allowlist',
+  );
+});
+
+test('the accepted Free-tier path rejects a non-Free plan', () => {
+  assertFails(
+    mutate((evidence) => {
+      evidence.database.plan = 'scale';
+    }),
+    'free_tier_control_requires_free_plan',
+  );
+});
+
+test('the accepted Free-tier path rejects a non-zero allowlist count', () => {
+  assertFails(
+    mutate((evidence) => {
+      evidence.connectivity.ipAllowlistEntryCount = 5;
+    }),
+    'free_tier_control_allowlist_count_nonzero',
+  );
+});
+
+test('the Free plan vocabulary is case- and whitespace-insensitive', () => {
+  const evidence = mutate((entry) => {
+    entry.database.plan = '  FREE  ';
+  });
+  const { ok, failures } = evaluateNeonEvidence(evidence, {
+    expectedSchemas: EXPECTED_SCHEMAS,
+  });
+  assert.equal(ok, true, failures.map((failure) => failure.message).join('; '));
 });
 
 test('a staging role that could still connect is rejected', () => {
@@ -229,6 +303,9 @@ test('the CLI accepts the example artifact and rejects a tampered one', async ()
     writeFileSync(
       tampered,
       JSON.stringify(mutate((evidence) => {
+        evidence.database.plan = 'scale';
+        delete evidence.connectivity.control;
+        evidence.connectivity.ipAllowlistConfigured = true;
         evidence.connectivity.ipAllowlistEntryCount = 0;
       })),
       'utf8',

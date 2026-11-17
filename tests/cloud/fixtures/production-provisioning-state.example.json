@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "environment": "production",
   "capturedAt": "2026-11-16T00:30:00.000Z",
   "operatorEvidence": {
@@ -21,6 +21,17 @@
         "production",
         "staging",
         "dev"
+      ]
+    },
+    "neonServiceRoleScopeProof": {
+      "recorded": true,
+      "readBackAt": "2026-11-15T22:10:00.000Z",
+      "evidenceRef": "tests/cloud/fixtures/operator-evidence-readback.txt",
+      "targets": [
+        "production",
+        "tasks_api",
+        "budget_api",
+        "content_scheduler"
       ]
     },
     "productionProbeInterval": {

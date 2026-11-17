@@ -1414,7 +1414,15 @@ async function main(argv) {
     // 9 carries the per-app egress allocation (count, region and
     // fingerprints) and the Neon allowlist entries as fingerprints, so the
     // two can be compared without either side disclosing an address.
-    schemaVersion: 9,
+    // Version 10: the Neon connectivity control is read from the provider
+    // plan instead of being assumed. Neon Free cannot express an IP
+    // allowlist, so the AC2 gate now chooses between the IP-allowlist path
+    // and the accepted schema-scoped service-role control, and reports the
+    // IP-allowlist gates as not applicable when that accepted control is in
+    // place. The operator evidence carries the acceptance itself, the
+    // role-scope read-back that backs it, and the spend-ordering deviation
+    // that closes the Fly spend-bound ordering gate.
+    schemaVersion: 10,
     environment: 'production',
     capturedAt,
     providers: { neon, fly, github, cloudflare },

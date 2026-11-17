@@ -16,9 +16,16 @@
 // This check is that shape, written down and enforced. The operator captures
 // a REDACTED evidence artifact (names, flags and counts only — never a
 // value) and this checker decides whether it proves AC2. It fails closed:
-// an absent field, a missing schema, a read-only role, an empty IP
-// allowlist, a staging role that could still connect, or a value-shaped
-// credential in the artifact all fail with a named reason.
+// an absent field, a missing schema, a read-only or unscoped role, an
+// unconfigured connectivity control, a staging role that could still
+// connect, or a value-shaped credential in the artifact all fail with a
+// named reason.
+//
+// The organisation deliberately remains on Neon Free, where IP Allow is
+// unavailable. The accepted control is therefore named explicitly:
+// `schema-scoped-service-roles`. That path requires one schema-scoped
+// service role per production schema plus denied staging/dev connections,
+// and it does NOT claim that an IP allowlist exists.
 //
 // The expected schema set is read from the environment manifest — the
 // single source of truth — so the evidence cannot prove a shape the
@@ -36,6 +43,8 @@ import { readFileSync } from 'node:fs';
 import { exit, stderr, stdout } from 'node:process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { isNeonFreePlan } from '../../../infra/cloud/platform/production-operator-evidence.mjs';
 
 const DEFAULTS = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -230,6 +239,12 @@ export function evaluateNeonEvidence(evidence, options = {}) {
           `the role for schema "${schema}" is not marked canWrite; the platform database sources are write-capable`,
         );
       }
+      if (role.scopedToSchema !== true) {
+        fail(
+          'role_not_schema_scoped',
+          `the role for schema "${schema}" is not marked scopedToSchema; each production service role must be confined to its own schema`,
+        );
+      }
     }
   }
   const roleSchemas = roles
@@ -245,17 +260,59 @@ export function evaluateNeonEvidence(evidence, options = {}) {
 
   const connectivity =
     evidence.connectivity && typeof evidence.connectivity === 'object' ? evidence.connectivity : {};
-  if (connectivity.ipAllowlistConfigured !== true) {
+  const connectivityControl = connectivity.control;
+  const freeTierControlSelected = connectivityControl === 'schema-scoped-service-roles';
+  const freePlan = isNeonFreePlan(database.plan);
+  if (
+    connectivityControl !== undefined &&
+    connectivityControl !== null &&
+    !freeTierControlSelected
+  ) {
     fail(
-      'ip_allowlist_not_configured',
-      'connectivity.ipAllowlistConfigured must be true: production must not be reachable from an unrestricted network',
+      'connectivity_control_unknown',
+      `connectivity.control ${JSON.stringify(connectivityControl)} is not a control this contract defines`,
     );
   }
-  if (!Number.isInteger(connectivity.ipAllowlistEntryCount) || connectivity.ipAllowlistEntryCount < 1) {
+
+  if (freePlan && !freeTierControlSelected) {
     fail(
-      'ip_allowlist_empty',
-      'connectivity.ipAllowlistEntryCount must be an integer of at least 1',
+      'free_plan_requires_connectivity_control',
+      'a Neon Free artifact must name the accepted `schema-scoped-service-roles` control; the IP-allowlist path cannot be expressed on Free',
     );
+  }
+
+  if (freeTierControlSelected) {
+    if (!freePlan) {
+      fail(
+        'free_tier_control_requires_free_plan',
+        `the schema-scoped service-role control is only accepted for the accepted Neon Free decision; database.plan is ${JSON.stringify(database.plan ?? null)}`,
+      );
+    }
+    if (connectivity.ipAllowlistConfigured !== false) {
+      fail(
+        'free_tier_control_claims_ip_allowlist',
+        'the Free-tier control must record `ipAllowlistConfigured: false`; Neon Free cannot express an IP allowlist',
+      );
+    }
+    if (connectivity.ipAllowlistEntryCount !== 0) {
+      fail(
+        'free_tier_control_allowlist_count_nonzero',
+        'the Free-tier control must record an IP-allowlist entry count of exactly 0; Neon Free cannot express an IP allowlist',
+      );
+    }
+  } else {
+    if (connectivity.ipAllowlistConfigured !== true) {
+      fail(
+        'ip_allowlist_not_configured',
+        'connectivity.ipAllowlistConfigured must be true when no schema-scoped control is selected: production must not be reachable from an unrestricted network',
+      );
+    }
+    if (!Number.isInteger(connectivity.ipAllowlistEntryCount) || connectivity.ipAllowlistEntryCount < 1) {
+      fail(
+        'ip_allowlist_empty',
+        'connectivity.ipAllowlistEntryCount must be an integer of at least 1',
+      );
+    }
   }
   if (connectivity.stagingRoleConnectDenied !== true) {
     fail(

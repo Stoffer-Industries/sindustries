@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: fb1240c0-f605-4e0f-bf0d-91b2e3bbb68a
 product_spec: brain/tasks/specs/open/production-environment-provisioning-2026-11-05.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: 979
+shipped_date: 2026-11-17
 ---
 
 # Production Environment Provisioning — tech design
@@ -222,6 +222,35 @@ Expected live evidence:
 - HTTPS health responses for all three API hostnames;
 - health-probe target/cadence read-back and one successful production probe interval.
 
+### Decision amendment — 2026-11-18 (Tom)
+
+Two account-level constraints were discovered after Slice D began. Tom resolved
+both in chat on 2026-11-18 at 07:28 NZDT; this amendment records the
+resulting evidence contract without rewriting what happened.
+
+1. **AC2 — remain on Neon Free.** IP Allow is a paid-plan capability, and
+   the production Neon organisation remains on Free. AC2's connectivity
+   evidence is therefore re-specified around
+   `schema-scoped-service-roles`: one write-capable, schema-scoped login
+   role per production schema, plus denied staging and dev connections.
+   The repository must not claim a non-empty IP allowlist on this account.
+   `neon.connectivity-restriction` is met only when the role inventory,
+   denial proof and recorded acceptance are all present; the IP-allowlist
+   gates are not applicable on the accepted Free path.
+2. **AC5 — accept the retroactive spend-bound ordering.** The approved
+   Fly-native spend-limit API does not exist on this account. The actual
+   bound is a dedicated capped billing method, and it was read back after
+   public exposure. Tom explicitly accepted that irreversible ordering
+   deviation and selected the capped card as the external financial
+   control; no rollback was requested. The checker continues to report the
+   chronology honestly and closes the ordering gate only through the
+   recorded, value-free `flySpendOrderingDeviation` acceptance naming every
+   exposed surface.
+
+The accepted decisions, the value-free evidence records and the operator
+read-backs live in
+[`docs/cloud/production-provisioning-readback.md`](../../cloud/production-provisioning-readback.md).
+
 ### Slice E — durable documentation
 
 Update the existing durable surfaces rather than creating a parallel runbook system:
@@ -295,17 +324,17 @@ This task provisions a new destination; it does not move traffic. Therefore roll
 2. After API DNS records are created but before traffic cutover, remove only the three records created by this task. Staging/dev records are not touched.
 3. Never destroy the production app, Neon branch, or role configuration automatically. Preserve them for diagnosis and the successor task.
 4. Migrations are forward-only and run against an empty production branch. If they fail, fix the branch/schema before retrying; do not delete evidence.
-5. The Fly spend limit stays in place even if deployment fails.
+5. The production spend bound stays in place even if deployment fails.
 
 ## 9. Open questions and risks
 
 ### Open questions for Quinn’s design review
 
 1. **Production database topology:** one Neon production project/branch with three schemas (the staging-proven shape), or separate production projects/branches per service? Recommendation: one production project with three schemas for the first cut because it mirrors staging and is materially cheaper; service ownership remains represented by schemas and credentials. The durable migration model can split later without changing app code.
-2. **Connectivity restriction — provider capability is now known, account plan is not:** the live Neon organization is on the Free plan. Neon currently makes IP Allow a Scale-plan feature and protected branches a paid-plan feature. The selected mechanism therefore needs an explicit account-plan decision before Slice D can execute: Scale for IP Allow (plus a protected production branch when the allowlist is scoped to protected branches), or an explicitly re-specified AC2 mechanism. Fly's source addresses are no longer an open question: the production platform and health probe each need an app-scoped static egress pair in `syd`, and those addresses form the allowlist once Neon supports it. The implementation must record the provider read-back, not infer isolation from branch naming or a guessed shared egress range.
+2. **Connectivity restriction — resolved 2026-11-18:** the live Neon organization remains on the Free plan, where IP Allow and protected branches are unavailable. Tom accepted `schema-scoped-service-roles` as AC2's connectivity control: one write-capable, schema-scoped login role per production schema plus denied staging/dev connections. The repository must not claim an IP allowlist on this account. The app-scoped Fly egress pairs allocated for the abandoned allowlist path are a cleanup candidate, not an open AC2 gate.
 3. **Production app naming:** approve `sindustries-platform-production` and `sindustries-health-probe-production`, or use a different naming convention.
 4. **Production health-probe cadence:** the task names both cadence variables but does not prescribe exact values. Recommendation: Fly app targets every 120 seconds and database probes hourly, matching the existing comments’ direction while avoiding a continuously-awake Neon compute endpoint.
-5. **Spend-limit ownership:** confirm whether Quinn can set the org-level Fly limit or whether Tom must perform that account/billing action.
+5. **Spend-bound ownership — resolved 2026-11-18:** Fly exposes no native spend-limit mutation on this account. The approved bound is a dedicated capped billing method. It was read back after production exposure, and Tom explicitly accepted that irreversible ordering deviation with the capped card as the external financial control; the repository records the acceptance rather than asserting the original order held.
 
 ### Risks
 
@@ -316,8 +345,8 @@ This task provisions a new destination; it does not move traffic. Therefore roll
 | Two Fly health targets or one shared DB cause cross-environment impact | High | production database/project and Cloudflare records are separate; staging read-back is required before and after DNS work |
 | Shared-fate outage in production | High | accepted explicitly; one canary deployment; all four child health states visible in supervisor status; app-wide rollback documented; no traffic cutover in this task |
 | Worker double-consumption | Critical | production queue/Redis is distinct; the production worker exists only inside the consolidated app; no retired production worker app is created; startup and queue identity are read back |
-| Fly spend limit absent or on the wrong scope | High | billing read-back is a hard AC5 gate before DNS/public probe activation; workflow ordering test makes it non-skippable |
-| Neon account plan cannot express the approved network restriction | High | the Free-plan account has neither IP Allow nor protected branches; make the Scale/alternative decision before creating production credentials, keep the AC2 evidence gate red, and do not substitute role-only isolation for the approved network control |
+| Production spend bound absent or on the wrong scope | High | billing read-back is a hard AC5 gate before DNS/public probe activation; when the actual order was violated, only Tom's recorded acceptance covering every exposed surface can close the immutable ordering deviation |
+| Neon Free cannot express an IP allowlist | High | Tom accepted schema-scoped service roles plus denied staging/dev connections as AC2's control; the checker proves that mechanism and reports the IP-allowlist gates not applicable rather than green |
 | Health probe keeps Neon compute awake | Medium | hourly DB cadence and 120-second Fly-app cadence; document the cost/liveness trade-off |
 | Missing production secret blocks boot after DNS exposure | High | complete secret inventory, fail-closed boot, canary deploy and smoke checks before DNS |
 | Migration is run against the wrong database | Critical | environment-labelled DSNs, schema rewrite contract, branch/host read-back, and a production-branch `SELECT`/migration-table check before public exposure |

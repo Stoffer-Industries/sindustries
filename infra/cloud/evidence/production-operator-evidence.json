@@ -9,6 +9,20 @@
       "sindustries-platform-production"
     ]
   },
+  "flySpendOrderingDeviation": {
+    "recorded": true,
+    "readBackAt": "2026-11-17T18:28:00.000Z",
+    "scope": "Tom acceptance of the retroactive spend-bound ordering using a dedicated capped card as the external financial control",
+    "evidenceRef": "docs/cloud/production-provisioning-readback.md",
+    "targets": [
+      "tasks-api.sindustries.co.nz",
+      "budget-api.sindustries.co.nz",
+      "content-scheduler-api.sindustries.co.nz",
+      "health-probe.sindustries.co.nz",
+      "sindustries-health-probe-production",
+      "sindustries-platform-production"
+    ]
+  },
   "neonSeparationDenialProof": {
     "recorded": true,
     "readBackAt": "2026-11-16T10:31:58.000Z",
@@ -16,6 +30,33 @@
     "evidenceRef": "docs/cloud/production-provisioning-readback.md",
     "targets": [
       "production",
+      "staging",
+      "dev"
+    ]
+  },
+  "neonServiceRoleScopeProof": {
+    "recorded": true,
+    "readBackAt": "2026-11-16T10:31:58.000Z",
+    "scope": "operator read-back authored by Quinn in commit 9c2c2e8d",
+    "evidenceRef": "docs/cloud/production-provisioning-readback.md",
+    "targets": [
+      "production",
+      "tasks_api",
+      "budget_api",
+      "content_scheduler"
+    ]
+  },
+  "neonFreeTierIsolationAcceptance": {
+    "recorded": true,
+    "readBackAt": "2026-11-17T18:28:00.000Z",
+    "scope": "Tom decision to remain on Neon Free and accept schema-scoped service-role isolation as the AC2 connectivity control",
+    "control": "schema-scoped-service-roles",
+    "evidenceRef": "docs/cloud/production-provisioning-readback.md",
+    "targets": [
+      "production",
+      "tasks_api",
+      "budget_api",
+      "content_scheduler",
       "staging",
       "dev"
     ]
