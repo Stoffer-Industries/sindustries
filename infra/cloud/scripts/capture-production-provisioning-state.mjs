@@ -30,6 +30,13 @@
 // `tests/cloud/scripts/check-production-provisioning-state.mjs`, which fails
 // closed on an unmet gate and names the owner of the open step.
 //
+// The artifact also carries WHEN production became publicly exposed: the
+// Cloudflare record's creation time and the production health-probe app's
+// release time. The approved design makes the production spend bound a
+// hard gate BEFORE any public exposure, so the checker has to compare the
+// bound's read-back time with the exposure time. Without those timestamps
+// the order could only be asserted in prose, never checked.
+//
 // Usage:
 //   node infra/cloud/scripts/capture-production-provisioning-state.mjs [--out <path>]
 //        [--repo-root <path>] [--neon-project <name>]
@@ -961,28 +968,45 @@ async function captureFly({ platformApp, healthProbeApp, healthProbeBaseUrl, red
    * read that failed are different facts, and the Machine inventory is what
    * settles which of the two it is.
    *
+   * The release's CREATION time is read as well as its version. The
+   * approved design makes the production spend bound a hard gate BEFORE
+   * any public exposure, so the checker has to know WHEN production became
+   * publicly exposed in order to compare that with when the bound was read
+   * back. Without a timestamp the ordering could only be asserted, never
+   * checked.
+   *
    * @param {string} name
-   * @returns {Promise<{releaseVersion: number|string|null, releaseError: string|null}>}
+   * @returns {Promise<{releaseVersion: number|string|null, releaseCreatedAt: string|null, releaseError: string|null}>}
    */
   const readRelease = async (name) => {
     try {
       const detail = await query(
-        `{ app(id: ${JSON.stringify(name)}) { name currentRelease { version } } }`,
+        `{ app(id: ${JSON.stringify(name)}) { name currentRelease { version createdAt } } }`,
       );
       const app = detail?.app ?? null;
       if (!app) {
-        return { releaseVersion: null, releaseError: `the Fly app ${name} has no release` };
+        return {
+          releaseVersion: null,
+          releaseCreatedAt: null,
+          releaseError: `the Fly app ${name} has no release`,
+        };
       }
       if (!app.currentRelease) {
         return {
           releaseVersion: null,
+          releaseCreatedAt: null,
           releaseError: `the Fly app ${name} has no current release`,
         };
       }
-      return { releaseVersion: app.currentRelease.version ?? null, releaseError: null };
+      return {
+        releaseVersion: app.currentRelease.version ?? null,
+        releaseCreatedAt: app.currentRelease.createdAt ?? null,
+        releaseError: null,
+      };
     } catch (error) {
       return {
         releaseVersion: null,
+        releaseCreatedAt: null,
         releaseError: `the release of the Fly app ${name} could not be read (${error.message})`,
       };
     }
@@ -1022,6 +1046,7 @@ async function captureFly({ platformApp, healthProbeApp, healthProbeBaseUrl, red
       organization: organizationFor(name),
       exists: machines.exists,
       releaseVersion: release.releaseVersion,
+      releaseCreatedAt: release.releaseCreatedAt,
       machineStates: machines.machineStates,
       machineCount: machines.machineCount,
       ...(release.releaseError ? { releaseError: release.releaseError } : {}),
@@ -1151,9 +1176,10 @@ function readDnsScope(repoRoot) {
 /**
  * Read the production DNS records — the AC3 read-back.
  *
- * Only names, record types, targets and the proxy flag are recorded: a DNS
- * target is a public hostname, and the artifact never carries the API
- * credential that read it.
+ * Only names, record types, targets, the proxy flag and the record's
+ * creation time are recorded: a DNS target is a public hostname, and the
+ * artifact never carries the API credential that read it. The creation
+ * time is the exposure time the spend-bound ORDER gate compares against.
  *
  * @param {{zoneName: string, hostnames: string[]}} scope
  */
@@ -1191,6 +1217,11 @@ async function captureCloudflare({ zoneName, hostnames }) {
           type: record.type ?? 'unknown',
           content: record.content ?? null,
           proxied: record.proxied === true,
+          // WHEN the record was published. This is the exposure time the
+          // approved design orders against: the production spend bound has
+          // to be in place BEFORE a production hostname is published, and
+          // a record without a publication time cannot prove that order.
+          createdOn: record.created_on ?? null,
         });
       }
     }

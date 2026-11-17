@@ -193,15 +193,44 @@ This is a **billing decision for Tom**, not an operator read-back, so the
 slot is deliberately left unrecorded rather than being satisfied with a
 value that does not exist.
 
-Note on ordering: the repository's checker enforces that the spend-limit
-read-back be recorded before public exposure. DNS records and the
-production health-probe were published under Tom's explicit approval of
-the Fly-app and DNS work on 2026-11-16 21:36, which is why the ordering
-gate is red — it is a true statement that the limit read-back does not
-exist yet, not a defect in the exposure.
+Note on ordering — and what the repository now checks. The approved
+design makes the spend bound a hard gate BEFORE any public exposure. The
+production DNS records were published at **2026-11-16T10:12:23Z**
+(`tasks-api`, the first of the four; the others follow within two
+seconds) and the production health-probe app's current release was created
+at **2026-11-16T20:32:20Z**, under Tom's explicit approval of the Fly-app
+and DNS work on 2026-11-16 21:36. The spend bound cannot be read back
+until the card is active, so **the bound will be established AFTER the
+exposure**.
 
-**Read-back artifact:** none — the step has not been performed (the card is
-not active yet).
+Until 2026-11-17 the checker's ordering gate proved only that a
+spend-bound read-back was RECORDED while production was exposed — it did
+not compare times, because the artifact carried no exposure time at all.
+That made the order assertable in prose but not checkable in code: once
+the card is read back, the gate would have reported "met" and its reason
+would have read as though the bound preceded the cutover.
+
+The capture now records the exposure times (the Cloudflare record's
+creation time and the probe app's release creation time) and the checker
+decides a second gate, `fly.spend-bound-ordering`:
+
+- the bound read back **before** the exposure → the order holds;
+- the bound read back **after** the exposure → the order was not met, and
+  the gate fails until the deviation is accepted;
+- an exposure with no readable time → the order cannot be proven, and the
+  gate fails against the capture.
+
+Because the order cannot be un-violated, the closure path is a recorded
+acceptance: the `flySpendOrderingDeviation` operator slot carries the
+same value-free shape as every other read-back (a boolean, a time, a
+pointer to the acceptance and the exposed surfaces it covers). **This is
+Tom/QA's decision** — accept the retroactive bound, or roll the exposure
+back until the bound is in place. The repository does not record it on
+anyone's behalf.
+
+**Read-back artifact:** none for the spend bound itself — the step has not
+been performed (the card is not active yet). The exposure timestamps above
+were read live from Cloudflare and Fly on 2026-11-17 (06:30Z).
 
 ---
 

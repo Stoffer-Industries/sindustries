@@ -96,6 +96,15 @@
 //  75. An operator obligation with no expected surface stays open.
 //  76. A recorded read-back without an inspectable pointer fails.
 //  77. A read-back stamped after the artifact capture fails.
+//  78. The spend-bound ORDER gate passes when the bound was read back
+//      before production was publicly exposed.
+//  79. A spend bound read back AFTER the public exposure fails the order
+//      gate — the order the approved design requires cannot be asserted.
+//  80. A recorded acceptance of the ordering deviation closes the order
+//      gate.
+//  81. An acceptance that does not cover every exposed surface stays open.
+//  82. A public exposure with no readable exposure time fails the order
+//      gate.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -1249,4 +1258,74 @@ test('an expectation set with no expected process group fails the process-group 
     { ...EXPECTATIONS, expectedPlatformProcessGroups: [] },
     'fly.production-platform-app-process-group',
   );
+});
+
+test('the spend-bound order gate passes when the bound was read back before the exposure', () => {
+  const { ok, rows } = evaluateProvisioningState(loadFixture(), EXPECTATIONS);
+  assert.equal(ok, true);
+  const ordering = rows.find((row) => row.gate === 'fly.spend-bound-ordering');
+  assert.ok(ordering, 'the order gate is reported');
+  assert.equal(ordering.status, 'met');
+  assert.match(ordering.reason, /before production was publicly exposed/);
+});
+
+test('a spend bound read back after the public exposure fails the order gate', () => {
+  const state = mutate((artifact) => {
+    // The fixture's production DNS was published at 2026-11-15T23:00Z;
+    // a bound read back afterwards is the deviation the design forbids.
+    artifact.operatorEvidence.flySpendLimit.readBackAt = '2026-11-16T00:00:00.000Z';
+  });
+  assertFails(state, 'fly.spend-bound-ordering');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const ordering = rows.find((row) => row.gate === 'fly.spend-bound-ordering');
+  assert.match(ordering.reason, /AFTER production was publicly exposed/);
+  assert.match(ordering.reason, /flySpendOrderingDeviation/);
+});
+
+test('a recorded acceptance of the ordering deviation closes the order gate', () => {
+  const state = mutate((artifact) => {
+    artifact.operatorEvidence.flySpendLimit.readBackAt = '2026-11-16T00:00:00.000Z';
+    artifact.operatorEvidence.flySpendOrderingDeviation = {
+      recorded: true,
+      readBackAt: '2026-11-16T00:10:00.000Z',
+      scope: 'Tom acceptance of the retroactive production spend bound',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: [...EXPECTATIONS.expectedOperatorTargets.productionExposure],
+    };
+  });
+  const { ok, rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  assert.equal(ok, true, JSON.stringify(rows.filter((row) => row.status === 'unmet'), null, 2));
+  const ordering = rows.find((row) => row.gate === 'fly.spend-bound-ordering');
+  assert.equal(ordering.status, 'met');
+  assert.match(ordering.reason, /the order the approved design requires was not met/);
+  assert.match(ordering.reason, /recorded acceptance/);
+});
+
+test('an acceptance that does not cover every exposed surface stays open', () => {
+  const state = mutate((artifact) => {
+    artifact.operatorEvidence.flySpendLimit.readBackAt = '2026-11-16T00:00:00.000Z';
+    artifact.operatorEvidence.flySpendOrderingDeviation = {
+      recorded: true,
+      readBackAt: '2026-11-16T00:10:00.000Z',
+      scope: 'Tom acceptance of the retroactive production spend bound',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: ['sindustries-platform-production'],
+    };
+  });
+  assertFails(state, 'fly.spend-bound-ordering');
+});
+
+test('a public exposure with no readable exposure time fails the order gate', () => {
+  const state = mutate((artifact) => {
+    for (const record of artifact.providers.cloudflare.records) {
+      delete record.createdOn;
+    }
+    for (const app of artifact.providers.fly.apps) {
+      delete app.releaseCreatedAt;
+    }
+  });
+  assertFails(state, 'fly.spend-bound-ordering');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const ordering = rows.find((row) => row.gate === 'fly.spend-bound-ordering');
+  assert.equal(ordering.owner, 'Rowan', 'the capture owns a missing exposure time');
 });
