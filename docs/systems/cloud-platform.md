@@ -250,8 +250,10 @@ limit, or the approved prepaid/capped billing method — this account has
 no native Fly spend-limit surface), and a required pointer to the
 read-back, never a value — recorded in
 the artifact's `operatorEvidence` section by
-`infra/cloud/scripts/capture-production-provisioning-state.mjs
---operator-evidence <file>`. The same section closes the other four
+`infra/cloud/scripts/capture-production-provisioning-state.mjs`. The
+committed `infra/cloud/evidence/production-operator-evidence.json` is
+loaded automatically; `--operator-evidence <file>` overrides it for a
+one-off capture. The same section closes the other four
 obligations no machine can prove (the staging/dev Neon denial proof, one
 successful production probe interval, the production API health responses
 and the DNS resolution/TLS read-back).

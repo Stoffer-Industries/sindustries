@@ -31,6 +31,7 @@ import {
   readHealthProbeTargets,
   readFlySecretNames,
   readNeonBranchEndpointFingerprints,
+  resolveOperatorEvidencePath,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
 
 const REPO_ROOT = new URL('../../..', import.meta.url).pathname;
@@ -900,6 +901,32 @@ function writeOperatorEvidence(contents) {
   writeFileSync(path, typeof contents === 'string' ? contents : JSON.stringify(contents));
   return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
+
+test('the committed operator evidence is the default capture input', () => {
+  const path = resolveOperatorEvidencePath({ repoRoot: REPO_ROOT });
+  assert.equal(
+    path,
+    join(REPO_ROOT, 'infra/cloud/evidence/production-operator-evidence.json'),
+  );
+
+  const { evidence, problems } = loadOperatorEvidence(path, {
+    capturedAt: '2026-11-17T09:00:00.000Z',
+  });
+  assert.deepEqual(problems, []);
+  assert.equal(evidence.flySpendLimit.recorded, true);
+  assert.equal(
+    evidence.flySpendLimit.control,
+    'prepaid-capped-billing-method',
+  );
+});
+
+test('an explicit operator evidence path overrides the committed default', () => {
+  const path = resolveOperatorEvidencePath({
+    repoRoot: REPO_ROOT,
+    operatorEvidence: '/tmp/operator-evidence.json',
+  });
+  assert.equal(path, '/tmp/operator-evidence.json');
+});
 
 test('a recorded operator read-back is carried into the artifact', () => {
   const file = writeOperatorEvidence({
