@@ -28,8 +28,18 @@ Usage: migrate.sh \
 Required:
   --tasks-dsn-file <path>   Mode-0600 direct DSN for the destination database.
   --budget-dsn-file <path>  Mode-0600 direct DSN for the destination database.
+
+Optional:
   --result-dir <path>       Directory for redacted migration results/logs.
-                            Defaults to ./artifacts/cloud-staging.
+                            Defaults to the environment's artifact directory
+                            (./artifacts/cloud-staging,
+                            ./artifacts/cloud-production).
+  --environment <staging|production>
+                            Environment label. Defaults to the ENVIRONMENT
+                            environment variable, then "staging".
+  --expected-host <host>    Declares an endpoint this run may touch.
+                            Repeatable. A production run MUST declare every
+                            endpoint it touches.
 
 The destination DSNs are expected to be the same database. The script adds
 the Prisma-only ?schema=... parameter when invoking each service migration;
@@ -39,13 +49,16 @@ USAGE
 
 TASKS_DSN_FILE=""
 BUDGET_DSN_FILE=""
-RESULT_DIR="./artifacts/cloud-staging"
+RESULT_DIR=""
+ENVIRONMENT="${ENVIRONMENT:-staging}"
 
 while (( $# > 0 )); do
   case "$1" in
     --tasks-dsn-file)  TASKS_DSN_FILE="$2"; shift 2;;
     --budget-dsn-file) BUDGET_DSN_FILE="$2"; shift 2;;
     --result-dir)      RESULT_DIR="$2"; shift 2;;
+    --environment)     ENVIRONMENT="$2"; shift 2;;
+    --expected-host)   cloud_db_add_expected_host "$2"; shift 2;;
     --help|-h)         usage; exit 0;;
     *)                 cloud_db_die "unknown argument: $1";;
   esac
@@ -55,12 +68,16 @@ if [[ -z "$TASKS_DSN_FILE" || -z "$BUDGET_DSN_FILE" ]]; then
   cloud_db_die "both --tasks-dsn-file and --budget-dsn-file are required"
 fi
 
-cloud_db_assert_environment "staging"
+cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_load_expected_targets_from_env
+cloud_db_assert_production_ack
+
+RESULT_DIR="${RESULT_DIR:-$CLOUD_DB_ARTIFACT_DIR}"
 
 cloud_db_load_secret TASKS_DSN "$TASKS_DSN_FILE"
 cloud_db_load_secret BUDGET_DSN "$BUDGET_DSN_FILE"
-cloud_db_assert_no_production_dsn "tasks" "$TASKS_DSN"
-cloud_db_assert_no_production_dsn "budget" "$BUDGET_DSN"
+cloud_db_assert_target_dsn "tasks" "$TASKS_DSN"
+cloud_db_assert_target_dsn "budget" "$BUDGET_DSN"
 
 # ---------------------------------------------------------------------------
 # Resolve per-service Prisma schema directory
@@ -171,14 +188,16 @@ run_service_migration "budget-api" "$BUDGET_PRISMA_DIR" "$BUDGET_DSN" budget_api
 RESULT_PATH="${RESULT_DIR}/migrate-${CLOUD_DB_RUN_ID}.json"
 
 python3 - "$RESULT_PATH" "$CLOUD_DB_RUN_ID" "$TASKS_DSN_FILE" "$BUDGET_DSN_FILE" \
-        "${SERVICE_RESULTS[tasks-api]}" "${SERVICE_RESULTS[budget-api]}" <<'PY'
+        "${SERVICE_RESULTS[tasks-api]}" "${SERVICE_RESULTS[budget-api]}" \
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
 
-out_path, run_id, tasks_dsn_file, budget_dsn_file, tasks_state, budget_state = sys.argv[1:]
+out_path, run_id, tasks_dsn_file, budget_dsn_file, tasks_state, budget_state, kind_prefix, environment = sys.argv[1:]
 
 envelope = {
   "schemaVersion": 1,
-  "kind": "cloud-staging-migrate",
+  "kind": f"{kind_prefix}-migrate",
+  "environment": environment,
   "runId": run_id,
   "tasks": {
     "dsnFile": tasks_dsn_file,

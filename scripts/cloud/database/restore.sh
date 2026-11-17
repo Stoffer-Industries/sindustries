@@ -43,10 +43,19 @@ Required:
 
 Optional:
   --result-dir <path>            Directory for redacted restore results/logs.
-                                 Defaults to ./artifacts/cloud-staging. The
+                                 Defaults to the environment's artifact
+                                 directory (./artifacts/cloud-staging,
+                                 ./artifacts/cloud-production). The
                                  workflow passes its upload directory here so
                                  restore-result.json and the pg_restore log are
                                  captured as run artifacts.
+  --environment <staging|production>
+                                 Environment label. Defaults to the
+                                 ENVIRONMENT environment variable, then
+                                 "staging".
+  --expected-host <host>         Declares an endpoint this run may touch.
+                                 Repeatable. A production run MUST declare
+                                 every endpoint it touches.
   --intentional-failure-after <seconds>
                                  Drill-only flag. When set, restore.sh
                                  starts pg_restore, waits the given
@@ -64,6 +73,7 @@ ARCHIVE_PATH=""
 EXPECTED_SHA=""
 INTENTIONAL_FAILURE_AFTER=""
 RESULT_DIR=""
+ENVIRONMENT="${ENVIRONMENT:-staging}"
 
 while (( $# > 0 )); do
   case "$1" in
@@ -72,6 +82,8 @@ while (( $# > 0 )); do
     --archive)                    ARCHIVE_PATH="$2"; shift 2;;
     --archive-sha256)             EXPECTED_SHA="$2"; shift 2;;
     --result-dir)                 RESULT_DIR="$2"; shift 2;;
+    --environment)                ENVIRONMENT="$2"; shift 2;;
+    --expected-host)              cloud_db_add_expected_host "$2"; shift 2;;
     --intentional-failure-after)  INTENTIONAL_FAILURE_AFTER="$2"; shift 2;;
     --help|-h)                    usage; exit 0;;
     *)                            cloud_db_die "unknown argument: $1";;
@@ -89,7 +101,9 @@ if [[ -n "$INTENTIONAL_FAILURE_AFTER" ]]; then
   fi
 fi
 
-cloud_db_assert_environment "staging"
+cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_load_expected_targets_from_env
+cloud_db_assert_production_ack
 cloud_db_assign_run_id
 
 # ---------------------------------------------------------------------------
@@ -98,8 +112,8 @@ cloud_db_assign_run_id
 
 cloud_db_load_secret SOURCE_DSN "$SOURCE_DSN_FILE"
 cloud_db_load_secret DEST_DSN "$DEST_DSN_FILE"
-cloud_db_assert_no_production_dsn "source" "$SOURCE_DSN"
-cloud_db_assert_no_production_dsn "destination" "$DEST_DSN"
+cloud_db_assert_target_dsn "source" "$SOURCE_DSN"
+cloud_db_assert_target_dsn "destination" "$DEST_DSN"
 cloud_db_assert_inequality "source" "$SOURCE_DSN" "destination" "$DEST_DSN"
 
 if [[ ! -f "$ARCHIVE_PATH" ]]; then
@@ -152,7 +166,7 @@ if [[ -n "${existing_schemas:-}" ]]; then
     "destination already contains schema(s): ${existing_schemas}; pg_restore cannot apply its TOC's SCHEMA entries into a destination that already holds them (custom-format archives issue CREATE SCHEMA before any table DDL). Re-run with --cleanup-destination (or drop the listed schema(s)) before restoring"
 fi
 
-RESULT_DIR="${RESULT_DIR:-./artifacts/cloud-staging}"
+RESULT_DIR="${RESULT_DIR:-$CLOUD_DB_ARTIFACT_DIR}"
 mkdir -p "$RESULT_DIR"
 
 RESULT_PATH="${RESULT_DIR}/restore-${CLOUD_DB_RUN_ID}.json"
@@ -229,14 +243,16 @@ fi
 
 python3 - "$RESULT_PATH" "$CLOUD_DB_RUN_ID" "$EXPECTED_SHA" \
         "$restore_start_epoch" "$restore_end_epoch" "$restored_schemas" \
-        "$(stat -c %s "$ARCHIVE_PATH" 2>/dev/null || stat -f %z "$ARCHIVE_PATH")" <<'PY'
+        "$(stat -c %s "$ARCHIVE_PATH" 2>/dev/null || stat -f %z "$ARCHIVE_PATH")" \
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
 
-out_path, run_id, expected_sha, start_epoch, end_epoch, schemas, size_bytes = sys.argv[1:]
+out_path, run_id, expected_sha, start_epoch, end_epoch, schemas, size_bytes, kind_prefix, environment = sys.argv[1:]
 
 envelope = {
   "schemaVersion": 1,
-  "kind": "cloud-staging-restore",
+  "kind": f"{kind_prefix}-restore",
+  "environment": environment,
   "runId": run_id,
   "archiveSha256": expected_sha,
   "archiveSizeBytes": int(size_bytes),
