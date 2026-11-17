@@ -107,10 +107,12 @@ Vercel provisioned a certificate for it. No DNS change was needed. See
   20-attempt smoke loop accommodates the latency (slice 3, AC4 enforcement).
 - Fly `fly certs add` issues a Let's Encrypt cert for the hostname. The
   staging smoke loop is the same shape; production uses the same loop in
-  `deploy-staging-*.yml` workflow files (these will be cloned as
-  `deploy-production-*.yml` for the production rollout, but that is a
-  separate task — this task only ships the contract, not the production
-  deploy workflows).
+  the live staging deploy workflows — `deploy-staging-platform.yml` (the
+  consolidated platform app) and `deploy-staging-health-probe.yml` (the
+  health probe keeps its own app). The production pair
+  (`deploy-production-platform.yml`, `deploy-production-health-probe.yml`)
+  has since shipped **consolidated**, not cloned per service, in PR #979
+  (merged 2026-11-17); see §6.
 
 ### 3. Vercel custom domain registration
 
@@ -406,22 +408,37 @@ credential boundary.
 
 ### 6. Production deploy workflows (task `fb1240c0`)
 
-This task ships the **staging** deploy workflow migration to the stable
-hostname (slice 3, PR #775, merged 2026-10-08T10:28:43Z). The
-**production** deploy workflows are not in scope for `5cb4a8fe`; they ship
-with task `fb1240c0` as one consolidated pair, because production follows
-the consolidated topology rather than one workflow per service. Quinn runs
-the production deploy by dispatching those workflows against the production
-GitHub environment.
+Neither environment has one deploy workflow per service. Staging deploys the
+consolidated platform app, production follows the same consolidated topology,
+and the health probe keeps its own app and its own workflow in both.
+
+The live staging deploy surfaces are `deploy-staging-platform.yml` (the
+consolidated platform app, added by PR #920) and
+`deploy-staging-health-probe.yml` (the health probe's own app, added by PR
+#756); `.github/workflows/ci.yml` calls only these two. The per-service
+staging workflows were retired at the 2026-11-07 consolidation (task
+`219fb673`): their deploy jobs were removed from `ci.yml` on that date and
+their Fly apps were destroyed, so the four files are `workflow_call`-only with
+no caller. They stay in the tree until the §5 cleanup in
+`docs/runbooks/platform-consolidation-rollback.md` deletes them.
+`tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs` still requires
+three of them (tasks-api, budget-api, content-scheduler-api) to exist.
+
+The **production** deploy workflows were not in scope for `5cb4a8fe`; they
+shipped with task `fb1240c0` as one consolidated pair, because production
+follows the consolidated topology rather than one workflow per service, and
+they merged on 2026-11-17. Quinn runs the production deploy by dispatching
+those workflows against the production GitHub environment.
 
 | Workflow | Status | Owner |
 | --- | --- | --- |
-| `deploy-staging-tasks-api.yml` | Merged (PR #775) | Rowan |
-| `deploy-staging-budget-api.yml` | Merged (PR #775) | Rowan |
-| `deploy-staging-content-scheduler-api.yml` | Merged (PR #775) | Rowan |
-| `deploy-staging-health-probe.yml` | Merged (PR #775) | Rowan |
-| `deploy-production-platform.yml` | Shipped by task `fb1240c0` (PR #979, unmerged) — one consolidated production app, not one app per service | Rowan |
-| `deploy-production-health-probe.yml` | Shipped by task `fb1240c0` (PR #979, unmerged) — the probe keeps its own app and its own gate | Rowan |
+| `deploy-staging-platform.yml` | Live staging deploy surface — the consolidated platform app (PR #920; stable-hostname migration PR #775) | Rowan |
+| `deploy-staging-health-probe.yml` | Live staging deploy surface — the health probe keeps its own app (PR #756; stable-hostname migration PR #775) | Rowan |
+| `deploy-staging-tasks-api.yml` | Retired at the 2026-11-07 consolidation — `workflow_call`-only, no caller, Fly app destroyed; retained pending the §5 cleanup | Rowan |
+| `deploy-staging-budget-api.yml` | Retired at the 2026-11-07 consolidation — `workflow_call`-only, no caller, Fly app destroyed; retained pending the §5 cleanup | Rowan |
+| `deploy-staging-content-scheduler-api.yml` | Retired at the 2026-11-07 consolidation — `workflow_call`-only, no caller, Fly app destroyed; retained pending the §5 cleanup | Rowan |
+| `deploy-production-platform.yml` | Merged (PR #979, 2026-11-17) — one consolidated production app, not one app per service | Rowan |
+| `deploy-production-health-probe.yml` | Merged (PR #979, 2026-11-17) — the probe keeps its own app and its own gate | Rowan |
 
 ### 7. Production smoke + cutover (separate task)
 
