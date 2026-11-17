@@ -907,6 +907,7 @@ test('a recorded operator read-back is carried into the artifact', () => {
       recorded: true,
       readBackAt: '2026-11-16T00:00:00.000Z',
       scope: 'personal organization',
+      control: 'prepaid-capped-billing-method',
       evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
       targets: ['sindustries-platform-production'],
     },
@@ -948,6 +949,7 @@ test('an operator evidence file stamped after the capture is refused', () => {
       recorded: true,
       readBackAt: '2026-11-16T01:00:01.000Z',
       scope: 'personal organization',
+      control: 'prepaid-capped-billing-method',
       evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
       targets: ['sindustries-platform-production'],
     },
@@ -958,6 +960,70 @@ test('an operator evidence file stamped after the capture is refused', () => {
     });
     assert.equal(evidence, null);
     assert.match(problems.join(' '), /after the artifact was captured/);
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('a recorded spend read-back that names no control is refused', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: {
+      recorded: true,
+      readBackAt: '2026-11-16T00:00:00.000Z',
+      scope: 'personal organization',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: ['sindustries-platform-production'],
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /without naming the control/);
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('a recorded spend read-back that names an unknown control is refused', () => {
+  const file = writeOperatorEvidence({
+    flySpendLimit: {
+      recorded: true,
+      readBackAt: '2026-11-16T00:00:00.000Z',
+      scope: 'personal organization',
+      control: 'wishful-thinking',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: ['sindustries-platform-production'],
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /unknown control/);
+  } finally {
+    file.cleanup();
+  }
+});
+
+test('a control on a slot that declares none is refused', () => {
+  const file = writeOperatorEvidence({
+    dnsResolutionAndTlsReadback: {
+      recorded: true,
+      readBackAt: '2026-11-16T00:00:00.000Z',
+      scope: 'production',
+      control: 'prepaid-capped-billing-method',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: [
+        'tasks-api.sindustries.co.nz',
+        'budget-api.sindustries.co.nz',
+        'content-scheduler-api.sindustries.co.nz',
+        'health-probe.sindustries.co.nz',
+      ],
+    },
+  });
+  try {
+    const { evidence, problems } = loadOperatorEvidence(file.path);
+    assert.equal(evidence, null);
+    assert.match(problems.join(' '), /a "control" the contract does not define/);
   } finally {
     file.cleanup();
   }

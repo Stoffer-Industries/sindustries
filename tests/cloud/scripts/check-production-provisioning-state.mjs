@@ -1579,6 +1579,21 @@ export function evaluateProvisioningState(state, options = {}) {
       'flySpendLimit',
       expectedTargetsForSlot('flySpendLimit'),
     );
+    // WHICH control bounded the spend. The slot was written for a native
+    // Fly spend limit, and this account has none: Fly exposes no
+    // spend-limit surface, so the approved control is a prepaid/capped
+    // billing method. A read-back that does not name its control cannot be
+    // checked against what the operator actually set, so a recorded slot
+    // with no control (or an unknown one) does not close the gate.
+    const spendSlotDefinition = OPERATOR_EVIDENCE_SLOTS.find(
+      (definition) => definition.slot === 'flySpendLimit',
+    );
+    const allowedSpendControls = Array.isArray(spendSlotDefinition?.controls)
+      ? spendSlotDefinition.controls
+      : [];
+    const recordedSpendControl = state.operatorEvidence?.flySpendLimit?.control;
+    const spendControlKnown =
+      typeof recordedSpendControl === 'string' && allowedSpendControls.includes(recordedSpendControl);
     if (exposure.length === 0) {
       add(
         row(gate, 'not-applicable', {
@@ -1606,8 +1621,19 @@ export function evaluateProvisioningState(state, options = {}) {
           owner: 'Quinn / Tom (account plan decision)',
           label,
           reason:
-            `${exposure.join('; ')}, but no Fly spend-limit read-back is recorded. ` +
-            'The approved design makes the limit a hard gate before any public exposure, so the exposure must not stand until the read-back is recorded.',
+            `${exposure.join('; ')}, but no production spend-bound read-back is recorded. ` +
+            'The approved design makes the bound a hard gate before any public exposure, so the exposure must not stand until the read-back is recorded.',
+        }),
+      );
+    } else if (!spendControlKnown) {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason:
+            `${exposure.join('; ')}, and the recorded read-back does not name the control that bounds ` +
+            `production spend — the allowed controls are ${allowedSpendControls.join(', ')}. A read-back that does not say WHAT bounded the spend cannot be checked against what was set.`,
         }),
       );
     } else if (!spendLimitCoverage.covered) {
@@ -1627,7 +1653,9 @@ export function evaluateProvisioningState(state, options = {}) {
           step: 'Slice D step 6',
           owner: 'Quinn / Tom (account plan decision)',
           label,
-          reason: `the spend limit was read back (${spendLimitSummary}) and ${exposure.join('; ')}`,
+          reason:
+            `the production spend bound was read back as a \`${recordedSpendControl}\` control ` +
+            `(${spendLimitSummary}) and ${exposure.join('; ')}`,
         }),
       );
     }
@@ -1642,6 +1670,26 @@ export function evaluateProvisioningState(state, options = {}) {
         slot,
         expectedTargetsForSlot(slot),
       );
+      const slotDefinition = OPERATOR_EVIDENCE_SLOTS.find(
+        (definition) => definition.slot === slot,
+      );
+      const allowedControls = Array.isArray(slotDefinition?.controls)
+        ? slotDefinition.controls
+        : [];
+      const recordedControl = state.operatorEvidence?.[slot]?.control;
+      if (allowedControls.length > 0 && !allowedControls.includes(recordedControl)) {
+        add(
+          row(entry.gate, 'unmet', {
+            step: entry.step,
+            owner: entry.owner,
+            label: entry.label,
+            reason:
+              'the operator recorded this read-back, but it does not name the control it read back — ' +
+              `the allowed controls are ${allowedControls.join(', ')}`,
+          }),
+        );
+        continue;
+      }
       if (coverage.expected.length === 0) {
         add(
           row(entry.gate, 'unmet', {

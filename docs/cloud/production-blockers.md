@@ -208,11 +208,16 @@ credential boundary.
   in the provisioning-state artifact's `operatorEvidence` section
   (`capture-production-provisioning-state.mjs --operator-evidence <file>`).
   The record carries a boolean, a read-back time, a required pointer to the
-  read-back and the production surfaces it covered, never a value. A record
-  without an inspectable pointer, or with a read-back stamped after the
-  artifact was captured, is refused. The
+  read-back and the production surfaces it covered, never a value. The
+  spend-bound slot additionally names the CONTROL that bounded production
+  spend — `fly-native-spend-limit` or `prepaid-capped-billing-method` (the
+  control Tom approved on 2026-11-17, because this account has no native
+  Fly spend-limit surface) — and a record with no control or an unknown
+  one is refused. A record without an inspectable pointer, or with a
+  read-back stamped after the artifact was captured, is refused. The
   Four are recorded in `production-provisioning-readback.md`; the Fly
-  spend-limit slot remains open because Fly exposes no such control. The
+  spend-bound slot remains open because the approved control is not active
+  yet. The
   `fly.spend-limit-before-public-exposure`
   gate enforces the order the approved design makes a hard gate: while a
   production hostname is published or the production health-probe app is
@@ -231,7 +236,7 @@ credential boundary.
 
   | Slot | `targets` must name |
   | --- | --- |
-  | flySpendLimit | `sindustries-platform-production` — the production app scope the limit is set on |
+  | flySpendLimit | `sindustries-platform-production` — the production app scope the spend bound covers |
   | productionProbeInterval | `sindustries-health-probe-production` — the app the interval must be observed on |
   | productionApiHealthResponses | `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz`, `content-scheduler-api.sindustries.co.nz` — the three production APIs, served by `sindustries-platform-production` |
   | dnsResolutionAndTlsReadback | `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz`, `content-scheduler-api.sindustries.co.nz` — served by `sindustries-platform-production` |
@@ -253,6 +258,7 @@ credential boundary.
       "recorded": true,
       "readBackAt": "2026-11-16T09:00:00.000Z",
       "scope": "personal organization - production app scope",
+      "control": "prepaid-capped-billing-method",
       "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": ["sindustries-platform-production"]
     },
