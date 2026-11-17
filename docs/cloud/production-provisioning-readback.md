@@ -1,6 +1,6 @@
 # Production provisioning read-backs — task fb1240c0 (Slice D)
 
-**Operator:** Quinn · **Date:** 2026-11-16 (NZDT) · **Environment:** production
+**Operator:** Quinn · **Dates:** 2026-11-16 to 2026-11-18 (NZDT) · **Environment:** production
 
 Every item below was observed live against the production control planes.
 No credential value appears in this file or in the artifact it feeds — only
@@ -38,10 +38,14 @@ and wrote to its own schema, with no cross-schema access:
 | `sindustries_budget_api` | `budget_api` | login OK, CREATE/INSERT/SELECT/DROP OK |
 | `sindustries_content_scheduler` | `content_scheduler` | login OK, CREATE/INSERT/SELECT/DROP OK |
 
-**Not covered by this read-back:** the IP allowlist. Neon on the Free plan
-cannot express it (`allowed_ips.ips` is empty, `protected=false`,
-`block_public_connections=false`). Per Tom's 2026-11-16 decision this is
-deferred to a post-launch follow-up, not a launch blocker.
+**Connectivity control:** Neon on the Free plan cannot express an IP
+allowlist (`allowed_ips.ips` is empty, `protected=false`,
+`block_public_connections=false`). Tom decided on 2026-11-18 to remain on
+Free and accept **schema-scoped service roles** as AC2's connectivity
+control: one write-capable, per-schema role for each production schema,
+plus the refused staging/dev connections recorded above. The repository
+does not claim that an IP allowlist exists; §7 records the accepted
+replacement and the cleanup note for the abandoned allowlist path.
 
 **Read-back artifact:** this file (`docs/cloud/production-provisioning-readback.md`).
 
@@ -156,7 +160,7 @@ part of the evidence path because Fly-managed add-ons do not appear there.
 
 ## 6. Production spend bound (AC5, slot `flySpendLimit`) — RECORDED
 
-**The read-back is recorded below, while the separate ordering-deviation acceptance remains a human gate.**
+**The read-back and Tom's ordering-deviation acceptance are both recorded below.**
 
 Fly.io exposes no programmatic spend-limit surface: no GraphQL field,
 input or mutation whose name contains spend/limit/budget/cap/threshold;
@@ -239,10 +243,9 @@ same value-free shape as every other read-back (a boolean, a time, a
 pointer to the acceptance and the exposed surfaces it covers — every
 production hostname, the production health-probe app and the consolidated
 production platform app, which serves all three production API hostnames
-and is publicly reachable before any DNS record exists). **This is
-Tom/QA's decision** — accept the retroactive bound, or roll the exposure
-back until the bound is in place. The repository does not record it on
-anyone's behalf.
+and is publicly reachable before any DNS record exists). **Tom accepted
+the deviation on 2026-11-18; §8 records the acceptance.** The repository
+does not record a human decision on anyone's behalf before it is made.
 
 **Read-back artifact:** `docs/cloud/production-provisioning-readback.md`
 (this section; `readBackAt=2026-11-17T07:38:00.000Z`). The exposure
@@ -251,15 +254,123 @@ timestamps above were read live from Cloudflare and Fly on 2026-11-17
 
 ---
 
-## 7. Recording the read-backs in the artifact
+## 7. Neon Free-tier connectivity-control acceptance (AC2, slot `neonFreeTierIsolationAcceptance`) — RECORDED
+
+Tom decided on **2026-11-18 at 07:28 NZDT** (`2026-11-17T18:28:00Z`) to
+keep the Neon organisation on the **Free** plan. IP Allow is a paid-plan
+feature on this provider, so no honest evidence can claim a non-empty
+allowlist on this account. The accepted replacement control is named
+`schema-scoped-service-roles`:
+
+- the production branch has exactly one write-capable login role for each
+  production schema;
+- each role is confined to its own schema and has no cross-schema grants;
+- the staging and dev credentials are both refused against the production
+  branch; and
+- the production branch, all three production schemas, and both refused
+  credential kinds are named by the acceptance record.
+
+The facts are not inferred from the decision. The role inventory and
+schema scoping are live provider/read-back evidence; the staging/dev
+refusals are in §1; and Tom's decision selects that mechanism as AC2's
+control. The provisioning checker therefore decides
+`neon.connectivity-restriction` from all three facts:
+
+- one service role per production schema is present;
+- the staging/dev denial proof is recorded against every required surface;
+- the acceptance is recorded with the exact `schema-scoped-service-roles`
+  control and every required surface.
+
+On Neon Free, `neon.ip-allowlist`, `neon.ip-allowlist-source` and
+`neon.ip-allowlist-match` are then reported **not applicable**. That is
+not a green claim that an allowlist exists: it says the abandoned IP
+mechanism is not the selected control. A Free-plan artifact without the
+complete acceptance still fails closed.
+
+Quinn allocated an app-scoped Fly egress pair for each production app on
+2026-11-18 (operator read-back recorded in the task thread, before the plan
+decision was settled). Those addresses are no longer needed
+for AC2's allowlist path. If neither app uses app-scoped static egress for
+another purpose, they are a cleanup candidate; this follow-up does not
+deallocate them without an explicit operator decision.
+
+**Acceptance artifact:**
+
+```json
+{
+  "recorded": true,
+  "readBackAt": "2026-11-17T18:28:00.000Z",
+  "scope": "Tom decision to remain on Neon Free and accept schema-scoped service-role isolation as the AC2 connectivity control",
+  "control": "schema-scoped-service-roles",
+  "evidenceRef": "docs/cloud/production-provisioning-readback.md",
+  "targets": [
+    "production",
+    "tasks_api",
+    "budget_api",
+    "content_scheduler",
+    "staging",
+    "dev"
+  ]
+}
+```
+
+---
+
+## 8. Retroactive spend-bound ordering acceptance (AC5, slot `flySpendOrderingDeviation`) — RECORDED
+
+Tom explicitly accepted the ordering deviation on **2026-11-18 at 07:28
+NZDT** (`2026-11-17T18:28:00Z`): the capped Fly billing card was read back
+after production became publicly exposed, and no rollback is requested.
+The dedicated capped card is the external financial control that replaces
+the unavailable Fly-native spend-limit API.
+
+The acceptance covers every exposed surface:
+
+- `tasks-api.sindustries.co.nz`;
+- `budget-api.sindustries.co.nz`;
+- `content-scheduler-api.sindustries.co.nz`;
+- `health-probe.sindustries.co.nz`;
+- `sindustries-health-probe-production`; and
+- `sindustries-platform-production` (the consolidated app that serves all
+  three production API hostnames and is publicly reachable before DNS is
+  published).
+
+The checker does not rewrite the chronology. It continues to report that
+the bound was read back **after** exposure; the recorded acceptance is the
+closure path for that irreversible ordering deviation. The artifact is
+value-free and points here for inspection.
+
+**Acceptance artifact:**
+
+```json
+{
+  "recorded": true,
+  "readBackAt": "2026-11-17T18:28:00.000Z",
+  "scope": "Tom acceptance of the retroactive spend-bound ordering using a dedicated capped card as the external financial control",
+  "evidenceRef": "docs/cloud/production-provisioning-readback.md",
+  "targets": [
+    "tasks-api.sindustries.co.nz",
+    "budget-api.sindustries.co.nz",
+    "content-scheduler-api.sindustries.co.nz",
+    "health-probe.sindustries.co.nz",
+    "sindustries-health-probe-production",
+    "sindustries-platform-production"
+  ]
+}
+```
+
+---
+
+## 9. Recording the read-backs in the artifact
 
 The read-backs above are this file's content. The **checker** does not
 read this file directly: it reads the `operatorEvidence` section of the
 captured artifact, and it compares a recorded slot against the production
 surfaces that slot must cover. The committed record at
 `infra/cloud/evidence/production-operator-evidence.json` now carries the
-four read-backs in §1–§4, so a normal capture closes those four
-obligations without a manual flag.
+four read-backs in §1–§4, the spend-bound read-back in §6, and Tom's two
+decision records in §7–§8, so a normal capture closes those obligations
+without a manual flag.
 
 The `readBackAt` time for those four slots is
 **2026-11-16T10:31:58.000Z** — the author time of Quinn's operator-record
@@ -305,11 +416,16 @@ nobody could inspect.
 | `productionApiHealthResponses` | §3 | `docs/cloud/production-provisioning-readback.md` |
 | `dnsResolutionAndTlsReadback` | §4 | `docs/cloud/production-provisioning-readback.md` |
 | `flySpendLimit` | §6 — capped card confirmed 2026-11-17 20:38 NZDT | `docs/cloud/production-provisioning-readback.md` |
+| `neonFreeTierIsolationAcceptance` | §7 — Tom's Free-tier control decision, 2026-11-18 07:28 NZDT | `docs/cloud/production-provisioning-readback.md` |
+| `flySpendOrderingDeviation` | §8 — Tom's spend-order deviation acceptance, 2026-11-18 07:28 NZDT | `docs/cloud/production-provisioning-readback.md` |
 
-The §1–§4 slots and the §6 spend slot are recorded in the committed
-operator-evidence file. `flySpendOrderingDeviation` is deliberately
-absent: recording it is Tom/QA's acceptance of the retroactive spend
-bound, not a repository inference.
+All six slots above are recorded in the committed operator-evidence file.
+The two decision slots name the exact control or exposed surfaces they
+cover, so the repository can distinguish Tom's accepted deviation from a
+claim that the original ordering held.
 
 The spend-bound record carries the approved `control`, the production app
-scope target, and the repository-relative pointer to this read-back.
+scope target, and the repository-relative pointer to this read-back. The
+Neon record carries the `schema-scoped-service-roles` control and the
+production branch, every production schema, and both refused credential
+kinds.

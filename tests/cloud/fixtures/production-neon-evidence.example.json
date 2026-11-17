@@ -4,6 +4,7 @@
   "database": {
     "project": "sindustries",
     "branch": "production",
+    "plan": "free",
     "schemas": ["tasks_api", "budget_api", "content_scheduler"]
   },
   "roles": [
@@ -11,24 +12,28 @@
       "name": "sindustries_tasks_api",
       "schema": "tasks_api",
       "canLogin": true,
-      "canWrite": true
+      "canWrite": true,
+      "scopedToSchema": true
     },
     {
       "name": "sindustries_budget_api",
       "schema": "budget_api",
       "canLogin": true,
-      "canWrite": true
+      "canWrite": true,
+      "scopedToSchema": true
     },
     {
       "name": "sindustries_content_scheduler",
       "schema": "content_scheduler",
       "canLogin": true,
-      "canWrite": true
+      "canWrite": true,
+      "scopedToSchema": true
     }
   ],
   "connectivity": {
-    "ipAllowlistConfigured": true,
-    "ipAllowlistEntryCount": 2,
+    "control": "schema-scoped-service-roles",
+    "ipAllowlistConfigured": false,
+    "ipAllowlistEntryCount": 0,
     "stagingRoleConnectDenied": true,
     "devRoleConnectDenied": true
   },

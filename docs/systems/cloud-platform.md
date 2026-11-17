@@ -224,13 +224,13 @@ does not allow the spend limit to be set directly. The full operator order
 is Slice D of
 [`docs/specs/production-environment-provisioning-tech-design.md`](../specs/production-environment-provisioning-tech-design.md).
 
-**The spend limit comes before real traffic.** The production app carries a
-live budget and a public API surface, so the organisation/app spend limit
-must be set — and read back — **before** the platform canary deploy or any
-public hostname is enabled. It is not a post-cutover tidy-up: the limit is
-what bounds the blast radius of a runaway production deploy, and the
-health probe must not go out before it either (the operator order deploys
-the platform first and the probe last).
+**The spend bound is designed to come before real traffic.** The
+production app carries a live budget and a public API surface, so the
+organisation/app spend bound must be set — and read back — **before** the
+platform canary deploy or any public hostname is enabled. It is not a
+post-cutover tidy-up: the limit is what bounds the blast radius of a
+runaway production deploy, and the health probe must not go out before it
+either (the operator order deploys the platform first and the probe last).
 
 That order is enforced, not only documented. The provisioning-state checker
 decides a `fly.spend-limit-before-public-exposure` gate: while a
@@ -250,8 +250,19 @@ by recording — so the closure path is a recorded human acceptance of the
 deviation (`flySpendOrderingDeviation`, the same value-free shape as every
 other read-back, and it must name every exposed surface — the production
 hostnames, the health-probe app and the production platform app), or the
-exposure is rolled back until the bound is in
-place. The read-back itself is operator evidence — a boolean, the time it
+exposure is rolled back until the bound is in place.
+
+On this account Fly exposes no native spend-limit surface, so the approved
+bound is a dedicated prepaid/capped billing method. The actual production
+bound was read back after public exposure. Tom explicitly accepted that
+irreversible ordering deviation on 2026-11-18 and selected the capped card
+as the external financial control; the recorded acceptance names every
+exposed surface and is kept in
+`infra/cloud/evidence/production-operator-evidence.json`. The checker does
+not rewrite the chronology: it still reports that the bound followed
+exposure and cites the recorded acceptance as the closure path.
+
+The read-back itself is operator evidence — a boolean, the time it
 was read back, the CONTROL that bounded the spend (a native Fly spend
 limit, or the approved prepaid/capped billing method — this account has
 no native Fly spend-limit surface), and a required pointer to the
@@ -260,10 +271,12 @@ the artifact's `operatorEvidence` section by
 `infra/cloud/scripts/capture-production-provisioning-state.mjs`. The
 committed `infra/cloud/evidence/production-operator-evidence.json` is
 loaded automatically; `--operator-evidence <file>` overrides it for a
-one-off capture. The same section closes the other four
-obligations no machine can prove (the staging/dev Neon denial proof, one
-successful production probe interval, the production API health responses
-and the DNS resolution/TLS read-back).
+one-off capture. The same section closes the four operator read-backs no
+machine can prove (the staging/dev Neon denial proof, one successful
+production probe interval, the production API health responses and the
+DNS resolution/TLS read-back) and carries the two explicit human
+decision records (the Neon Free-tier control and the spend-order
+deviation).
 
 A recorded read-back is only as good as what it covers, so it also names
 the production surfaces it was read back against, in `targets`. A boolean
@@ -310,18 +323,19 @@ Fly-hosted production DNS/TLS surfaces were provisioned. The value-free live
 read-backs are in
 [`docs/cloud/production-provisioning-readback.md`](../cloud/production-provisioning-readback.md).
 
-**The Neon connectivity restriction has two prerequisites.** AC2's "connectivity
-restricted to production services" needs (1) a Neon plan that can express an
-IP allowlist and (2) the Fly **app-scoped static egress addresses** the
-allowlist must carry — Fly's shared egress ranges are not a fixed set, so an
-allowlist built from them drifts. The second is an allocation, not a plan
-change: the live read-back on 2026-11-18 found **neither production app has
-an app-scoped static egress address allocated**, so upgrading the Neon plan
-alone would leave nothing to allow. The provisioning capture reads the
-allocation (count, region and a fingerprint per address) and the Neon
-allowlist entries as fingerprints — never the addresses themselves — and the
-checker decides `neon.ip-allowlist-source` and `neon.ip-allowlist-match`
-from them. See
+**The Neon connectivity control is schema-scoped service-role isolation.**
+The production Neon organisation deliberately remains on the Free plan,
+where IP Allow is unavailable. Tom's 2026-11-18 decision re-specifies
+AC2's evidence around the control this account can enforce: one
+write-capable, schema-scoped login role per production schema, with the
+staging and dev credentials both proved unable to connect to the
+production branch. The provisioning-state checker decides
+`neon.connectivity-restriction` from the live role inventory, the denial
+proof and the recorded acceptance; on a complete Free-plan record the
+IP-allowlist gates are **not applicable**, not green. The checker never
+claims an allowlist that the provider cannot express. The abandoned
+app-scoped Fly egress allocations are a cleanup candidate, not an open AC2
+gate. See
 [`docs/cloud/production-neon-contract.md`](../cloud/production-neon-contract.md).
 
 ---

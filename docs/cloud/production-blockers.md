@@ -345,45 +345,32 @@ credential boundary.
   platform and health-probe apps are deployed, all four Fly-hosted production
   DNS/TLS surfaces resolve and return 200, and all three schemas plus Redis
   report `up=1`. See `docs/cloud/production-provisioning-readback.md`.
-- The production Neon branch now carries the three service schemas and one
+- The production Neon branch carries the three service schemas and one
   write-capable, schema-confined role per schema. Staging and dev credentials
-  were both refused against the production endpoint. The IP allowlist remains
-  unavailable on the current Free plan and is explicitly deferred by Tom;
-  that remaining limitation is recorded in the read-back rather than hidden.
+  were both refused against the production endpoint. Tom decided on
+  2026-11-18 to remain on Neon Free and accept schema-scoped service-role
+  isolation as AC2's connectivity control; the repository records that
+  decision and does **not** claim an IP allowlist exists.
 - Redis is two separate Fly-managed Upstash Pay-as-you-go add-ons in `syd`:
   `sindustries-staging` and `sindustries-production`. The direct-Upstash
   staging database was retired after staging was repointed and health-checked.
   The manifest's `redisAddon` entries are the source of truth.
-  - **Provider-plan blocker (re-read 2026-11-16):** the Neon organization
-    `Stoffer Industries` reports `plan=free`. Neon currently makes IP Allow
-    a **Scale-plan** feature, while protected branches are available only
-    on paid plans (Launch supports up to two protected branches per
-    project; Scale up to five). The production branch still reports
-    `protected=false`, `allowed_ips.ips=[]`,
-    `protected_branches_only=false`, and
-    `block_public_connections=false`. AC2 therefore cannot be truthfully
-    closed until the account owner approves a plan/mechanism change. The
-    repository does not silently substitute role-only isolation for the
-    approved network restriction.
-  - **Fly allowlist source:** Fly's shared egress ranges are not a fixed
-    allowlist. The production platform and health probe each need an
-    app-scoped static egress pair in `syd`
-    (`fly ips allocate-egress --app <app> --region syd`); each IPv4 is
-    currently $3.60/month and each pair supports up to 64 Machines. Those
-    app-owned addresses are the allowlist inputs once Neon supports IP
-    Allow on the selected plan.
-    - **Live read-back (2026-11-18): neither production app has an
-      app-scoped static egress address allocated** — both report zero, and
-      the two staging apps do too. The Neon plan decision and this
-      allocation are therefore **two** prerequisites of AC2, and the plan
-      alone does not close it: there is no allowlist to apply until the
-      addresses exist. The provisioning capture reads the allocation
-      (count, region and a fingerprint per address) and the Neon allowlist
-      entries as fingerprints, and the checker decides
-      `neon.ip-allowlist-source` (every production app carries an
-      allocation — owner Quinn) and `neon.ip-allowlist-match` (the Neon
-      allowlist names exactly the allocated addresses — owner Quinn). The
-      addresses are never written to the artifact.
+  - **Provider-plan decision (resolved 2026-11-18):** the Neon organization
+    `Stoffer Industries` reports `plan=free`. Neon makes IP Allow a
+    **Scale-plan** feature, so the production account cannot express a
+    non-empty allowlist. Tom decided to remain on Free and re-specified
+    AC2 around `schema-scoped-service-roles`: one write-capable,
+    schema-scoped login role per production schema plus denied staging/dev
+    connections. The repository records the accepted control and reports the
+    IP-allowlist gates as not applicable, not met.
+  - **Abandoned Fly allowlist source:** Fly's shared egress ranges are not
+    a fixed allowlist, so the original plan used app-scoped static egress
+    pairs. Quinn allocated one pair for each production app on 2026-11-18
+    (operator read-back recorded in the task thread, before the plan
+    decision was settled). The addresses are no longer required by AC2 and
+    are a cleanup candidate if neither app needs app-scoped static egress
+    for another purpose. Deallocation remains a separate operator action;
+    the provisioning checker does not treat it as an AC2 blocker.
   - **How to read the provider:** the live Neon API base is
     `https://console.neon.tech/api/v2` — `api.neon.tech` has no address
     records at all, so a request to it fails at DNS and looks like a

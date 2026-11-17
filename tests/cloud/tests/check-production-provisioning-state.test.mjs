@@ -185,11 +185,12 @@ test('the passing artifact passes and every operator obligation is backed by a r
     (row) =>
       row.gate === 'fly.spend-limit-readback' ||
       row.gate === 'neon.separation-denial-proof' ||
+      row.gate === 'neon.service-role-scope' ||
       row.gate === 'health.production-probe-interval' ||
       row.gate === 'health.production-api-responses' ||
       row.gate === 'dns.resolution-and-tls-readback',
   );
-  assert.equal(operatorRows.length, 5, 'the five operator-only obligations are reported');
+  assert.equal(operatorRows.length, 6, 'the six operator-only obligations are reported');
   for (const row of operatorRows) {
     assert.equal(row.status, 'met', `${row.gate} is closed by the recorded read-back`);
     assert.ok(row.reason.length > 0, `${row.gate} explains why it cannot be machine-verified`);
@@ -197,13 +198,13 @@ test('the passing artifact passes and every operator obligation is backed by a r
   }
 });
 
-test('an artifact with no operator evidence reports the five obligations as operator-required', () => {
+test('an artifact with no operator evidence reports the six obligations as operator-required', () => {
   const state = mutate((artifact) => {
     delete artifact.operatorEvidence;
   });
   const { rows, failures } = evaluateProvisioningState(state, EXPECTATIONS);
   const operatorRequired = rows.filter((row) => row.status === 'operator-required');
-  assert.equal(operatorRequired.length, 5, 'every obligation stays open without a read-back');
+  assert.equal(operatorRequired.length, 6, 'every obligation stays open without a read-back');
   for (const row of operatorRequired) {
     assert.ok(row.reason.includes('operatorEvidence'), `${row.gate} says where to record it`);
   }
@@ -551,6 +552,113 @@ test('an empty IP allowlist fails', () => {
     }),
     'neon.ip-allowlist',
   );
+});
+
+test('the accepted Neon Free-tier control closes AC2 without asserting an IP allowlist', () => {
+  const state = mutate((artifact) => {
+    artifact.capturedAt = '2026-11-18T00:00:00.000Z';
+    artifact.providers.neon.organization.plan = 'free';
+    artifact.providers.neon.project.allowedIpCount = 0;
+    artifact.providers.neon.project.allowedIpFingerprints = [];
+    artifact.operatorEvidence.neonFreeTierIsolationAcceptance = {
+      recorded: true,
+      readBackAt: '2026-11-17T18:28:00.000Z',
+      scope: 'Tom acceptance of the Free-tier replacement control',
+      control: 'schema-scoped-service-roles',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: [...EXPECTATIONS.expectedOperatorTargets.neonConnectivityRestriction],
+    };
+  });
+
+  const { ok, failures, rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  assert.equal(ok, true, JSON.stringify(failures, null, 2));
+
+  const connectivity = rows.find((row) => row.gate === 'neon.connectivity-restriction');
+  assert.equal(connectivity.status, 'met');
+  assert.match(connectivity.reason, /schema-scoped service role/);
+
+  for (const gate of [
+    'neon.ip-allowlist',
+    'neon.ip-allowlist-source',
+    'neon.ip-allowlist-match',
+  ]) {
+    const row = rows.find((candidate) => candidate.gate === gate);
+    assert.equal(row.status, 'not-applicable', `${gate} must not claim an allowlist exists`);
+  }
+});
+
+test('a Neon Free-plan artifact without the accepted replacement control still fails', () => {
+  const state = mutate((artifact) => {
+    artifact.providers.neon.organization.plan = 'free';
+    artifact.providers.neon.project.allowedIpCount = 0;
+    artifact.providers.neon.project.allowedIpFingerprints = [];
+  });
+  assertFails(state, 'neon.connectivity-restriction');
+  assertFails(state, 'neon.ip-allowlist');
+});
+
+test('the Neon Free-tier acceptance cannot replace the staging and dev denial proof', () => {
+  const state = mutate((artifact) => {
+    artifact.capturedAt = '2026-11-18T00:00:00.000Z';
+    artifact.providers.neon.organization.plan = 'free';
+    artifact.providers.neon.project.allowedIpCount = 0;
+    artifact.providers.neon.project.allowedIpFingerprints = [];
+    delete artifact.operatorEvidence.neonSeparationDenialProof;
+    artifact.operatorEvidence.neonFreeTierIsolationAcceptance = {
+      recorded: true,
+      readBackAt: '2026-11-17T18:28:00.000Z',
+      scope: 'Tom acceptance of the Free-tier replacement control',
+      control: 'schema-scoped-service-roles',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: [...EXPECTATIONS.expectedOperatorTargets.neonConnectivityRestriction],
+    };
+  });
+  assertFails(state, 'neon.connectivity-restriction');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const separation = rows.find((row) => row.gate === 'neon.separation-denial-proof');
+  assert.equal(separation.status, 'operator-required');
+  assert.match(separation.reason, /operatorEvidence/);
+});
+
+test('the Neon Free-tier acceptance cannot claim an unknown control', () => {
+  const state = mutate((artifact) => {
+    artifact.capturedAt = '2026-11-18T00:00:00.000Z';
+    artifact.providers.neon.organization.plan = 'free';
+    artifact.providers.neon.project.allowedIpCount = 0;
+    artifact.providers.neon.project.allowedIpFingerprints = [];
+    artifact.operatorEvidence.neonFreeTierIsolationAcceptance = {
+      recorded: true,
+      readBackAt: '2026-11-17T18:28:00.000Z',
+      scope: 'Tom acceptance of the Free-tier replacement control',
+      control: 'ip-allowlist',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: [...EXPECTATIONS.expectedOperatorTargets.neonConnectivityRestriction],
+    };
+  });
+  assertFails(state, 'artifact.operator-evidence');
+  assertFails(state, 'neon.connectivity-restriction');
+});
+
+test('the Neon Free-tier acceptance does not bypass a missing service role', () => {
+  const state = mutate((artifact) => {
+    artifact.capturedAt = '2026-11-18T00:00:00.000Z';
+    artifact.providers.neon.organization.plan = 'free';
+    artifact.providers.neon.project.allowedIpCount = 0;
+    artifact.providers.neon.project.allowedIpFingerprints = [];
+    artifact.providers.neon.roleNames = artifact.providers.neon.roleNames.filter(
+      (name) => name !== 'sindustries_budget_api',
+    );
+    artifact.operatorEvidence.neonFreeTierIsolationAcceptance = {
+      recorded: true,
+      readBackAt: '2026-11-17T18:28:00.000Z',
+      scope: 'Tom acceptance of the Free-tier replacement control',
+      control: 'schema-scoped-service-roles',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      targets: [...EXPECTATIONS.expectedOperatorTargets.neonConnectivityRestriction],
+    };
+  });
+  assertFails(state, 'neon.service-roles');
+  assertFails(state, 'neon.connectivity-restriction');
 });
 
 test('a protected-branch allowlist without a protected branch fails', () => {

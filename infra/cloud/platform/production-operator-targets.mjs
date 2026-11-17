@@ -158,5 +158,28 @@ export async function loadOperatorTargetExpectations(repoRoot) {
     // are credential KINDS from the Neon contract, not hostnames or
     // credential values.
     neonSeparation: [PRODUCTION_NEON_BRANCH, 'staging', 'dev'],
+    // The role-scope read-back covers the production branch and every
+    // production schema whose service role must be confined to that
+    // schema. The schema names come from the environment manifest, so
+    // the record cannot omit a production schema without failing.
+    neonServiceRoleScope: [
+      PRODUCTION_NEON_BRANCH,
+      ...Object.values(environment.schemas ?? {}).filter(
+        (schema) => typeof schema === 'string' && schema.length > 0,
+      ),
+    ],
+    // The Free-tier replacement control covers the production branch,
+    // every production schema that owns a scoped service role, and BOTH
+    // non-production credential kinds whose access must be denied. The
+    // schema names come from the environment manifest, so the record
+    // cannot drift from the production topology.
+    neonConnectivityRestriction: [
+      PRODUCTION_NEON_BRANCH,
+      ...Object.values(environment.schemas ?? {}).filter(
+        (schema) => typeof schema === 'string' && schema.length > 0,
+      ),
+      'staging',
+      'dev',
+    ],
   };
 }

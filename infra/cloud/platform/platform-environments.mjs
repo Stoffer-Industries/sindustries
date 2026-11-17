@@ -173,6 +173,19 @@ export const PLATFORM_ENVIRONMENTS = {
       budget: 'budget_api',
       contentScheduler: 'content_scheduler',
     },
+    /**
+     * The Neon service roles that own the production schemas.
+     *
+     * The role names are part of the production topology: the provisioning
+     * capture compares the provider's role inventory against these exact
+     * names, so a similarly named read-only or broad role cannot satisfy
+     * the schema-scoped connectivity control by substring accident.
+     */
+    databaseServiceRoles: {
+      tasks: 'sindustries_tasks_api',
+      budget: 'sindustries_budget_api',
+      contentScheduler: 'sindustries_content_scheduler',
+    },
     sourceNames: {
       tasksDatabaseUrl: 'PRODUCTION_TASKS_API_DATABASE_URL',
       budgetDatabaseUrl: 'PRODUCTION_BUDGET_API_DATABASE_URL',

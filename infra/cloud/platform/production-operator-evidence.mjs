@@ -4,11 +4,17 @@
 //
 // WHY THIS EXISTS
 //
-// Slice D has five obligations the repository cannot decide: the Fly
-// spend-limit read-back (Fly exposes no limit API), the staging/dev Neon
-// denial proof (it needs credentials), one successful production probe
-// interval (time-based), the production API health responses (network and
-// time bound) and the DNS resolution/TLS read-back (network bound).
+// Slice D has six ordinary obligations the repository cannot decide: the
+// Fly spend-limit read-back (Fly exposes no limit API), the staging/dev
+// Neon denial proof (it needs credentials), the Neon service-role scope
+// proof (the provider role inventory does not expose SQL grants), one
+// successful production probe interval (time-based), the production API
+// health responses (network and time bound) and the DNS resolution/TLS
+// read-back (network bound).
+//
+// It also has two explicit human-decision records: the accepted Neon
+// Free-tier connectivity control and the accepted retroactive spend-bound
+// ordering. Those decisions are not inferred from provider state.
 //
 // Until now those five were reported as `operator-required` FOREVER. The
 // operator had nowhere to record a read-back, so the evidence chain could
@@ -86,6 +92,58 @@ export const SPEND_BOUND_CONTROLS = {
     'a prepaid or capped billing method on the Fly production billing account, read back from the billing surface',
 };
 
+/**
+ * The connectivity controls Neon Free can actually enforce.
+ *
+ * Neon gates IP Allow behind a paid plan. The production organisation
+ * deliberately remains on Free, so an IP allowlist cannot be the control
+ * for AC2 on this account. The accepted replacement is the isolation the
+ * live branch already exposes: one login role per production schema, each
+ * confined to that schema, with staging and dev credentials proved unable
+ * to connect to the production branch.
+ *
+ * The control is named so the record cannot claim an IP restriction that
+ * was never configured. An unknown control is refused rather than trusted.
+ */
+export const NEON_CONNECTIVITY_CONTROLS = {
+  'schema-scoped-service-roles':
+    'one login role per production schema, confined to that schema, with staging and dev connections to the production branch denied',
+};
+
+/**
+ * Normalise the Neon plan token carried by provider and operator
+ * artifacts.
+ *
+ * The provider capture can expose either the organisation's `plan` name or
+ * its `subscription_plan_id`. Both the machine capture and the operator
+ * artifact must recognise the same Free-plan vocabulary, or the two AC2
+ * gates can disagree about the same production account.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeNeonPlan(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+/**
+ * Is this token one of the provider spellings of Neon Free?
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isNeonFreePlan(value) {
+  const normalized = normalizeNeonPlan(value);
+  return (
+    normalized === 'free' ||
+    normalized === 'neonfreeplan' ||
+    normalized === 'subscriptionfree'
+  );
+}
+
 // The operator obligations and the evidence slot that closes each one.
 //
 // `flySpendOrderingDeviation` is not an obligation in the ordinary sense:
@@ -129,6 +187,27 @@ export const OPERATOR_EVIDENCE_SLOTS = [
     owner: 'Quinn (operator)',
     hint:
       'the staging/dev connection attempts that were refused against the production branch',
+  },
+  {
+    slot: 'neonServiceRoleScopeProof',
+    gate: 'neon.service-role-scope',
+    coverage: 'neonServiceRoleScope',
+    label: 'Production service-role scope proof',
+    step: 'Slice D step 2',
+    owner: 'Quinn (operator)',
+    hint:
+      'the read-back proving each production service role can write only inside its own schema and has no cross-schema access',
+  },
+  {
+    slot: 'neonFreeTierIsolationAcceptance',
+    gate: 'neon.connectivity-restriction',
+    coverage: 'neonConnectivityRestriction',
+    label: 'Neon Free-tier connectivity-restriction acceptance',
+    step: 'Slice D step 2',
+    owner: 'Tom (acceptance) / Quinn (operator)',
+    controls: Object.keys(NEON_CONNECTIVITY_CONTROLS),
+    hint:
+      'the acceptance that Neon Free cannot express an IP allowlist and that schema-scoped service roles plus refused staging and dev connections are the approved replacement control',
   },
   {
     slot: 'productionProbeInterval',
