@@ -55,6 +55,14 @@
 //   FLY_API_TOKEN         Fly GraphQL API
 //   GITHUB_TOKEN          GitHub API (falls back to `gh auth token`)
 //   CLOUDFLARE_API_TOKEN  Cloudflare DNS API (zone records read)
+//
+// The artifact also carries the FLY SOURCE ADDRESSES of the production
+// Neon allowlist: the app-scoped static egress IPs allocated to each
+// production app, and the Neon project's allowlist entries — both reduced
+// to fingerprints. The Neon contract names those allocations as the
+// allowlist's source, but nothing read them, so the allowlist gate could
+// name the Neon account plan as the blocker while the addresses it would
+// have to list did not exist.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -66,6 +74,10 @@ import {
   hostFingerprint,
   hostOfTargetValue,
 } from '../platform/probe-target-facts.mjs';
+import {
+  fingerprintIpSet,
+  isIpv6Address,
+} from '../platform/egress-allowlist-facts.mjs';
 import { validateOperatorEvidence } from '../platform/production-operator-evidence.mjs';
 
 const REPO_ROOT_DEFAULT = (() => {
@@ -435,6 +447,11 @@ async function captureNeon({ projectName }) {
         id: project.id,
         name: project.name,
         allowedIpCount: Array.isArray(allowedIps) ? allowedIps.length : 0,
+        // The allowlist ENTRIES, as fingerprints. The count alone cannot be
+        // compared with the Fly addresses the contract says the allowlist
+        // must carry: two allowlists of the same size can name different
+        // addresses. The addresses themselves never reach the artifact.
+        allowedIpFingerprints: fingerprintIpSet(allowedIps),
         protectedBranchesOnly: settings?.allowed_ips?.protected_branches_only === true,
         blockPublicConnections: settings?.block_public_connections === true,
       },
@@ -974,6 +991,65 @@ export async function readFlyRedisAddon(addon, apiToken) {
   }
 }
 
+/**
+ * Read an app's APP-SCOPED STATIC EGRESS ADDRESSES.
+ *
+ * The Neon contract names these as the source of the production Neon
+ * allowlist: Fly's shared egress ranges are not a fixed set of
+ * addresses, so the allowlist must be built from the addresses Fly
+ * allocated to the production apps themselves.
+ *
+ * The read reports the COUNT, the REGION and the FINGERPRINT of each
+ * address — never the address. An app that has allocated nothing and an
+ * app whose read failed are different facts, and they name different
+ * owners, so they are recorded differently: the second carries a
+ * REASON, never an empty count.
+ *
+ * @param {string} name
+ * @param {(body: string) => Promise<object>} query the GraphQL query function
+ * @returns {Promise<{captured: boolean, ipv4Count: number, ipv6Count: number, regions: string[], fingerprints: string[], error: string|null}>}
+ */
+export async function readFlyEgressAddresses(name, query) {
+  try {
+    const detail = await query(
+      `{ app(id: ${JSON.stringify(name)}) { name egressIpAddresses(first: 50) { totalCount nodes { ip region } } } }`,
+    );
+    const app = detail?.app ?? null;
+    if (!app) {
+      return {
+        captured: false,
+        ipv4Count: 0,
+        ipv6Count: 0,
+        regions: [],
+        fingerprints: [],
+        error: `the Fly app ${name} does not exist, so its egress addresses cannot be read`,
+      };
+    }
+    const nodes = app.egressIpAddresses?.nodes ?? [];
+    const addresses = nodes.map((node) => node?.ip).filter(Boolean);
+    const regions = [
+      ...new Set(nodes.map((node) => node?.region).filter((region) => typeof region === 'string')),
+    ];
+    return {
+      captured: true,
+      ipv4Count: addresses.filter((address) => !isIpv6Address(address)).length,
+      ipv6Count: addresses.filter((address) => isIpv6Address(address)).length,
+      regions,
+      fingerprints: fingerprintIpSet(addresses),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      captured: false,
+      ipv4Count: 0,
+      ipv6Count: 0,
+      regions: [],
+      fingerprints: [],
+      error: `the egress addresses of the Fly app ${name} could not be read (${error.message})`,
+    };
+  }
+}
+
 async function captureFly({ platformApp, healthProbeApp, healthProbeBaseUrl, redisAddon }) {
   const apiToken = process.env.FLY_API_TOKEN;
   if (!apiToken) return failure('FLY_API_TOKEN is not set');
@@ -1077,6 +1153,7 @@ async function captureFly({ platformApp, healthProbeApp, healthProbeBaseUrl, red
     const machines = await readFlyAppMachines(name, apiToken);
     const release = await readRelease(name);
     const inventory = await readFlySecretNames(name, apiToken);
+    const egress = await readFlyEgressAddresses(name, query);
     apps.push({
       name,
       organization: organizationFor(name),
@@ -1085,6 +1162,14 @@ async function captureFly({ platformApp, healthProbeApp, healthProbeBaseUrl, red
       releaseCreatedAt: release.releaseCreatedAt,
       machineStates: machines.machineStates,
       machineCount: machines.machineCount,
+      egressAddresses: {
+        captured: egress.captured,
+        ipv4Count: egress.ipv4Count,
+        ipv6Count: egress.ipv6Count,
+        regions: egress.regions,
+        fingerprints: egress.fingerprints,
+        ...(egress.error ? { error: egress.error } : {}),
+      },
       ...(release.releaseError ? { releaseError: release.releaseError } : {}),
       ...(machines.error ? { machineInventoryError: machines.error } : {}),
       ...inventory,
@@ -1321,7 +1406,15 @@ async function main(argv) {
     // deployed probe targets come from the probe's value-free info metric.
     // Fly never exposes secret values in Machine config.env, so version 7's
     // Machines-API target read could only return an empty target set.
-    schemaVersion: 8,
+    // Version 9: the production Neon allowlist's SOURCE is read. The Neon
+    // contract names Fly's app-scoped static egress addresses as the
+    // addresses the allowlist must carry, but nothing read them: the
+    // allowlist gate could name the Neon account plan as the blocker while
+    // the addresses it would have to list had never been allocated. Version
+    // 9 carries the per-app egress allocation (count, region and
+    // fingerprints) and the Neon allowlist entries as fingerprints, so the
+    // two can be compared without either side disclosing an address.
+    schemaVersion: 9,
     environment: 'production',
     capturedAt,
     providers: { neon, fly, github, cloudflare },

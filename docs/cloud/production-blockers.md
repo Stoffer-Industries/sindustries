@@ -370,6 +370,18 @@ credential boundary.
     currently $3.60/month and each pair supports up to 64 Machines. Those
     app-owned addresses are the allowlist inputs once Neon supports IP
     Allow on the selected plan.
+    - **Live read-back (2026-11-18): neither production app has an
+      app-scoped static egress address allocated** — both report zero, and
+      the two staging apps do too. The Neon plan decision and this
+      allocation are therefore **two** prerequisites of AC2, and the plan
+      alone does not close it: there is no allowlist to apply until the
+      addresses exist. The provisioning capture reads the allocation
+      (count, region and a fingerprint per address) and the Neon allowlist
+      entries as fingerprints, and the checker decides
+      `neon.ip-allowlist-source` (every production app carries an
+      allocation — owner Quinn) and `neon.ip-allowlist-match` (the Neon
+      allowlist names exactly the allocated addresses — owner Quinn). The
+      addresses are never written to the artifact.
   - **How to read the provider:** the live Neon API base is
     `https://console.neon.tech/api/v2` — `api.neon.tech` has no address
     records at all, so a request to it fails at DNS and looks like a

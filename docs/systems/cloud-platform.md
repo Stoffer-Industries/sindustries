@@ -310,6 +310,20 @@ Fly-hosted production DNS/TLS surfaces were provisioned. The value-free live
 read-backs are in
 [`docs/cloud/production-provisioning-readback.md`](../cloud/production-provisioning-readback.md).
 
+**The Neon connectivity restriction has two prerequisites.** AC2's "connectivity
+restricted to production services" needs (1) a Neon plan that can express an
+IP allowlist and (2) the Fly **app-scoped static egress addresses** the
+allowlist must carry — Fly's shared egress ranges are not a fixed set, so an
+allowlist built from them drifts. The second is an allocation, not a plan
+change: the live read-back on 2026-11-18 found **neither production app has
+an app-scoped static egress address allocated**, so upgrading the Neon plan
+alone would leave nothing to allow. The provisioning capture reads the
+allocation (count, region and a fingerprint per address) and the Neon
+allowlist entries as fingerprints — never the addresses themselves — and the
+checker decides `neon.ip-allowlist-source` and `neon.ip-allowlist-match`
+from them. See
+[`docs/cloud/production-neon-contract.md`](../cloud/production-neon-contract.md).
+
 ---
 
 ## Platform secret provisioning (task `219fb673`)

@@ -76,6 +76,24 @@ Each allocation persists across Machine replacement and supplies a paired IPv4/I
 
 > **Decision still open:** the Neon account is Free, while the selected IP Allow mechanism requires Scale. Quinn/Tom must approve the plan change (or an explicitly re-specified AC2 mechanism) before this contract can be executed. The contract itself stays fail-closed.
 
+### Two prerequisites, not one — read back 2026-11-18
+
+The connectivity restriction has **two** prerequisites, and until 2026-11-18 the repository could only see one of them:
+
+1. **A Neon plan that can express an IP allowlist** (the account decision above).
+2. **The Fly app-scoped static egress addresses the allowlist must carry.**
+
+Upgrading the Neon plan does not create an address. The live read-back on 2026-11-18 found that **neither production app has any app-scoped static egress address allocated** — `sindustries-platform-production` and `sindustries-health-probe-production` both report zero (and the two staging apps do too), so there is no allowlist to apply even on a plan that supports one. A gate that named only the Neon plan would have sent the operator to the account decision and left the allocation undone.
+
+Both facts are now executable. The capture reads each production app's egress allocation (count, region and a fingerprint of each address — never the address itself) and the Neon project's allowlist entries as fingerprints, and the checker decides two gates from them:
+
+| Gate | What it decides | Owner |
+|---|---|---|
+| `neon.ip-allowlist-source` | every production app carries an app-scoped static egress address | Quinn (operator) |
+| `neon.ip-allowlist-match` | the Neon allowlist names EXACTLY the allocated addresses — none missing, none extra | Quinn (operator) |
+
+The `neon.ip-allowlist` gate itself (a non-empty allowlist on the Neon side) stays as it was and now names both prerequisites in its reason. The addresses are compared as fingerprints, so the artifact — which is committed and pasted into task comments — never carries one.
+
 ---
 
 ## 4. Evidence obligation
@@ -128,4 +146,4 @@ The evidence artifact is captured at step 2 and attached to the task as AC2 evid
 
 - No credential, DSN, password or token — this repository is public.
 - No Fly app, spend limit, DNS record or health-probe configuration. Those belong to the other Slice D steps.
-- No production resource. Re-read live from the provider on 2026-11-16: the organization is on the Free plan; the production branch exists (`current_state=ready`) but carries only the `auth` and `public` schemas — no `tasks_api`, `budget_api` or `content_scheduler` — its only roles are Neon's four defaults (`neondb_owner`, `authenticator`, `anonymous`, `authenticated`), the branch is not protected, and the project restriction is unset (`allowed_ips.ips` empty, `protected_branches_only` false, `block_public_connections` false).
+- No production resource. Re-read live from the provider on 2026-11-18: the organization is on the Free plan; the production branch exists (`current_state=ready`) and now carries the three service schemas with one write-capable, schema-confined role each (provisioned 2026-11-16); staging and dev credentials are both refused against it; the branch is not protected; the project restriction is still unset (`allowed_ips.ips` empty, `protected_branches_only` false, `block_public_connections` false); and neither production app has an app-scoped static egress address allocated, so the allowlist has no source addresses yet. The IP allowlist is therefore deferred on two counts — the Neon plan and the Fly allocation — and the `neon.ip-allowlist-source` gate names the second.
