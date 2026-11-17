@@ -213,6 +213,22 @@ export function resolveOperatorEvidencePath(options) {
 }
 
 /**
+ * Resolve the operator-evidence input that a capture should merge.
+ *
+ * The committed record is used when present. An explicit path is always
+ * used so a missing or malformed override is refused rather than silently
+ * falling back to the committed record.
+ *
+ * @param {{repoRoot: string, operatorEvidence?: string|null}} options
+ * @returns {string|null}
+ */
+export function resolveOperatorEvidenceInput(options) {
+  if (options.operatorEvidence) return resolveOperatorEvidencePath(options);
+  const committedPath = resolveOperatorEvidencePath(options);
+  return existsSync(committedPath) ? committedPath : null;
+}
+
+/**
  * Read the operator's read-backs from a file.
  *
  * The file is operator-owned and holds NO values: a boolean, a read-back
@@ -1311,8 +1327,8 @@ async function main(argv) {
     providers: { neon, fly, github, cloudflare },
   };
 
-  const operatorEvidencePath = resolveOperatorEvidencePath(options);
-  if (options.operatorEvidence || existsSync(operatorEvidencePath)) {
+  const operatorEvidencePath = resolveOperatorEvidenceInput(options);
+  if (operatorEvidencePath) {
     const loaded = loadOperatorEvidence(operatorEvidencePath, {
       capturedAt,
       repoRoot: options.repoRoot,

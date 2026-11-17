@@ -31,6 +31,7 @@ import {
   readHealthProbeTargets,
   readFlySecretNames,
   readNeonBranchEndpointFingerprints,
+  resolveOperatorEvidenceInput,
   resolveOperatorEvidencePath,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
 
@@ -908,6 +909,10 @@ test('the committed operator evidence is the default capture input', () => {
     path,
     join(REPO_ROOT, 'infra/cloud/evidence/production-operator-evidence.json'),
   );
+  assert.equal(
+    resolveOperatorEvidenceInput({ repoRoot: REPO_ROOT }),
+    path,
+  );
 
   const { evidence, problems } = loadOperatorEvidence(path, {
     capturedAt: '2026-11-17T09:00:00.000Z',
@@ -926,6 +931,22 @@ test('an explicit operator evidence path overrides the committed default', () =>
     operatorEvidence: '/tmp/operator-evidence.json',
   });
   assert.equal(path, '/tmp/operator-evidence.json');
+  assert.equal(
+    resolveOperatorEvidenceInput({
+      repoRoot: REPO_ROOT,
+      operatorEvidence: '/tmp/operator-evidence.json',
+    }),
+    path,
+  );
+});
+
+test('a checkout without committed operator evidence has no default input', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'capture-no-evidence-'));
+  try {
+    assert.equal(resolveOperatorEvidenceInput({ repoRoot: dir }), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a recorded operator read-back is carried into the artifact', () => {
