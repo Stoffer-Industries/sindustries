@@ -222,19 +222,28 @@ credential boundary.
   capture closes those four obligations without a manual flag. The
   `fly.spend-limit-before-public-exposure`
   gate enforces the order the approved design makes a hard gate: while a
-  production hostname is published or the production health-probe app is
-  running, an artifact with no recorded spend-limit read-back fails.
+  production hostname is published, the consolidated production platform
+  app is running, or the production health-probe app is running, an
+  artifact with no recorded spend-limit read-back fails.
 - The ORDER itself is a second gate, `fly.spend-bound-ordering`: the
   capture records WHEN production became publicly exposed (the Cloudflare
-  record's creation time and the production probe app's release creation
-  time), and the bound's read-back time is compared with it. Production
-  DNS was published at 2026-11-16T10:12:23Z and the production probe's
-  current release at 2026-11-16T20:32:20Z, so a bound read back after
+  record's creation time, the production platform app's release creation
+  time and the production probe app's release creation time), and the
+  bound's read-back time is compared with it. The consolidated production
+  platform app is exposure in its own right — every production API
+  hostname points at it and it answers on its own `.fly.dev` hostname —
+  so it can be publicly reachable before the first DNS record exists.
+  Production DNS was published at 2026-11-16T10:12:23Z, the production
+  platform app's current release was created at 2026-11-16T10:02:57Z and
+  the production probe's current release at 2026-11-16T20:32:20Z, so a
+  bound read back after
   that — which is what the approved prepaid/capped control will be — is an
   order violation and fails the gate. The order cannot be un-violated by
   recording, so the closure path is a recorded acceptance of the
   deviation (`flySpendOrderingDeviation`, the same value-free shape, with
-  a pointer to the acceptance and the exposed surfaces it covers) or a
+  a pointer to the acceptance and the exposed surfaces it covers — every
+  production hostname, the production health-probe app AND the
+  consolidated production platform app) or a
   rollback of the exposure. That acceptance is Tom/QA's to give; the
   repository does not record it on anyone's behalf.
 - A recorded read-back must also name the production surfaces it covered,

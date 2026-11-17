@@ -234,16 +234,23 @@ the platform first and the probe last).
 
 That order is enforced, not only documented. The provisioning-state checker
 decides a `fly.spend-limit-before-public-exposure` gate: while a
-production hostname is published in DNS or the production health-probe app
-is running, an artifact with no recorded spend-limit read-back fails the
-gate. A second gate, `fly.spend-bound-ordering`, enforces the ORDER
+production hostname is published in DNS, the consolidated production
+platform app is running, or the production health-probe app is running,
+an artifact with no recorded spend-limit read-back fails the gate. The
+platform app is exposure in its own right: every production API hostname
+points at it and Fly gives it its own public `.fly.dev` hostname, so it
+answers on the public internet before any DNS record exists. A second
+gate, `fly.spend-bound-ordering`, enforces the ORDER
 itself: the capture records when production became publicly exposed (the
-Cloudflare record's creation time and the production probe's release
+Cloudflare record's creation time, the production platform app's release
+time and the production probe's release
 time), and the bound's read-back time is compared with it. A bound read
 back after the exposure fails that gate — the order cannot be un-violated
 by recording — so the closure path is a recorded human acceptance of the
 deviation (`flySpendOrderingDeviation`, the same value-free shape as every
-other read-back), or the exposure is rolled back until the bound is in
+other read-back, and it must name every exposed surface — the production
+hostnames, the health-probe app and the production platform app), or the
+exposure is rolled back until the bound is in
 place. The read-back itself is operator evidence — a boolean, the time it
 was read back, the CONTROL that bounded the spend (a native Fly spend
 limit, or the approved prepaid/capped billing method — this account has

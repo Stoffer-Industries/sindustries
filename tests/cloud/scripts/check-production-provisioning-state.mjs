@@ -1565,9 +1565,26 @@ export function evaluateProvisioningState(state, options = {}) {
       (machineState) => machineState === 'started',
     );
 
+    // The consolidated production PLATFORM app is public exposure too.
+    // Every production API hostname points at it, and Fly gives it its
+    // own public .fly.dev hostname, so it answers on the public internet
+    // BEFORE the first DNS record is published. Counting only the DNS
+    // records and the probe meant a live production API app with an
+    // unbounded spend passed this gate as "nothing is publicly exposed
+    // yet".
+    const platformAppEntry = asArray(providers.fly?.apps).find(
+      (app) => app?.name === platformApp,
+    );
+    const platformRunning = asArray(platformAppEntry?.machineStates).some(
+      (machineState) => machineState === 'started',
+    );
+
     const exposure = [];
     if (publishedHostnames.length > 0) {
       exposure.push(`the production hostname(s) ${publishedHostnames.join(', ')} are published`);
+    }
+    if (platformRunning) {
+      exposure.push(`the production platform app ${platformApp ?? '(unnamed)'} is running`);
     }
     if (probeRunning) {
       exposure.push(`the production health-probe app ${healthProbeApp ?? '(unnamed)'} is running`);
@@ -1705,6 +1722,30 @@ export function evaluateProvisioningState(state, options = {}) {
     const probeRunning = asArray(probeApp?.machineStates).some(
       (machineState) => machineState === 'started',
     );
+
+    // The production PLATFORM app is exposure as well, and its release
+    // time is often the EARLIEST exposure there is: the consolidated app
+    // every production API hostname points at is deployed and publicly
+    // reachable on its own .fly.dev hostname before the DNS records are
+    // published. Reading the order from the DNS records alone could
+    // report that the spend bound was read back before production went
+    // live, when the app that serves production had already been
+    // released — and served — without one.
+    const platformAppEntry = asArray(providers.fly?.apps).find(
+      (app) => app?.name === platformApp,
+    );
+    const platformRunning = asArray(platformAppEntry?.machineStates).some(
+      (machineState) => machineState === 'started',
+    );
+    if (platformRunning) {
+      exposureEvents.push({
+        surface: platformApp ?? '(unnamed)',
+        at:
+          typeof platformAppEntry?.releaseCreatedAt === 'string'
+            ? platformAppEntry.releaseCreatedAt
+            : null,
+      });
+    }
     if (probeRunning) {
       exposureEvents.push({
         surface: healthProbeApp ?? '(unnamed)',
@@ -1724,6 +1765,11 @@ export function evaluateProvisioningState(state, options = {}) {
     const untimedExposure = exposureEvents
       .filter((event) => !isIsoTimestamp(event.at))
       .map((event) => event.surface);
+    // WHICH surfaces were exposed, so a reviewer can see what the order
+    // was measured against — the consolidated platform app serves all
+    // three production API hostnames and can be exposed before any DNS
+    // record exists.
+    const exposureSurfaces = exposureEvents.map((event) => event.surface).join(', ');
 
     const spendSlot = state.operatorEvidence?.flySpendLimit;
     const spendRecorded = Boolean(spendSlot && typeof spendSlot === 'object' && spendSlot.recorded === true);
@@ -1785,7 +1831,8 @@ export function evaluateProvisioningState(state, options = {}) {
           owner: 'Quinn / Tom (account plan decision)',
           label,
           reason:
-            `the spend bound was read back at ${spendReadBackAt}, before production was publicly exposed at ${exposureAtIso}`,
+            `the spend bound was read back at ${spendReadBackAt}, before production was publicly exposed at ${exposureAtIso} ` +
+            `(${exposureSurfaces})`,
         }),
       );
     } else if (deviationCoverage.recorded && deviationCoverage.covered) {
@@ -1795,7 +1842,7 @@ export function evaluateProvisioningState(state, options = {}) {
           owner: 'Tom (acceptance) / Quinn (operator)',
           label,
           reason:
-            `the spend bound was read back at ${spendReadBackAt}, AFTER production was publicly exposed at ${exposureAtIso} — ` +
+            `the spend bound was read back at ${spendReadBackAt}, AFTER production was publicly exposed at ${exposureAtIso} (${exposureSurfaces}) — ` +
             'the order the approved design requires was not met, and the deviation is covered by the recorded acceptance ' +
             `(${operatorEvidenceSummary(state.operatorEvidence, 'flySpendOrderingDeviation')})`,
         }),
@@ -1807,7 +1854,7 @@ export function evaluateProvisioningState(state, options = {}) {
           owner: 'Tom (acceptance) / Quinn (operator)',
           label,
           reason:
-            `the spend bound was read back at ${spendReadBackAt}, AFTER production was publicly exposed at ${exposureAtIso} — ` +
+            `the spend bound was read back at ${spendReadBackAt}, AFTER production was publicly exposed at ${exposureAtIso} (${exposureSurfaces}) — ` +
             'the order the approved design requires was not met. The exposure cannot be un-exposed by recording, so either ' +
             'Tom/QA records the acceptance of the retroactive bound (operator-evidence slot `flySpendOrderingDeviation`) ' +
             'or the exposure is rolled back until the bound is in place',

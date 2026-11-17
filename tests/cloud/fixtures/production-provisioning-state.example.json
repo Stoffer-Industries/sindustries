@@ -5,7 +5,7 @@
   "operatorEvidence": {
     "flySpendLimit": {
       "recorded": true,
-      "readBackAt": "2026-11-15T22:05:00.000Z",
+      "readBackAt": "2026-11-15T20:55:00.000Z",
       "scope": "personal organization - production app scope",
       "control": "prepaid-capped-billing-method",
       "evidenceRef": "tests/cloud/fixtures/operator-evidence-readback.txt",

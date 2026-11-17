@@ -105,6 +105,14 @@
 //  81. An acceptance that does not cover every exposed surface stays open.
 //  82. A public exposure with no readable exposure time fails the order
 //      gate.
+//  83. A live production platform app with no spend-bound read-back
+//      fails the before-exposure gate — the consolidated platform app is
+//      public exposure on its own .fly.dev hostname.
+//  84. The order gate reads the production platform app release as the
+//      exposure time, so a bound read back after the app was deployed
+//      fails the order gate.
+//  85. An acceptance that omits the exposed production platform app
+//      stays open.
 //
 // Run with: node --test tests/cloud/tests/check-production-provisioning-state.test.mjs
 
@@ -260,7 +268,8 @@ test('the ordering gate names the control that bounded production spend', () => 
 test('a running production health probe with no spend-limit read-back fails the ordering gate', () => {
   const state = mutate((artifact) => {
     delete artifact.operatorEvidence.flySpendLimit;
-    // No DNS exposure at all: the only public surface left is the probe.
+    // No DNS exposure at all: the public surfaces left are the running
+    // probe and the running production platform app.
     artifact.providers.cloudflare.records = artifact.providers.cloudflare.records.filter(
       (record) => !record.name.endsWith('.sindustries.co.nz'),
     );
@@ -282,6 +291,13 @@ test('the ordering gate is not applicable when nothing is exposed', () => {
       (app) => app.name === 'sindustries-health-probe-production',
     );
     if (probe) probe.machineStates = ['stopped'];
+    // The consolidated production platform app is exposure too — it
+    // answers on its own .fly.dev hostname — so "nothing is exposed"
+    // means no running production app at all.
+    const platform = artifact.providers.fly.apps.find(
+      (app) => app.name === EXPECTATIONS.platformApp,
+    );
+    if (platform) platform.machineStates = ['stopped'];
   });
   const { rows, failures } = evaluateProvisioningState(state, EXPECTATIONS);
   const ordering = rows.find((row) => row.gate === 'fly.spend-limit-before-public-exposure');
@@ -1328,4 +1344,68 @@ test('a public exposure with no readable exposure time fails the order gate', ()
   const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
   const ordering = rows.find((row) => row.gate === 'fly.spend-bound-ordering');
   assert.equal(ordering.owner, 'Rowan', 'the capture owns a missing exposure time');
+});
+
+test('a live production platform app with no spend-bound read-back fails the before-exposure gate', () => {
+  const state = mutate((artifact) => {
+    // No production DNS record is published and the probe is stopped, so
+    // the ONLY public exposure left is the consolidated production
+    // platform app — the app every production API hostname points at, and
+    // the app that answers on its own .fly.dev hostname. Counting only
+    // DNS records and the probe reported this state as "nothing is
+    // publicly exposed yet", which is how a live production API app
+    // passed the spend-bound gate without a bound.
+    const productionHostnames = new Set(
+      EXPECTATIONS.expectedOperatorTargets.productionHostnames,
+    );
+    artifact.providers.cloudflare.records = artifact.providers.cloudflare.records.filter(
+      (record) => !productionHostnames.has(record?.name),
+    );
+    const probe = artifact.providers.fly.apps.find(
+      (app) => app?.name === EXPECTATIONS.healthProbeApp,
+    );
+    if (probe) probe.machineStates = [];
+    delete artifact.operatorEvidence.flySpendLimit;
+  });
+  assertFails(state, 'fly.spend-limit-before-public-exposure');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const gate = rows.find((row) => row.gate === 'fly.spend-limit-before-public-exposure');
+  assert.match(gate.reason, /production platform app/);
+});
+
+test('the order gate reads the production platform app release as the exposure time', () => {
+  const state = mutate((artifact) => {
+    // The platform app was released at 20:00Z, BEFORE the spend bound
+    // was read back at 20:55Z and before any DNS record was published.
+    // The order the approved design requires was violated, so the gate
+    // has to say so instead of reading the DNS publication as the first
+    // exposure.
+    const platform = artifact.providers.fly.apps.find(
+      (app) => app?.name === EXPECTATIONS.platformApp,
+    );
+    if (platform) platform.releaseCreatedAt = '2026-11-15T20:00:00.000Z';
+  });
+  assertFails(state, 'fly.spend-bound-ordering');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const ordering = rows.find((row) => row.gate === 'fly.spend-bound-ordering');
+  assert.match(ordering.reason, /AFTER production was publicly exposed/);
+  assert.match(ordering.reason, /sindustries-platform-production/);
+});
+
+test('an acceptance that omits the exposed production platform app stays open', () => {
+  const state = mutate((artifact) => {
+    artifact.operatorEvidence.flySpendLimit.readBackAt = '2026-11-16T00:00:00.000Z';
+    artifact.operatorEvidence.flySpendOrderingDeviation = {
+      recorded: true,
+      readBackAt: '2026-11-16T00:10:00.000Z',
+      scope: 'Tom acceptance of the retroactive production spend bound',
+      evidenceRef: 'tests/cloud/fixtures/operator-evidence-readback.txt',
+      // Every exposed surface EXCEPT the production platform app — the
+      // app that actually serves all three production API hostnames.
+      targets: EXPECTATIONS.expectedOperatorTargets.productionExposure.filter(
+        (target) => target !== EXPECTATIONS.platformApp,
+      ),
+    };
+  });
+  assertFails(state, 'fly.spend-bound-ordering');
 });
