@@ -1409,3 +1409,119 @@ test('an acceptance that omits the exposed production platform app stays open', 
   });
   assertFails(state, 'fly.spend-bound-ordering');
 });
+
+test('a production app with no allocated app-scoped egress address fails the source gate', () => {
+  // The Neon allowlist is built from Fly's app-scoped static egress
+  // addresses. An app that has allocated none leaves the allowlist with
+  // nothing to list, whatever the Neon plan allows — so the gate has to
+  // fail on the FLY side and name the allocation, not the Neon plan.
+  const state = mutate((artifact) => {
+    const platform = artifact.providers.fly.apps.find(
+      (app) => app?.name === EXPECTATIONS.platformApp,
+    );
+    if (platform) {
+      platform.egressAddresses = {
+        captured: true,
+        ipv4Count: 0,
+        ipv6Count: 0,
+        regions: [],
+        fingerprints: [],
+      };
+    }
+  });
+  assertFails(state, 'neon.ip-allowlist-source');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const gate = rows.find((row) => row.gate === 'neon.ip-allowlist-source');
+  assert.match(gate.reason, /no app-scoped static egress address/);
+  assert.match(gate.reason, /allocate-egress/);
+  assert.match(gate.owner, /Quinn/, 'the allocation is an operator action');
+});
+
+test('an unreadable egress-address read fails the source gate and names the capture', () => {
+  const state = mutate((artifact) => {
+    const probe = artifact.providers.fly.apps.find(
+      (app) => app?.name === EXPECTATIONS.healthProbeApp,
+    );
+    if (probe) {
+      probe.egressAddresses = {
+        captured: false,
+        ipv4Count: 0,
+        ipv6Count: 0,
+        regions: [],
+        fingerprints: [],
+        error: 'the egress addresses of the Fly app could not be read (HTTP 500)',
+      };
+    }
+  });
+  assertFails(state, 'neon.ip-allowlist-source');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const gate = rows.find((row) => row.gate === 'neon.ip-allowlist-source');
+  assert.match(gate.reason, /could not be read/);
+  assert.equal(gate.owner, 'Rowan', 'a read that failed is the capture’s, not the operator’s');
+});
+
+test('a Neon allowlist that omits an allocated source address fails the match gate', () => {
+  const state = mutate((artifact) => {
+    artifact.providers.neon.project.allowedIpFingerprints =
+      artifact.providers.neon.project.allowedIpFingerprints.slice(0, 3);
+    artifact.providers.neon.project.allowedIpCount = 3;
+  });
+  assertFails(state, 'neon.ip-allowlist-match');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const gate = rows.find((row) => row.gate === 'neon.ip-allowlist-match');
+  assert.match(gate.reason, /source address\(es\) are missing/);
+});
+
+test('a Neon allowlist that names an address production does not use fails the match gate', () => {
+  const state = mutate((artifact) => {
+    artifact.providers.neon.project.allowedIpFingerprints = [
+      ...artifact.providers.neon.project.allowedIpFingerprints.slice(0, 3),
+      'ffffffffffffffff',
+    ];
+    artifact.providers.neon.project.allowedIpCount = 4;
+  });
+  assertFails(state, 'neon.ip-allowlist-match');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const gate = rows.find((row) => row.gate === 'neon.ip-allowlist-match');
+  assert.match(gate.reason, /not allocated to a production app/);
+});
+
+test('an allowlist count with no fingerprints for it fails the match gate rather than passing', () => {
+  const state = mutate((artifact) => {
+    artifact.providers.neon.project.allowedIpFingerprints = [];
+    artifact.providers.neon.project.allowedIpCount = 4;
+  });
+  assertFails(state, 'neon.ip-allowlist-match');
+  const { rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  const gate = rows.find((row) => row.gate === 'neon.ip-allowlist-match');
+  assert.match(gate.reason, /only 0 fingerprint\(s\)/);
+  assert.equal(gate.owner, 'Rowan');
+});
+
+test('the artifact records no address in the clear', () => {
+  // The artifact is committed, compared between runs and pasted into task
+  // comments. An egress address or a Neon allowlist entry must reach it
+  // as a fingerprint only.
+  //
+  // The values are inspected one by one rather than as a serialized blob:
+  // an ISO timestamp contains colons, so a blob-wide pattern cannot tell
+  // a timestamp from an address.
+  const strings = [];
+  const walk = (node) => {
+    if (typeof node === 'string') strings.push(node);
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node && typeof node === 'object') Object.values(node).forEach(walk);
+  };
+  walk(loadFixture());
+
+  const bare = strings.map((value) => value.trim().split('/')[0].replace(/^\[|\]$/g, ''));
+  const ipv4 = bare.filter((value) => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value));
+  const ipv6 = bare.filter(
+    (value) =>
+      /^[0-9a-f:]+$/.test(value) &&
+      value.includes(':') &&
+      (value.includes('::') || value.split(':').length >= 7),
+  );
+  assert.deepEqual(ipv4, [], 'no IPv4 address in the artifact');
+  assert.deepEqual(ipv6, [], 'no IPv6 address in the artifact');
+});

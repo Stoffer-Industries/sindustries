@@ -53,6 +53,10 @@ import {
   hostOfTargetValue,
 } from '../../../infra/cloud/platform/probe-target-facts.mjs';
 import {
+  ipSetDifference,
+  ipSetsMatch,
+} from '../../../infra/cloud/platform/egress-allowlist-facts.mjs';
+import {
   OPERATOR_EVIDENCE_SLOTS,
   operatorEvidenceCoverage,
   operatorEvidenceRecorded,
@@ -72,7 +76,7 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 8;
+export const SUPPORTED_SCHEMA_VERSION = 9;
 
 /** The operator obligation gate → the evidence slot that closes it. */
 const OPERATOR_EVIDENCE_SLOT_BY_GATE = new Map(
@@ -553,7 +557,8 @@ export function evaluateProvisioningState(state, options = {}) {
             `the production project carries ${allowedIpCount} allowed IP address(es); AC2 requires a non-empty allowlist` +
             (neon.organization?.plan
               ? ` (Neon organization plan: ${neon.organization.plan})`
-              : ''),
+              : '') +
+            '. The allowlist has TWO prerequisites: a Neon plan that can express one (the account-plan decision above) and the Fly app-scoped static egress addresses it must carry — see the `neon.ip-allowlist-source` gate, which is a separate allocation and a separate owner',
         }),
       );
     } else {
@@ -589,6 +594,169 @@ export function evaluateProvisioningState(state, options = {}) {
               : 'the project does not scope the allowlist to protected branches',
         }),
       );
+    }
+  }
+
+  // --- AC2: the Neon allowlist's SOURCE — Fly's app-scoped egress -------
+  //
+  // The Neon contract names Fly's APP-SCOPED STATIC EGRESS ADDRESSES as the
+  // addresses the production allowlist must carry: Fly's shared egress
+  // ranges are not a fixed set, so an allowlist built from "the current
+  // shared ranges" drifts.
+  //
+  // Until these gates existed, the repository read the Neon side of that
+  // pair and NOTHING on the Fly side. The allowlist gate could therefore
+  // name the Neon account plan as the blocker while the addresses the
+  // allowlist would have to list had never been allocated — and upgrading
+  // the plan does not create an address. A reader of the gate would
+  // believe that one decision closes AC2; it does not.
+  //
+  // The addresses are compared as FINGERPRINTS, so the artifact never
+  // carries one and the comparison still proves that the allowlist names
+  // exactly the addresses production actually uses.
+  {
+    const sourceGate = 'neon.ip-allowlist-source';
+    const matchGate = 'neon.ip-allowlist-match';
+    const label = 'Neon allowlist source addresses';
+
+    const productionApps = [platformApp, healthProbeApp].filter(
+      (name) => typeof name === 'string' && name.length > 0,
+    );
+    const flyApps = asArray(providers.fly?.apps);
+
+    const sourceFingerprints = [];
+    const unallocated = [];
+    const unreadable = [];
+    for (const name of productionApps) {
+      const entry = flyApps.find((app) => app?.name === name) ?? null;
+      const egress = entry?.egressAddresses;
+      if (!egress || egress.captured !== true) {
+        unreadable.push(
+          `${name} (${egress?.error ?? 'the artifact records no egress-address read'})`,
+        );
+        continue;
+      }
+      const ipv4Count = Number(egress.ipv4Count ?? 0);
+      const ipv6Count = Number(egress.ipv6Count ?? 0);
+      // An IPv4 address is what the allowlist must carry: the contract
+      // prices the IPv4 and the Neon allowlist is what restricts the
+      // public production surface. An allocation with no IPv4 is not a
+      // usable source.
+      if (!Number.isFinite(ipv4Count) || ipv4Count < 1) {
+        unallocated.push(`${name} (${ipv4Count} IPv4, ${ipv6Count} IPv6)`);
+      }
+      for (const fingerprint of asArray(egress.fingerprints)) {
+        if (typeof fingerprint === 'string' && !sourceFingerprints.includes(fingerprint)) {
+          sourceFingerprints.push(fingerprint);
+        }
+      }
+    }
+
+    if (productionApps.length === 0) {
+      add(
+        row(sourceGate, 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Rowan',
+          label,
+          reason:
+            'the environment manifest supplied no production Fly app name, so the allowlist source addresses cannot be proven',
+        }),
+      );
+    } else if (unreadable.length > 0) {
+      add(
+        row(sourceGate, 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Rowan',
+          label,
+          reason:
+            `the app-scoped egress addresses could not be read for: ${unreadable.join('; ')}`,
+        }),
+      );
+    } else if (unallocated.length > 0) {
+      add(
+        row(sourceGate, 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Quinn (operator)',
+          label,
+          reason:
+            `the Fly app(s) ${unallocated.join(', ')} carry no app-scoped static egress address. The Neon allowlist is built from those addresses, so there is nothing to allow until they are allocated (fly ips allocate-egress --app <app> --region syd); this allocation is separate from the Neon account-plan decision the \`neon.ip-allowlist\` gate names`,
+        }),
+      );
+    } else {
+      add(
+        row(sourceGate, 'met', {
+          step: 'Slice D step 2',
+          owner: 'Quinn (operator)',
+          label,
+          reason: `every production app carries an app-scoped static egress address (${sourceFingerprints.length} address(es) in total)`,
+        }),
+      );
+    }
+
+    // The allowlist must name EXACTLY the allocated source addresses: an
+    // address production does not use is a widened restriction, and a
+    // source address the allowlist omits is a service that cannot
+    // connect. Both are failures, and the gate says which.
+    const neonProject = providers.neon?.project ?? {};
+    const allowlistFingerprints = asArray(neonProject.allowedIpFingerprints).filter(
+      (fingerprint) => typeof fingerprint === 'string' && fingerprint.length > 0,
+    );
+    const allowlistCount = Number(neonProject.allowedIpCount ?? 0);
+    const sourceGateUnmet = unallocated.length > 0 || unreadable.length > 0;
+
+    if (sourceGateUnmet) {
+      add(
+        row(matchGate, 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Quinn (operator)',
+          label: 'Neon allowlist matches the allocated source addresses',
+          reason:
+            'the Neon allowlist cannot be compared with the source addresses while those addresses are unallocated or unreadable',
+        }),
+      );
+    } else if (!Number.isFinite(allowlistCount) || allowlistCount < 1) {
+      add(
+        row(matchGate, 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Quinn / Tom (account plan decision)',
+          label: 'Neon allowlist matches the allocated source addresses',
+          reason:
+            'the production project carries no allowlist entry, so it cannot name the allocated source addresses',
+        }),
+      );
+    } else if (allowlistFingerprints.length !== allowlistCount) {
+      add(
+        row(matchGate, 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Rowan',
+          label: 'Neon allowlist matches the allocated source addresses',
+          reason:
+            `the artifact records ${allowlistCount} allowlist entr(y/ies) but only ${allowlistFingerprints.length} fingerprint(s) for them, so the allowlist cannot be compared with the source addresses`,
+        }),
+      );
+    } else {
+      const missing = ipSetDifference(sourceFingerprints, allowlistFingerprints);
+      const extra = ipSetDifference(allowlistFingerprints, sourceFingerprints);
+      if (!ipSetsMatch(sourceFingerprints, allowlistFingerprints)) {
+        add(
+          row(matchGate, 'unmet', {
+            step: 'Slice D step 2',
+            owner: 'Quinn (operator)',
+            label: 'Neon allowlist matches the allocated source addresses',
+            reason:
+              `the Neon allowlist does not name exactly the allocated source addresses: ${missing.length} source address(es) are missing from the allowlist and ${extra.length} allowlist entr(y/ies) are not allocated to a production app`,
+          }),
+        );
+      } else {
+        add(
+          row(matchGate, 'met', {
+            step: 'Slice D step 2',
+            owner: 'Quinn (operator)',
+            label: 'Neon allowlist matches the allocated source addresses',
+            reason: `the Neon allowlist names exactly the ${allowlistFingerprints.length} address(es) allocated to the production apps`,
+          }),
+        );
+      }
     }
   }
 

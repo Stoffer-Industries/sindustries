@@ -30,6 +30,7 @@ import {
   readFlyRedisAddon,
   readHealthProbeTargets,
   readFlySecretNames,
+  readFlyEgressAddresses,
   readNeonBranchEndpointFingerprints,
   resolveOperatorEvidenceInput,
   resolveOperatorEvidencePath,
@@ -1208,4 +1209,71 @@ test('an operator evidence slot with an unknown field is refused', () => {
   } finally {
     file.cleanup();
   }
+});
+
+// --- The app-scoped static egress read (AC2's allowlist source) ---------
+//
+// The Neon contract names Fly's app-scoped static egress addresses as the
+// addresses the production Neon allowlist must carry: Fly's shared egress
+// ranges are not a fixed set, so an allowlist built from them drifts.
+//
+// These cases prove the read can go red, and that it records an address as
+// a fingerprint only. The artifact is committed, compared between runs and
+// pasted into task comments, so the address itself must never reach it.
+
+test('the app-scoped egress read records counts, regions and fingerprints — never the address', async () => {
+  const result = await readFlyEgressAddresses('sindustries-platform-production', async () => ({
+    app: {
+      name: 'sindustries-platform-production',
+      egressIpAddresses: {
+        totalCount: 2,
+        nodes: [
+          { ip: '203.0.113.10', region: 'syd' },
+          { ip: '2001:db8::10', region: 'syd' },
+        ],
+      },
+    },
+  }));
+  assert.equal(result.captured, true);
+  assert.equal(result.ipv4Count, 1);
+  assert.equal(result.ipv6Count, 1);
+  assert.deepEqual(result.regions, ['syd']);
+  assert.equal(result.fingerprints.length, 2);
+  for (const fingerprint of result.fingerprints) {
+    assert.match(fingerprint, /^[0-9a-f]{16}$/);
+  }
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes('203.0.113.10'), false, 'no IPv4 address in the read');
+  assert.equal(serialized.includes('2001:db8::10'), false, 'no IPv6 address in the read');
+});
+
+test('an app with no allocated egress address is zero, not an error', async () => {
+  const result = await readFlyEgressAddresses('sindustries-platform-production', async () => ({
+    app: {
+      name: 'sindustries-platform-production',
+      egressIpAddresses: { totalCount: 0, nodes: [] },
+    },
+  }));
+  assert.equal(result.captured, true);
+  assert.equal(result.ipv4Count, 0);
+  assert.equal(result.ipv6Count, 0);
+  assert.deepEqual(result.fingerprints, []);
+  assert.equal(result.error, null);
+});
+
+test('an app that does not exist is distinct from an unreadable egress read', async () => {
+  const absent = await readFlyEgressAddresses('sindustries-platform-production', async () => ({
+    app: null,
+  }));
+  assert.equal(absent.captured, false);
+  assert.match(absent.error, /does not exist/);
+
+  const unreadable = await readFlyEgressAddresses('sindustries-platform-production', async () => {
+    throw new Error('HTTP 500');
+  });
+  assert.equal(unreadable.captured, false);
+  assert.match(unreadable.error, /could not be read \(HTTP 500\)/);
+  // An unreadable read is never an empty inventory: "could not look" and
+  // "allocated nothing" name different owners.
+  assert.deepEqual(unreadable.fingerprints, []);
 });
