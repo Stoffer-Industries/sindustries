@@ -923,6 +923,57 @@ test('the committed operator evidence is the default capture input', () => {
     evidence.flySpendLimit.control,
     'prepaid-capped-billing-method',
   );
+
+  // Quinn's operator read-back for the Neon denial proof, the production
+  // probe interval, the three production API health responses and the
+  // DNS/TLS read-back is committed in the same record. A normal capture
+  // must carry it, so those four operator-only gates can close without a
+  // hand-written --operator-evidence file.
+  assert.deepEqual(evidence.neonSeparationDenialProof.targets, [
+    'production',
+    'staging',
+    'dev',
+  ]);
+  assert.deepEqual(evidence.productionProbeInterval.targets, [
+    'sindustries-health-probe-production',
+  ]);
+  assert.deepEqual(evidence.productionApiHealthResponses.targets, [
+    'tasks-api.sindustries.co.nz',
+    'budget-api.sindustries.co.nz',
+    'content-scheduler-api.sindustries.co.nz',
+  ]);
+  assert.deepEqual(evidence.dnsResolutionAndTlsReadback.targets, [
+    'tasks-api.sindustries.co.nz',
+    'budget-api.sindustries.co.nz',
+    'content-scheduler-api.sindustries.co.nz',
+    'health-probe.sindustries.co.nz',
+  ]);
+  for (const slot of [
+    'neonSeparationDenialProof',
+    'productionProbeInterval',
+    'productionApiHealthResponses',
+    'dnsResolutionAndTlsReadback',
+  ]) {
+    assert.equal(evidence[slot].recorded, true, `${slot} is recorded`);
+    assert.equal(
+      evidence[slot].readBackAt,
+      '2026-11-16T10:31:58.000Z',
+      `${slot} carries the operator record's authoring time`,
+    );
+    assert.equal(
+      evidence[slot].evidenceRef,
+      'docs/cloud/production-provisioning-readback.md',
+      `${slot} points at the inspectable read-back`,
+    );
+  }
+
+  // The retroactive spend-bound acceptance is Tom/QA's decision. The
+  // repository records it; it does not infer it.
+  assert.notEqual(
+    evidence.flySpendOrderingDeviation?.recorded,
+    true,
+    'the spend-bound ordering deviation is not recorded by the repository',
+  );
 });
 
 test('an explicit operator evidence path overrides the committed default', () => {

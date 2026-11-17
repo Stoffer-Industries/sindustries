@@ -214,10 +214,12 @@ credential boundary.
   control Tom approved on 2026-11-17, because this account has no native
   Fly spend-limit surface) — and a record with no control or an unknown
   one is refused. A record without an inspectable pointer, or with a
-  read-back stamped after the artifact was captured, is refused. The
+  read-back stamped after the artifact was captured, is refused.
   All five read-backs are recorded in
   `production-provisioning-readback.md`, including Tom's confirmed
-  prepaid/capped Fly billing method. The
+  prepaid/capped Fly billing method. The four non-spend read-backs are
+  transcribed into the committed operator-evidence record, so a normal
+  capture closes those four obligations without a manual flag. The
   `fly.spend-limit-before-public-exposure`
   gate enforces the order the approved design makes a hard gate: while a
   production hostname is published or the production health-probe app is
@@ -269,27 +271,30 @@ credential boundary.
   {
     "flySpendLimit": {
       "recorded": true,
-      "readBackAt": "2026-11-16T09:00:00.000Z",
-      "scope": "personal organization - production app scope",
+      "readBackAt": "2026-11-17T07:38:00.000Z",
+      "scope": "production app scope",
       "control": "prepaid-capped-billing-method",
       "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": ["sindustries-platform-production"]
     },
     "neonSeparationDenialProof": {
       "recorded": true,
-      "readBackAt": "2026-11-16T09:10:00.000Z",
+      "readBackAt": "2026-11-16T10:31:58.000Z",
+      "scope": "operator read-back authored by Quinn in commit 9c2c2e8d",
       "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": ["production", "staging", "dev"]
     },
     "productionProbeInterval": {
       "recorded": true,
-      "readBackAt": "2026-11-16T09:20:00.000Z",
+      "readBackAt": "2026-11-16T10:31:58.000Z",
+      "scope": "operator read-back authored by Quinn in commit 9c2c2e8d",
       "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": ["sindustries-health-probe-production"]
     },
     "productionApiHealthResponses": {
       "recorded": true,
-      "readBackAt": "2026-11-16T09:30:00.000Z",
+      "readBackAt": "2026-11-16T10:31:58.000Z",
+      "scope": "operator read-back authored by Quinn in commit 9c2c2e8d",
       "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": [
         "tasks-api.sindustries.co.nz",
@@ -299,7 +304,8 @@ credential boundary.
     },
     "dnsResolutionAndTlsReadback": {
       "recorded": true,
-      "readBackAt": "2026-11-16T09:40:00.000Z",
+      "readBackAt": "2026-11-16T10:31:58.000Z",
+      "scope": "operator read-back authored by Quinn in commit 9c2c2e8d",
       "evidenceRef": "docs/cloud/production-provisioning-readback.md",
       "targets": [
         "tasks-api.sindustries.co.nz",
