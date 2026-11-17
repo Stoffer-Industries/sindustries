@@ -56,17 +56,48 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
+/**
+ * The controls that can bound production spend, and what each one is.
+ *
+ * WHY A CONTROL IS NAMED
+ *
+ * The slot was written for one control: a native Fly organisation/app
+ * spend limit, read back from the Fly billing surface. That control does
+ * not exist on this account — Fly exposes no spend-limit surface at all
+ * (no GraphQL field, no REST path, no `flyctl` flag), which the capture
+ * and the blocker register both record.
+ *
+ * Tom approved a different control on 2026-11-17 (NZDT): a prepaid /
+ * capped billing method as the Fly production billing method. A record
+ * that cannot say WHICH control bounded the spend would force the
+ * operator to either leave AC5 unrecordable forever, or to write a
+ * "Fly organization spend limit" attestation for something that is not
+ * one. A gate that can only be satisfied by a lie is a broken gate.
+ *
+ * So a recorded spend slot names its control, and the name is an
+ * allow-list: an unknown control is refused rather than trusted, and a
+ * recorded slot with no control at all is refused too — a read-back that
+ * does not say what bounded the spend proves nothing about the bound.
+ */
+export const SPEND_BOUND_CONTROLS = {
+  'fly-native-spend-limit':
+    'a native Fly organisation/app spend limit, read back from the Fly billing surface',
+  'prepaid-capped-billing-method':
+    'a prepaid or capped billing method on the Fly production billing account, read back from the billing surface',
+};
+
 /** The operator obligations and the evidence slot that closes each one. */
 export const OPERATOR_EVIDENCE_SLOTS = [
   {
     slot: 'flySpendLimit',
     gate: 'fly.spend-limit-readback',
     coverage: 'platformAppScope',
-    label: 'Fly organization spend limit',
+    label: 'Production spend bound',
     step: 'Slice D step 6',
     owner: 'Quinn / Tom',
+    controls: Object.keys(SPEND_BOUND_CONTROLS),
     hint:
-      'the Fly Billing → Limits read-back for the production app scope, recorded once the limit is set',
+      'the read-back of the control that bounds production spend for the production app scope — a native Fly spend limit or the approved prepaid/capped billing method',
   },
   {
     slot: 'neonSeparationDenialProof',
@@ -114,7 +145,7 @@ export const OPERATOR_EVIDENCE_SLOT_NAMES = OPERATOR_EVIDENCE_SLOTS.map(
 );
 
 /** The fields a slot may carry. */
-const SLOT_FIELDS = ['recorded', 'readBackAt', 'scope', 'evidenceRef', 'targets'];
+const SLOT_FIELDS = ['recorded', 'readBackAt', 'scope', 'evidenceRef', 'targets', 'control'];
 
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
@@ -290,9 +321,46 @@ export function validateOperatorEvidence(value, options = {}) {
       problems.push(`the operator evidence slot "${slot}" must carry a boolean "recorded"`);
       continue;
     }
+
+    // The control a read-back names. It is an allow-list, never a free
+    // string: a control the contract does not define proves nothing, and
+    // the VALUE is never echoed back — a control field is an enum, but a
+    // malformed artifact can carry anything in it.
+    const slotDefinition = OPERATOR_EVIDENCE_SLOTS.find((entry) => entry.slot === slot);
+    const allowedControls = Array.isArray(slotDefinition?.controls) ? slotDefinition.controls : [];
+    const control = entry.control;
+    const controlIsSet = control !== undefined && control !== null;
+    if (controlIsSet) {
+      if (allowedControls.length === 0) {
+        problems.push(
+          `the operator evidence slot "${slot}" carries a "control" the contract does not define`,
+        );
+      } else if (typeof control !== 'string' || !allowedControls.includes(control)) {
+        problems.push(
+          `the operator evidence slot "${slot}" carries an unknown control — the allowed controls are ${allowedControls.join(', ')}`,
+        );
+      }
+    }
+
     // A slot that is explicitly NOT recorded is a statement, not a defect:
     // the operator has not done that step yet.
-    if (entry.recorded !== true) continue;
+    if (entry.recorded !== true) {
+      if (controlIsSet) {
+        problems.push(
+          `the operator evidence slot "${slot}" names a control but records no read-back`,
+        );
+      }
+      continue;
+    }
+
+    // A recorded slot that must name its control has not proved anything
+    // until it does: a read-back that does not say WHAT bounded the spend
+    // cannot be checked against the control the operator actually set.
+    if (allowedControls.length > 0 && !allowedControls.includes(entry.control)) {
+      problems.push(
+        `the operator evidence slot "${slot}" records a read-back without naming the control it read back — the allowed controls are ${allowedControls.join(', ')}`,
+      );
+    }
     if (!isIsoTimestamp(entry.readBackAt)) {
       problems.push(
         `the operator evidence slot "${slot}" records a read-back without an ISO-8601 "readBackAt"`,
@@ -368,6 +436,13 @@ export function operatorEvidenceTemplate(expectedTargets) {
       evidenceRef: null,
       targets: Array.isArray(targets) ? [...targets] : [],
     };
+    // A slot whose read-back must name a control carries the field, so the
+    // operator is told WHICH control the record is about instead of
+    // guessing it. It stays null until a read-back exists — a template
+    // names no control, because naming one would be a claim.
+    if (Array.isArray(entry.controls) && entry.controls.length > 0) {
+      template[entry.slot].control = null;
+    }
   }
   return template;
 }
@@ -443,6 +518,9 @@ export function operatorEvidenceSummary(evidence, slot) {
   const entry = evidence[slot];
   const parts = [];
   if (typeof entry.readBackAt === 'string') parts.push(`read back ${entry.readBackAt}`);
+  if (typeof entry.control === 'string' && entry.control.length > 0) {
+    parts.push(`control ${entry.control}`);
+  }
   if (typeof entry.scope === 'string' && entry.scope.length > 0) parts.push(entry.scope);
   if (typeof entry.evidenceRef === 'string' && entry.evidenceRef.length > 0) {
     parts.push(entry.evidenceRef);

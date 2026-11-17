@@ -79,6 +79,10 @@ function filledInRecord() {
     entry.readBackAt = '2026-11-15T23:00:00Z';
     entry.scope = 'production';
     entry.evidenceRef = 'tests/cloud/fixtures/operator-evidence-readback.txt';
+    // The spend slot must say WHICH control bounded production spend:
+    // this account has no native Fly spend limit, so the approved control
+    // is the prepaid/capped billing method.
+    if ('control' in entry) entry.control = 'prepaid-capped-billing-method';
   }
   return record;
 }
@@ -95,6 +99,34 @@ test('the printed template validates against the operator evidence contract', as
     assert.ok(entry.slot in template, `the template carries the "${entry.slot}" slot`);
     assert.equal(template[entry.slot].recorded, false, 'a template records nothing yet');
   }
+});
+
+test('the template names the control the spend slot must record, and no other slot does', () => {
+  const template = operatorEvidenceTemplate(EXPECTED_TARGETS);
+  assert.equal(template.flySpendLimit.control, null, 'the spend slot carries the control field');
+  for (const entry of OPERATOR_EVIDENCE_SLOTS) {
+    if (entry.slot === 'flySpendLimit') continue;
+    assert.ok(
+      !('control' in template[entry.slot]),
+      `the "${entry.slot}" slot declares no control, so it must not carry one`,
+    );
+  }
+});
+
+test('a filled-in record that names no control does not close the spend obligation', () => {
+  const record = filledInRecord();
+  delete record.flySpendLimit.control;
+  const validation = validateOperatorEvidence(record, { repoRoot: REPO_ROOT });
+  assert.equal(validation.ok, false, 'a spend read-back without a control is refused');
+  assert.match(validation.problems.join(' '), /without naming the control/);
+});
+
+test('a filled-in record that names an unknown control does not close the spend obligation', () => {
+  const record = filledInRecord();
+  record.flySpendLimit.control = 'hope';
+  const validation = validateOperatorEvidence(record, { repoRoot: REPO_ROOT });
+  assert.equal(validation.ok, false, 'an unknown control is refused');
+  assert.match(validation.problems.join(' '), /unknown control/);
 });
 
 test('every slot names exactly the surfaces the checker compares against', () => {

@@ -154,7 +154,7 @@ part of the evidence path because Fly-managed add-ons do not appear there.
 
 ---
 
-## 6. Fly spend limit (AC5, slot `flySpendLimit`) — NOT RECORDED
+## 6. Production spend bound (AC5, slot `flySpendLimit`) — NOT RECORDED
 
 **No read-back was recorded, and the gate stays open.**
 
@@ -168,6 +168,27 @@ supported. The only enforced stop available on this account is prepaid
 credit exhaustion (minimum $25), which suspends the account rather than
 capping spend.
 
+**The approved control.** Tom decided on 2026-11-17 (16:54 NZDT) that the
+production spend bound is a **prepaid/capped billing method** on the Fly
+production billing account, because Fly has no native spend-limit control
+to set. The slot therefore records WHICH control was read back, and the
+contract allows exactly two:
+
+| `control` | What it means |
+| --- | --- |
+| `fly-native-spend-limit` | a native Fly organisation/app spend limit, read back from the Fly billing surface — no such control exists on this account |
+| `prepaid-capped-billing-method` | a prepaid or capped billing method on the Fly production billing account, read back from the billing surface — **the approved control** |
+
+A recorded spend slot that names no control, or names a control outside
+this list, is refused: a read-back that does not say what bounded the
+spend cannot be checked against what was actually set.
+
+**What is still owed.** The card is not active yet, so there is nothing
+to read back: the slot stays `recorded: false` and the ordering gate
+stays red. When the card is active, the operator records the read-back
+with `"control": "prepaid-capped-billing-method"` and points
+`evidenceRef` at this section.
+
 This is a **billing decision for Tom**, not an operator read-back, so the
 slot is deliberately left unrecorded rather than being satisfied with a
 value that does not exist.
@@ -179,7 +200,8 @@ the Fly-app and DNS work on 2026-11-16 21:36, which is why the ordering
 gate is red — it is a true statement that the limit read-back does not
 exist yet, not a defect in the exposure.
 
-**Read-back artifact:** none — the step has not been performed.
+**Read-back artifact:** none — the step has not been performed (the card is
+not active yet).
 
 ---
 
@@ -227,6 +249,8 @@ nobody could inspect.
 | `dnsResolutionAndTlsReadback` | §4 | `docs/cloud/production-provisioning-readback.md` |
 | `flySpendLimit` | §6 — **not performed** | leave `recorded: false` |
 
-The spend-limit slot stays unrecorded until Tom's billing decision
-produces an actual limit read-back (see §6). Recording it now would be
-saying something that is not true.
+The spend-bound slot stays unrecorded until Tom's billing decision
+produces an actual read-back (see §6). Recording it now would be saying
+something that is not true. When it is performed, the record must also
+carry `"control": "prepaid-capped-billing-method"` — the control that
+bounded production spend — or the capture refuses the record.

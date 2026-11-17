@@ -237,7 +237,10 @@ decides a `fly.spend-limit-before-public-exposure` gate: while a
 production hostname is published in DNS or the production health-probe app
 is running, an artifact with no recorded spend-limit read-back fails the
 gate. The read-back itself is operator evidence — a boolean, the time it
-was read back and a required pointer to the read-back, never a value — recorded in
+was read back, the CONTROL that bounded the spend (a native Fly spend
+limit, or the approved prepaid/capped billing method — this account has
+no native Fly spend-limit surface), and a required pointer to the
+read-back, never a value — recorded in
 the artifact's `operatorEvidence` section by
 `infra/cloud/scripts/capture-production-provisioning-state.mjs
 --operator-evidence <file>`. The same section closes the other four

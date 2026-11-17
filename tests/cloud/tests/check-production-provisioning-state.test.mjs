@@ -207,6 +207,47 @@ test('a published production hostname with no spend-limit read-back fails the or
   );
 });
 
+test('a recorded spend read-back that names no control fails the ordering gate', () => {
+  const state = mutate((artifact) => {
+    delete artifact.operatorEvidence.flySpendLimit.control;
+  });
+  const { failures, rows } = evaluateProvisioningState(state, EXPECTATIONS);
+  assert.ok(
+    failures.map((failure) => failure.gate).includes('fly.spend-limit-before-public-exposure'),
+    'a read-back that does not say what bounded the spend cannot close the gate',
+  );
+  const ordering = rows.find((row) => row.gate === 'fly.spend-limit-before-public-exposure');
+  assert.ok(ordering, 'the ordering gate is always reported');
+  assert.match(ordering.reason, /does not name the control/);
+  assert.ok(
+    failures.map((failure) => failure.gate).includes('fly.spend-limit-readback'),
+    'the obligation itself stays open too',
+  );
+});
+
+test('a recorded spend read-back that names an unknown control fails the ordering gate', () => {
+  const state = mutate((artifact) => {
+    artifact.operatorEvidence.flySpendLimit.control = 'hope';
+  });
+  const { failures } = evaluateProvisioningState(state, EXPECTATIONS);
+  assert.ok(
+    failures.map((failure) => failure.gate).includes('fly.spend-limit-before-public-exposure'),
+    'an unknown control is refused',
+  );
+});
+
+test('the ordering gate names the control that bounded production spend', () => {
+  const { rows } = evaluateProvisioningState(loadFixture(), EXPECTATIONS);
+  const ordering = rows.find((row) => row.gate === 'fly.spend-limit-before-public-exposure');
+  assert.ok(ordering, 'the ordering gate is always reported');
+  assert.equal(ordering.status, 'met');
+  assert.match(
+    ordering.reason,
+    /prepaid-capped-billing-method/,
+    'the gate names WHICH control was read back',
+  );
+});
+
 test('a running production health probe with no spend-limit read-back fails the ordering gate', () => {
   const state = mutate((artifact) => {
     delete artifact.operatorEvidence.flySpendLimit;
