@@ -79,7 +79,7 @@ def test_collect_writes_to_deduped_candidates_not_candidates(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Concrete cost framing",
-            tweet_body="Slow iteration is paid for by the team closest to the user.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="When teams track effort without measuring exposure to delay, the cost is paid by the wrong group.",
             resonance_score=0.84,
             evidence_strength=0.78,
@@ -88,7 +88,7 @@ def test_collect_writes_to_deduped_candidates_not_candidates(
         AngleOutput(
             canonical_url=BOUNDARY_URL,
             angle="Boundary setting",
-            tweet_body="Set the boundary before you set the policy.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Boundaries are pre-decisional; policies are post-decisional. Conflating them produces inconsistent enforcement.",
             resonance_score=0.80,
             evidence_strength=0.74,
@@ -97,7 +97,7 @@ def test_collect_writes_to_deduped_candidates_not_candidates(
         AngleOutput(
             canonical_url=GENERIC_URL,
             angle="Generic",
-            tweet_body="A third angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Generic excerpt.",
             resonance_score=0.72,
             evidence_strength=0.68,
@@ -152,7 +152,7 @@ def test_collect_node_dedupes_and_writes_to_deduped_field() -> None:
     duplicate_candidate = {
         "canonical_url": STRONG_URL,
         "angle": "First",
-        "tweet_body": "First angle body that fits within 280 chars and is non-empty for the structural validator.",
+        "suggested_tweet_type": "short_tip",
         "evidence_excerpt": "e1",
         "resonance_score": 0.90,
         "evidence_strength": 0.80,
@@ -163,7 +163,7 @@ def test_collect_node_dedupes_and_writes_to_deduped_field() -> None:
     boundary_candidate = {
         "canonical_url": BOUNDARY_URL,
         "angle": "Boundary",
-        "tweet_body": "Boundary setting body that fits within 280 chars and is non-empty.",
+        "suggested_tweet_type": "short_tip",
         "evidence_excerpt": "e2",
         "resonance_score": 0.80,
         "evidence_strength": 0.74,
@@ -213,7 +213,7 @@ def test_graph_state_candidates_not_doubled_end_to_end(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Concrete cost framing",
-            tweet_body="Slow iteration is paid for by the team closest to the user. Measure who is exposed to the delay.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="When teams track effort without measuring exposure to delay, the cost is paid by the wrong group.",
             resonance_score=0.84,
             evidence_strength=0.78,
@@ -222,7 +222,7 @@ def test_graph_state_candidates_not_doubled_end_to_end(
         AngleOutput(
             canonical_url=BOUNDARY_URL,
             angle="Boundary",
-            tweet_body="Set the boundary before you set the policy. Boundaries are pre-decisional; policies are post-decisional.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Conflating boundaries with policies produces inconsistent enforcement.",
             resonance_score=0.81,
             evidence_strength=0.74,
@@ -231,7 +231,7 @@ def test_graph_state_candidates_not_doubled_end_to_end(
         AngleOutput(
             canonical_url=GENERIC_URL,
             angle="Generic",
-            tweet_body="Hire for the receiving role, not the broadcaster role.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="The strongest predictor of team success is the clarity of the receiving role.",
             resonance_score=0.72,
             evidence_strength=0.71,
@@ -240,7 +240,7 @@ def test_graph_state_candidates_not_doubled_end_to_end(
         AngleOutput(
             canonical_url=HIRING_URL,
             angle="Hiring",
-            tweet_body="Hiring for the role you have, not the role you wish you had.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Hiring for the role you wish you had produces roles that don't exist.",
             resonance_score=0.78,
             evidence_strength=0.72,
@@ -290,7 +290,7 @@ def test_selection_reads_from_deduped_candidates(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Concrete cost framing",
-            tweet_body="Slow iteration is paid for by the team closest to the user.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="When teams track effort without measuring exposure to delay, the cost is paid by the wrong group.",
             resonance_score=0.84,
             evidence_strength=0.78,
@@ -299,7 +299,7 @@ def test_selection_reads_from_deduped_candidates(
         AngleOutput(
             canonical_url=BOUNDARY_URL,
             angle="Boundary setting",
-            tweet_body="Set the boundary before you set the policy.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Boundaries are pre-decisional; policies are post-decisional. Conflating them produces inconsistent enforcement.",
             resonance_score=0.80,
             evidence_strength=0.74,
@@ -308,7 +308,7 @@ def test_selection_reads_from_deduped_candidates(
         AngleOutput(
             canonical_url=GENERIC_URL,
             angle="Generic",
-            tweet_body="A third angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Generic excerpt.",
             resonance_score=0.72,
             evidence_strength=0.68,
@@ -317,7 +317,7 @@ def test_selection_reads_from_deduped_candidates(
         AngleOutput(
             canonical_url=HIRING_URL,
             angle="Hiring",
-            tweet_body="Hiring for the role you have, not the role you wish you had.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Hiring for the role you wish you had produces roles that don't exist; hiring for the role you have produces growth.",
             resonance_score=0.78,
             evidence_strength=0.72,
@@ -373,7 +373,7 @@ def test_noop_outcome_still_writes_deduped_candidates(
         AngleOutput(
             canonical_url=STRONG_URL,
             angle="Single",
-            tweet_body="Only one angle.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="e1",
             resonance_score=0.90,
             evidence_strength=0.80,

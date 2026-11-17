@@ -10,6 +10,10 @@ from cto_craft_workflow.angle_model import (
     AnglePrompt,
     OpenClawInvocationConfig,
     OpenClawStructuredAngleModel,
+    OpenClawTweetWriter,
+    OpenClawWriterConfig,
+    WriterPrompt,
+    load_skill_text,
     _ANGLE_EVALUATOR_PROMPT,
     _TOM_WORLDVIEW_PROFILE,
     _build_openclaw_message,
@@ -34,7 +38,7 @@ def test_openclaw_model_parses_valid_json() -> None:
     def runner(args: list[str], message: str, timeout_seconds: float, cwd: str):
         calls.append((args, message, timeout_seconds, cwd))
         return _result(
-            '{"canonical_url":"https://example.com/a","angle":"Good angle","tweet_body":"Tweet","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":["anti_fluff"]}'
+            '{"canonical_url":"https://example.com/a","angle":"Good angle","suggested_tweet_type":"short_tip","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":["anti_fluff"]}'
         )
 
     model = OpenClawStructuredAngleModel(
@@ -69,7 +73,7 @@ def test_openclaw_model_retries_invalid_json_then_succeeds() -> None:
         if attempts == 1:
             return _result("not json")
         return _result(
-            '{"canonical_url":"https://example.com/a","angle":"Good angle","tweet_body":"Tweet","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":[]}'
+            '{"canonical_url":"https://example.com/a","angle":"Good angle","suggested_tweet_type":"short_tip","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":[]}'
         )
 
     model = OpenClawStructuredAngleModel(
@@ -101,7 +105,7 @@ def test_openclaw_model_retries_transient_process_failure_then_succeeds() -> Non
                 stderr="",
             )
         return _result(
-            '{"canonical_url":"https://example.com/a","angle":"Good angle","tweet_body":"Tweet","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":[]}'
+            '{"canonical_url":"https://example.com/a","angle":"Good angle","suggested_tweet_type":"short_tip","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":[]}'
         )
 
     model = OpenClawStructuredAngleModel(
@@ -153,7 +157,7 @@ def test_openclaw_model_returns_none_after_retry_exhaustion() -> None:
     def runner(args: list[str], message: str, timeout_seconds: float, cwd: str):
         nonlocal attempts
         attempts += 1
-        return _result('{"canonical_url":"https://wrong.example/a","angle":"Good angle","tweet_body":"Tweet","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":[]}')
+        return _result('{"canonical_url":"https://wrong.example/a","angle":"Good angle","suggested_tweet_type":"short_tip","evidence_excerpt":"Excerpt","resonance_score":0.8,"evidence_strength":0.7,"worldview_axes":[]}')
 
     model = OpenClawStructuredAngleModel(
         config=OpenClawInvocationConfig(max_attempts=2),
@@ -208,3 +212,112 @@ def test_load_prompts_is_idempotent_across_calls() -> None:
     second_system, second_world = load_prompts()
     assert second_system is first_system
     assert second_world is first_world
+
+
+# ---------------------------------------------------------------------------
+# Writer model (PR: cto-craft writer split, task 2e724316).
+
+
+def _writer_prompt(**overrides) -> WriterPrompt:
+    defaults = dict(
+        skill_text="# Tweet: Short-Form Tip\n\nSome skill body.",
+        angle="Angle text",
+        evidence_excerpt="Evidence text",
+        canonical_url="https://example.com/a",
+    )
+    defaults.update(overrides)
+    return WriterPrompt(**defaults)
+
+
+def test_load_skill_text_reads_real_skill_files() -> None:
+    """All 3 tweet types must resolve to a real SKILL.md (PR #1007)."""
+
+    for tweet_type in ("short_tip", "personal_philosophy", "personality_post"):
+        text = load_skill_text(tweet_type)
+        assert isinstance(text, str)
+        assert len(text) > 0
+        assert "name:" in text  # frontmatter present
+
+
+def test_load_skill_text_rejects_unknown_type() -> None:
+    with pytest.raises(RuntimeError, match="unknown tweet type"):
+        load_skill_text("not_a_real_type")
+
+
+def test_writer_passes_skill_text_verbatim_into_prompt() -> None:
+    """Per Tom (2026-11-17): skill text goes into the raw model call as literal text."""
+
+    calls: list[tuple[list[str], str, float, str]] = []
+
+    def runner(args, message, timeout_seconds, cwd):
+        calls.append((args, message, timeout_seconds, cwd))
+        return _result('{"tweet_body":"Final tweet copy."}')
+
+    writer = OpenClawTweetWriter(
+        config=OpenClawWriterConfig(model="openai/gpt-5.6-luna", thinking_level="low", max_attempts=1),
+        runner=runner,
+    )
+    prompt = _writer_prompt(skill_text="UNIQUE_SKILL_MARKER_12345")
+
+    out = writer.write_one(prompt=prompt, timeout_seconds=10.0)
+
+    assert out == "Final tweet copy."
+    assert len(calls) == 1
+    args, message, timeout_seconds, _cwd = calls[0]
+    assert "--model" in args and "openai/gpt-5.6-luna" in args
+    assert "--thinking" in args and "low" in args
+    assert "UNIQUE_SKILL_MARKER_12345" in message
+
+
+def test_writer_falls_back_to_second_model_on_exhaustion() -> None:
+    calls: list[str] = []
+
+    def runner(args, message, timeout_seconds, cwd):
+        model = args[args.index("--model") + 1]
+        calls.append(model)
+        if model == "openai/gpt-5.6-luna":
+            raise subprocess.CalledProcessError(1, args, output="rate limit", stderr="")
+        return _result('{"tweet_body":"Fallback tweet."}')
+
+    writer = OpenClawTweetWriter(
+        config=OpenClawWriterConfig(
+            model="openai/gpt-5.6-luna",
+            fallback_model="minimax-portal/MiniMax-M3",
+            thinking_level="low",
+            max_attempts=1,
+        ),
+        runner=runner,
+    )
+
+    out = writer.write_one(prompt=_writer_prompt(), timeout_seconds=10.0)
+
+    assert out == "Fallback tweet."
+    assert calls == ["openai/gpt-5.6-luna", "minimax-portal/MiniMax-M3"]
+
+
+def test_writer_returns_none_when_both_models_exhausted() -> None:
+    def runner(args, message, timeout_seconds, cwd):
+        raise subprocess.CalledProcessError(1, args, output="down", stderr="")
+
+    writer = OpenClawTweetWriter(
+        config=OpenClawWriterConfig(max_attempts=1),
+        runner=runner,
+    )
+
+    out = writer.write_one(prompt=_writer_prompt(), timeout_seconds=10.0)
+
+    assert out is None
+
+
+def test_writer_rejects_tweet_over_280_chars() -> None:
+    def runner(args, message, timeout_seconds, cwd):
+        return _result(json.dumps({"tweet_body": "x" * 281}))
+
+    writer = OpenClawTweetWriter(config=OpenClawWriterConfig(max_attempts=1), runner=runner)
+
+    out = writer.write_one(prompt=_writer_prompt(), timeout_seconds=10.0)
+
+    # Both model+fallback attempts return the same invalid payload, so
+    # the writer exhausts and returns None rather than persisting an
+    # over-length tweet.
+    assert out is None

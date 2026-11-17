@@ -60,11 +60,17 @@ class ArticleContent(TypedDict):
 
 
 class AngleCandidate(TypedDict):
-    """One angle emitted by the structured angle model for one article."""
+    """One angle emitted by the filter model for one article.
+
+    ``suggested_tweet_type`` replaces the old ``tweet_body`` field: the
+    filter model classifies relevance/worldview fit and tweet type only.
+    Final copy is written later by the writer step (see ``write_tweet_copy``
+    in ``graph.py``), using the skill named by this field.
+    """
 
     canonical_url: str
     angle: str
-    tweet_body: str
+    suggested_tweet_type: str
     evidence_excerpt: str
     resonance_score: float
     evidence_strength: float
@@ -72,9 +78,15 @@ class AngleCandidate(TypedDict):
 
 
 class SelectedAngle(TypedDict):
-    """An angle that survived selection and is destined for import."""
+    """An angle that survived selection and is destined for import.
+
+    ``tweet_body`` is populated by ``write_tweet_copy`` after selection —
+    it is absent (or empty) on the dict produced by ``select_distinct_angles``
+    itself.
+    """
 
     canonical_url: str
+    suggested_tweet_type: str
     tweet_body: str
     evidence_excerpt: str
     resonance_score: float
@@ -193,15 +205,13 @@ def is_valid_candidate_shape(candidate: Any) -> bool:
 
     if not isinstance(candidate, dict):
         return False
-    required = ("canonical_url", "angle", "tweet_body", "evidence_excerpt",
+    required = ("canonical_url", "angle", "suggested_tweet_type", "evidence_excerpt",
                 "resonance_score", "evidence_strength", "worldview_axes")
     for key in required:
         if key not in candidate:
             return False
-    tweet_body = candidate.get("tweet_body")
-    if not isinstance(tweet_body, str) or len(tweet_body) == 0:
-        return False
-    if len(tweet_body) > MAX_TWEET_CHARS:
+    tweet_type = candidate.get("suggested_tweet_type")
+    if not isinstance(tweet_type, str) or len(tweet_type) == 0:
         return False
     canonical_url = candidate.get("canonical_url")
     if not isinstance(canonical_url, str) or not canonical_url.startswith(("http://", "https://")):

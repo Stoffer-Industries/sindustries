@@ -27,6 +27,10 @@ from cto_craft_workflow.angle_model import (
     AngleOutput,
     AnglePrompt,
     StructuredAngleModel,
+    TWEET_TYPES,
+    TweetWriter,
+    WriterPrompt,
+    load_skill_text,
 )
 from cto_craft_workflow.article_extract import (
     ExtractedArticle,
@@ -62,6 +66,7 @@ COMPLETE_NOOP = "complete_noop"
 FANOUT = "fanout_articles"
 COLLECT = "collect_candidates"
 SELECT = "select_distinct_angles"
+WRITE = "write_tweet_copy"
 IMPORT = "import_drafts"
 NOTIFY = "format_notification"
 _URL_RE = re.compile(r"https?://[^\s]+")
@@ -79,6 +84,8 @@ class GraphDeps:
     max_selected_angles: int
     model_timeout_seconds: float
     archive_url: str
+    writer: TweetWriter | None = None
+    writer_timeout_seconds: float = 30.0
     import_fn: Callable[[list[dict]], dict] | None = None
     fetch_article: Callable[[str], FetchedResource] | None = None
     parse_issue_links_fn: Callable[[str, bytes], list[dict]] | None = None
@@ -414,8 +421,10 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
         picked_urls.add(url)
         selected.append({
             "canonical_url": url,
-            "tweet_body": candidate.get("tweet_body", ""),
+            "suggested_tweet_type": candidate.get("suggested_tweet_type", ""),
+            "tweet_body": "",
             "evidence_excerpt": candidate.get("evidence_excerpt", ""),
+            "angle": candidate.get("angle", ""),
             "resonance_score": float(candidate.get("resonance_score", 0.0)),
             "issue_ref": state.get("issue_url"),
         })
@@ -430,6 +439,90 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
         }
 
     return {"selected_angles": selected}
+
+
+_SKILL_TEXT_CACHE: dict[str, str] = {}
+
+
+def _cached_skill_text(tweet_type: str) -> str:
+    """Load a skill's raw text once per process and reuse it.
+
+    The writer model call concatenates this text verbatim into its
+    prompt (per Tom, 2026-11-17: "I will pass the skill in to the raw
+    model call just as text") — no agent session, no skill-loading
+    runtime. Caching avoids re-reading the same file for every selected
+    angle of the same type within one run.
+    """
+
+    if tweet_type not in _SKILL_TEXT_CACHE:
+        _SKILL_TEXT_CACHE[tweet_type] = load_skill_text(tweet_type)
+    return _SKILL_TEXT_CACHE[tweet_type]
+
+
+def write_tweet_copy(state: PipelineState, deps: GraphDeps) -> dict:
+    """Write final tweet copy for each selected angle via the writer model.
+
+    Per selected angle: load the raw text of the skill matching its
+    ``suggested_tweet_type`` and hand it to ``deps.writer`` along with the
+    angle/evidence/URL. The skill text alone decides tone, structure, and
+    whether the source URL earns a place in the tweet — this node applies
+    no link policy of its own (Tom, 2026-11-17: "I wouldn't make it
+    mandatory... the skill itself can be the judge").
+
+    An angle whose type doesn't map to a known skill, or whose writer call
+    fails outright (writer + fallback both exhausted), is dropped rather
+    than failing the whole run — a partial batch beats no batch.
+    """
+
+    selected = list(state.get("selected_angles", []) or [])
+    if not selected:
+        return {}
+
+    if deps.writer is None:
+        _emit_diagnostic(state, node=WRITE, code="NO_WRITER", message="no writer configured")
+        return {"selected_angles": [], "outcome": "failed"}
+
+    written: list[dict] = []
+    for angle in selected:
+        tweet_type = angle.get("suggested_tweet_type", "")
+        try:
+            skill_text = _cached_skill_text(tweet_type)
+        except RuntimeError as exc:
+            _emit_diagnostic(
+                state, node=WRITE, code="UNKNOWN_TWEET_TYPE",
+                message=str(exc), url=angle.get("canonical_url"),
+            )
+            continue
+
+        prompt = WriterPrompt(
+            skill_text=skill_text,
+            angle=angle.get("angle", ""),
+            evidence_excerpt=angle.get("evidence_excerpt", ""),
+            canonical_url=angle.get("canonical_url", ""),
+        )
+        try:
+            tweet_body = deps.writer.write_one(prompt=prompt, timeout_seconds=deps.writer_timeout_seconds)
+        except Exception as exc:  # defensive
+            _emit_diagnostic(state, node=WRITE, code="WRITER_ERROR", message=str(exc), url=angle.get("canonical_url"))
+            continue
+
+        if not tweet_body:
+            _emit_diagnostic(
+                state, node=WRITE, code="WRITER_EMPTY",
+                message="writer model returned no usable tweet", url=angle.get("canonical_url"),
+            )
+            continue
+
+        written.append({**angle, "tweet_body": tweet_body})
+
+    if len(written) < MIN_QUALIFIED_CANDIDATES:
+        return {
+            "selected_angles": written,
+            "outcome": "noop",
+            "outcome_reason": "writer produced too few usable tweets this run",
+        }
+
+    return {"selected_angles": written}
 
 
 def _enforce_link_budget(tweet_body: str) -> tuple[str, bool]:
@@ -578,6 +671,12 @@ def _route_after_collect(state: PipelineState) -> str:
 def _route_after_select(state: PipelineState) -> str:
     if state.get("outcome") in ("noop", "failed"):
         return COMPLETE_NOOP
+    return WRITE
+
+
+def _route_after_write(state: PipelineState) -> str:
+    if state.get("outcome") in ("noop", "failed"):
+        return COMPLETE_NOOP
     return IMPORT
 
 
@@ -606,6 +705,7 @@ def build_graph(
     workflow.add_node("fetch_and_score_article", lambda s: fetch_and_score_article(s, deps))
     workflow.add_node(COLLECT, lambda s: collect_candidates(s, deps))
     workflow.add_node(SELECT, lambda s: select_distinct_angles(s, deps))
+    workflow.add_node(WRITE, lambda s: write_tweet_copy(s, deps))
     workflow.add_node(IMPORT, lambda s: import_drafts(s, deps))
     workflow.add_node(NOTIFY, lambda s: format_notification(s, deps))
     workflow.add_node(COMPLETE_NOOP, lambda s: complete_noop(s, deps))
@@ -634,6 +734,11 @@ def build_graph(
     workflow.add_conditional_edges(
         SELECT,
         _route_after_select,
+        {WRITE: WRITE, COMPLETE_NOOP: COMPLETE_NOOP},
+    )
+    workflow.add_conditional_edges(
+        WRITE,
+        _route_after_write,
         {IMPORT: IMPORT, COMPLETE_NOOP: COMPLETE_NOOP},
     )
     workflow.add_conditional_edges(
@@ -670,6 +775,7 @@ __all__ = [
     "FANOUT",
     "COLLECT",
     "SELECT",
+    "WRITE",
     "IMPORT",
     "NOTIFY",
 ]

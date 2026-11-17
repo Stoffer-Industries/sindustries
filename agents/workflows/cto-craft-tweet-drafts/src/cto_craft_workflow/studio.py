@@ -53,6 +53,7 @@ from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
 from cto_craft_workflow.angle_model import (
+    FakeTweetWriter,
     AngleOutput,
     FakeAngleModel,
     load_prompts,
@@ -284,7 +285,7 @@ def _default_studio_fixtures() -> list[AngleOutput]:
         AngleOutput(
             canonical_url="https://staysaasy.com/p/slow-iteration",
             angle="Slow iteration is paid for by the team closest to the user",
-            tweet_body="Slow iteration is paid for by the team closest to the user, not the team closest to the schedule.",
+            suggested_tweet_type="personal_philosophy",
             evidence_excerpt="The cost of slow iteration is paid by the wrong group.",
             resonance_score=0.84,
             evidence_strength=0.78,
@@ -293,7 +294,7 @@ def _default_studio_fixtures() -> list[AngleOutput]:
         AngleOutput(
             canonical_url="https://lethain.com/boundaries/",
             angle="Boundary decisions are made by the org chart",
-            tweet_body="Information architecture decides who owns the failure.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Boundary decisions are made by the org chart.",
             resonance_score=0.81,
             evidence_strength=0.74,
@@ -302,7 +303,7 @@ def _default_studio_fixtures() -> list[AngleOutput]:
         AngleOutput(
             canonical_url="https://lethain.com/fluff-receipts/",
             angle="Most 'communicate better' advice skips the receiver",
-            tweet_body="Most communication advice skips the receiving role.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Clarity of the receiving role predicts success.",
             resonance_score=0.72,
             evidence_strength=0.71,
@@ -311,7 +312,7 @@ def _default_studio_fixtures() -> list[AngleOutput]:
         AngleOutput(
             canonical_url="https://lethain.com/hiring-receiving-role/",
             angle="Hire for the receiver, not the speaker",
-            tweet_body="Most communication advice skips the receiving role.",
+            suggested_tweet_type="short_tip",
             evidence_excerpt="Clarity of the receiving role predicts success.",
             resonance_score=0.7,
             evidence_strength=0.7,
@@ -363,6 +364,8 @@ def _build_studio_graph(
         max_selected_angles=max_selected_angles,
         model_timeout_seconds=model_timeout_seconds,
         archive_url=archive_url,
+        writer=FakeTweetWriter(),
+        writer_timeout_seconds=model_timeout_seconds,
         import_fn=import_fn,
     )
     return build_graph(deps, checkpointer=checkpointer)
