@@ -254,6 +254,49 @@ design or deployment record must explain the trade-off and retain a portable
 boundary where practical (for example, a Dockerfile for a service that runs
 on Fly.io).
 
+## Infrastructure provisioning
+
+Prefer Terraform (or an equivalent declarative IaC tool) over hand-rolled
+shell/Node provisioning scripts for resources that a mature, official or
+well-maintained community provider already covers — this repo's cloud
+foundation (`infra/cloud/`) currently provisions Cloudflare DNS, Fly
+apps/machines/secrets, Upstash Redis, Neon branches/roles, and GitHub
+environment secrets entirely through custom bash/Node scripts
+(`bootstrap-platform.sh`, `render-fly-config.mjs`,
+`platform-provision-secrets.mjs`) plus bespoke read-back/evidence tooling
+(`capture-production-provisioning-state.mjs`,
+`check-production-provisioning-state.mjs`). Terraform providers exist for
+every one of those five surfaces and would replace the hand-rolled
+scripting with declared resources, `plan`-time review, and real drift
+detection.
+
+This is a forward-looking preference, not a retrofit mandate — do not
+rewrite existing working provisioning (for example PR #979 / task
+`fb1240c0`) to adopt this mid-flight. Apply it incrementally:
+
+- New provider-level infrastructure (a new DNS zone/record, a new Fly app,
+  a new Redis/Postgres instance, a new CI secret) should default to
+  Terraform when a provider covers it, instead of adding another
+  hand-rolled script.
+- When touching an existing hand-rolled provisioning script for an
+  unrelated reason, note in the tech design/PR whether that surface is a
+  good incremental Terraform candidate; migrate it only if the change is
+  already touching that surface and the migration is proportionate.
+- Cloudflare DNS is the lowest-risk, most standardized starting point
+  (mature official provider, narrow blast radius) if a dedicated
+  migration task is ever picked up.
+
+Terraform does not replace verification/evidence logic that proves a live
+environment matches intent after deploy (health-probe attestations,
+cross-provider separation checks, secret-inventory read-backs) — that is
+runtime audit tooling, not provisioning, and stays independent of the IaC
+tool used to create the underlying resources.
+
+The weekly architecture review should flag any new or touched
+provisioning work that still uses a hand-rolled script where a Terraform
+provider already exists, so this converges incrementally rather than
+requiring a dedicated migration project.
+
 ## Work classification
 
 Use the lightest workflow that preserves traceability and safety:
