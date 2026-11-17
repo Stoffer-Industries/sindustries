@@ -30,8 +30,16 @@ Required:
 
 Optional:
   --archive-dir <path>       Where to write the .dump and .sha256 files.
-                             Defaults to ./artifacts/cloud-staging.
-  --environment <staging>    Environment label. Defaults to "staging".
+                             Defaults to the environment's artifact
+                             directory (./artifacts/cloud-staging,
+                             ./artifacts/cloud-production).
+  --environment <staging|production>
+                             Environment label. Defaults to the
+                             ENVIRONMENT environment variable, then
+                             "staging".
+  --expected-host <host>     Declares an endpoint this run may touch.
+                             Repeatable. A production run MUST declare
+                             every endpoint it touches.
   --keep-partial             Do not delete the .partial file on failure
                              (used by the interruption drill).
   --help                     Show this help.
@@ -40,7 +48,7 @@ USAGE
 
 SOURCE_DSN_FILE=""
 ARCHIVE_DIR=""
-ENVIRONMENT="staging"
+ENVIRONMENT="${ENVIRONMENT:-staging}"
 KEEP_PARTIAL=0
 
 while (( $# > 0 )); do
@@ -48,6 +56,7 @@ while (( $# > 0 )); do
     --source-dsn-file) SOURCE_DSN_FILE="$2"; shift 2;;
     --archive-dir)     ARCHIVE_DIR="$2"; shift 2;;
     --environment)     ENVIRONMENT="$2"; shift 2;;
+    --expected-host)   cloud_db_add_expected_host "$2"; shift 2;;
     --keep-partial)    KEEP_PARTIAL=1; shift;;
     --help|-h)         usage; exit 0;;
     *)                 cloud_db_die "unknown argument: $1";;
@@ -58,7 +67,9 @@ if [[ -z "$SOURCE_DSN_FILE" ]]; then
   cloud_db_die "--source-dsn-file is required"
 fi
 
-cloud_db_assert_environment "$ENVIRONMENT"
+cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_load_expected_targets_from_env
+cloud_db_assert_production_ack
 cloud_db_assign_run_id
 
 # ---------------------------------------------------------------------------
@@ -66,9 +77,9 @@ cloud_db_assign_run_id
 # ---------------------------------------------------------------------------
 
 cloud_db_load_secret SOURCE_DSN "$SOURCE_DSN_FILE"
-cloud_db_assert_no_production_dsn "source" "$SOURCE_DSN"
+cloud_db_assert_target_dsn "source" "$SOURCE_DSN"
 
-ARCHIVE_DIR="${ARCHIVE_DIR:-./artifacts/cloud-staging}"
+ARCHIVE_DIR="${ARCHIVE_DIR:-$CLOUD_DB_ARTIFACT_DIR}"
 mkdir -p "$ARCHIVE_DIR"
 
 PARTIAL_PATH="${ARCHIVE_DIR}/${CLOUD_DB_RUN_ID}.dump.partial"
@@ -145,17 +156,19 @@ RESULT_PATH="${ARCHIVE_DIR}/${CLOUD_DB_RUN_ID}.dump-result.json"
 
 python3 - "$RESULT_PATH" "$CLOUD_DB_RUN_ID" "$FINAL_PATH" \
         "$SHA_PATH" "$pg_dump_start_epoch" "$pg_dump_end_epoch" \
-        "$(stat -c %s "$FINAL_PATH" 2>/dev/null || stat -f %z "$FINAL_PATH")" <<'PY'
+        "$(stat -c %s "$FINAL_PATH" 2>/dev/null || stat -f %z "$FINAL_PATH")" \
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import hashlib, json, os, sys
 
-out_path, run_id, archive_path, sha_path, start_epoch, end_epoch, size_bytes = sys.argv[1:]
+out_path, run_id, archive_path, sha_path, start_epoch, end_epoch, size_bytes, kind_prefix, environment = sys.argv[1:]
 
 with open(archive_path, "rb") as fh:
   digest = hashlib.sha256(fh.read()).hexdigest()
 
 envelope = {
   "schemaVersion": 1,
-  "kind": "cloud-staging-dump",
+  "kind": f"{kind_prefix}-dump",
+  "environment": environment,
   "runId": run_id,
   "archivePath": os.path.basename(archive_path),
   "sha256": digest,

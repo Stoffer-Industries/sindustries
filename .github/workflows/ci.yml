@@ -1411,6 +1411,9 @@ jobs:
       - name: Run cloud database shared-helper contract test
         run: bash scripts/cloud/database/tests/common.test.sh
 
+      - name: Run cloud database environment-profile contract test
+        run: bash scripts/cloud/database/tests/environment-profile.test.sh
+
       - name: Run cloud database manifest-constraints contract test
         run: bash scripts/cloud/database/tests/manifest-constraints.test.sh
 

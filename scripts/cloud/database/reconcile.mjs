@@ -12,12 +12,15 @@
 //   --dest-budget-dsn-file <path>      budget_api destination DSN
 //
 // Optional:
-//   --output <path>                    default: ./artifacts/cloud-staging/reconcile-<runId>.json
+//   --environment <staging|production> default: staging (or the ENVIRONMENT
+//                                  environment variable)
+//   --output <path>                    default: ./artifacts/cloud-<env>/reconcile-<runId>.json
 //
 // Output envelope shape:
 //   {
 //     "schemaVersion": 1,
-//     "kind": "cloud-staging-reconcile",
+//     "kind": "cloud-<env>-reconcile",
+//     "environment": "<env>",
 //     "runId": "<id>",
 //     "services": {
 //       "tasks-api":  { "checks": [...], "allMatch": true|false, "digestMatch": true|false },
@@ -56,6 +59,7 @@ function parseArgs(argv) {
     destTasks: '',
     destBudget: '',
     output: '',
+    environment: process.env.ENVIRONMENT || 'staging',
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -65,12 +69,13 @@ function parseArgs(argv) {
       case '--source-budget-dsn-file': args.sourceBudget = value; i++; break;
       case '--dest-tasks-dsn-file':    args.destTasks    = value; i++; break;
       case '--dest-budget-dsn-file':   args.destBudget   = value; i++; break;
+      case '--environment':            args.environment  = value; i++; break;
       case '--output':                 args.output       = value; i++; break;
       case '--help': case '-h':
         process.stderr.write([
           'Usage: reconcile.mjs --source-tasks-dsn-file <path> --source-budget-dsn-file <path>',
           '                 --dest-tasks-dsn-file <path>   --dest-budget-dsn-file <path>',
-          '                 [--output <path>]',
+          '                 [--environment <staging|production>] [--output <path>]',
           '',
         ].join('\n'));
         process.exit(0);
@@ -80,10 +85,14 @@ function parseArgs(argv) {
     }
   }
   for (const [key, value] of Object.entries(args)) {
-    if (key !== 'output' && !value) {
+    if (key !== 'output' && key !== 'environment' && !value) {
       process.stderr.write(`missing required --${kebab(key)} argument\n`);
       process.exit(2);
     }
+  }
+  if (!['staging', 'production'].includes(args.environment)) {
+    process.stderr.write(`unknown environment: ${args.environment}\n`);
+    process.exit(2);
   }
   return args;
 }
@@ -252,7 +261,7 @@ async function pkDigest(client, serviceName) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const runId = makeRunId();
-  const outputPath = args.output || `./artifacts/cloud-staging/reconcile-${runId}.json`;
+  const outputPath = args.output || `./artifacts/cloud-${args.environment}/reconcile-${runId}.json`;
 
   const sourceTasks  = await readSecret(args.sourceTasks);
   const sourceBudget = await readSecret(args.sourceBudget);
@@ -272,7 +281,8 @@ async function main() {
 
   const envelope = {
     schemaVersion: 1,
-    kind: 'cloud-staging-reconcile',
+    kind: `cloud-${args.environment}-reconcile`,
+    environment: args.environment,
     runId,
     services: {},
   };

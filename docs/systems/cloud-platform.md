@@ -1010,3 +1010,22 @@ Each run produces a dated evidence record at `docs/infra/cloud-staging-validatio
 - AC3 requires Quinn-owned Grafana Cloud + Neon + Fly secrets to land under task `31233a0a`; until then the failure-drill step emits `AC3_OBSERVABILITY_VERIFICATION_UNIMPLEMENTED` as an accepted limitation.
 - The `bin/{deploy,status,rollback}` wrappers in `infra/cloud/bin/` are operator hotfix paths; they are NOT a replacement for the CI workflows and they MUST NOT be used to bypass the merge gate.
 - Per-deploy intent commit SHA is exposed on every HTTP service `/health` as `version: process.env.GIT_COMMIT_SHA`; the AC2 harness asserts `matchesIntent === true` for Tasks, Budget, and Content Scheduler using this signal.
+
+## Database transfer harness (task `d37681e1`, extended by `f2c23e26`)
+
+The database transfer harness lives in `scripts/cloud/database/` and is the single implementation of the transfer procedure for both environments. There is no separate "production script set": one harness, two environment profiles, resolved by `cloud_db_set_environment` in `scripts/cloud/database/common.sh`.
+
+The stages are `inventory.sh` → `dump.sh` → `restore.sh` → `migrate.sh` → `reconcile.mjs`, orchestrated by `drill.sh`, which seals each run's evidence into `manifest.sh` (`manifest-<run-id>.json`: the digest of every artefact plus the rolled-up verdict).
+
+| | `staging` profile | `production` profile |
+|---|---|---|
+| Endpoint identification | refused if the DSN carries a production marker | **required** allowlist of `host[:port]` (`--expected-host` / `CLOUD_DB_EXPECTED_HOSTS`) |
+| Second key | not required | `CLOUD_DB_PRODUCTION_ACK=1` in the environment |
+| Database-name rule | must carry `sindustries_staging_` | must NOT carry the staging prefix |
+| Artefact directory / envelope kind | `artifacts/cloud-staging` / `cloud-staging-*` | `artifacts/cloud-production` / `cloud-production-*` |
+
+**Why the production profile identifies its target by endpoint, not by name.** The production Neon branch database is named `neondb` — the same name staging uses — so a database-name prefix cannot distinguish them. A production run therefore has to declare the exact endpoints it may touch, and the scripts refuse any endpoint outside that list. The staging profile keeps its deny-list behaviour unchanged: a staging run refuses any DSN carrying a production marker.
+
+**Three keys guard a production move.** The `production` GitHub Environment (approval gate), the typed confirmation `MIGRATE PRODUCTION` (which is what sets `CLOUD_DB_PRODUCTION_ACK=1`), and the declared endpoints. No single key can start a move. The operator surface is `.github/workflows/cloud-production-db-cutover.yml` (`workflow_dispatch` only); the procedure and its failure/retry rules are in `docs/runbooks/production-data-migration-restore.md`.
+
+**Invariants that hold in every environment.** Nothing in the harness ever writes to the source; the destination is rebuilt from the archive on every attempt, so a retry cannot double-write rows; a restore refuses a destination that is not empty; every attempt carries a fresh run id, and the run id is part of every artefact name and of the manifest.

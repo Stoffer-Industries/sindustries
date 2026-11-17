@@ -25,8 +25,13 @@
 #   4. Refuses to operate if the destination DSN is the same host
 #      as the source DSN (cannot drop a schema the source needs).
 #   5. Refuses to operate on any database name without the staging
-#      prefix (sindustries_staging_).
-#   6. Refuses to operate if ENVIRONMENT is not "staging".
+#      prefix (sindustries_staging_). A production run has no
+#      environment-distinguishing prefix (the production Neon database is
+#      named `neondb`), so the production rule is the inverse: it refuses
+#      the staging prefix.
+#   6. Refuses to operate if the environment is not one of the allowed
+#      labels, and a production run additionally requires
+#      CLOUD_DB_PRODUCTION_ACK=1 in the environment.
 #
 # NEVER call this from a push-triggered or schedule-triggered
 # workflow. Only from a workflow_dispatch input where the operator
@@ -38,7 +43,6 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 cloud_db_assert_required_commands
-cloud_db_assert_environment "staging"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -65,8 +69,19 @@ Required:
                                     spelled exactly; refuses
                                     otherwise.
 
-Emits a JSON envelope at artifacts/cloud-staging/cleanup-<run-id>.json
-documenting the schemas dropped, the timestamp, and the run id.
+Optional:
+  --environment <staging|production>
+                                    Environment label. Defaults to the
+                                    ENVIRONMENT environment variable, then
+                                    "staging". A production run also
+                                    requires CLOUD_DB_PRODUCTION_ACK=1.
+  --expected-host <host>            Declares an endpoint this run may
+                                    touch. Repeatable. A production run
+                                    MUST declare every endpoint it
+                                    touches.
+
+Emits a JSON envelope at <artifact-dir>/cleanup-<run-id>.json documenting
+the schemas dropped, the timestamp, and the run id.
 USAGE
 }
 
@@ -75,6 +90,7 @@ DEST_TASKS_FILE=""
 DEST_BUDGET_FILE=""
 CONFIRM=""
 CONFIRM_CLEANUP=0
+ENVIRONMENT="${ENVIRONMENT:-staging}"
 
 while (( $# > 0 )); do
   case "$1" in
@@ -83,6 +99,8 @@ while (( $# > 0 )); do
     --dest-budget-dsn-file)    DEST_BUDGET_FILE="$2";   shift 2;;
     --confirm)                 CONFIRM="$2";            shift 2;;
     --confirm-cleanup-destination) CONFIRM_CLEANUP=1;    shift;;
+    --environment)             ENVIRONMENT="$2";        shift 2;;
+    --expected-host)           cloud_db_add_expected_host "$2"; shift 2;;
     --help|-h)                 usage; exit 0;;
     *)                         cloud_db_die "unknown argument: $1";;
   esac
@@ -98,6 +116,10 @@ if [[ "$CONFIRM_CLEANUP" -ne 1 ]]; then
   cloud_db_die "--confirm-cleanup-destination is required; this is a destructive operator action"
 fi
 
+cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_load_expected_targets_from_env
+cloud_db_assert_production_ack
+
 cloud_db_assign_run_id
 
 if [[ "$CONFIRM" != "${CLOUD_DB_RUN_ID:-}" ]]; then
@@ -112,24 +134,22 @@ cloud_db_load_secret SOURCE_TASKS_DSN "$SOURCE_TASKS_FILE"
 cloud_db_load_secret DEST_TASKS_DSN  "$DEST_TASKS_FILE"
 cloud_db_load_secret DEST_BUDGET_DSN "$DEST_BUDGET_FILE"
 
-# Refuse production DSNs at either end of the source/dest spectrum.
-cloud_db_assert_no_production_dsn "source"      "$SOURCE_TASKS_DSN"
-cloud_db_assert_no_production_dsn "destination (tasks_api)"  "$DEST_TASKS_DSN"
-cloud_db_assert_no_production_dsn "destination (budget_api)" "$DEST_BUDGET_DSN"
+# Refuse any endpoint outside the declared target set at either end of
+# the source/dest spectrum.
+cloud_db_assert_target_dsn "source"      "$SOURCE_TASKS_DSN"
+cloud_db_assert_target_dsn "destination (tasks_api)"  "$DEST_TASKS_DSN"
+cloud_db_assert_target_dsn "destination (budget_api)" "$DEST_BUDGET_DSN"
 
 # Refuse same-host source/destination (would drop schemas the source
 # still needs).
 cloud_db_assert_inequality "source" "$SOURCE_TASKS_DSN" "destination (tasks_api)"  "$DEST_TASKS_DSN"
 cloud_db_assert_inequality "source" "$SOURCE_TASKS_DSN" "destination (budget_api)" "$DEST_BUDGET_DSN"
 
-# Refuse any non-staging database name. The DSN includes the
-# database name as the path component; strip the userinfo and
-# query string before passing the name to the assertion.
-_dsn_dbname() {
-  printf '%s' "$1" | sed -E 's#^[a-z0-9]+://[^@]+@[^/]+/##; s#\?.*$##'
-}
-cloud_db_assert_database_name "$(_dsn_dbname "$DEST_TASKS_DSN")"
-cloud_db_assert_database_name "$(_dsn_dbname "$DEST_BUDGET_DSN")"
+# Refuse any database name the active profile does not allow. The DSN
+# includes the database name as the path component; strip the userinfo
+# and query string before passing the name to the assertion.
+cloud_db_assert_database_name "$(cloud_db_dsn_database "$DEST_TASKS_DSN")"
+cloud_db_assert_database_name "$(cloud_db_dsn_database "$DEST_BUDGET_DSN")"
 
 # ---------------------------------------------------------------------------
 # Pre-cleanup snapshot: count the pre-existing objects in each
@@ -198,14 +218,16 @@ if _schema_exists "$DEST_BUDGET_DSN" budget_api; then pre_budget_schema_present=
 
 if [[ "$pre_tasks_schema_present" == "false" && "$pre_budget_schema_present" == "false" ]]; then
   cloud_db_info "cleanup: neither destination schema exists; nothing to drop"
-  emitted_path="./artifacts/cloud-staging/cleanup-${CLOUD_DB_RUN_ID}.json"
+  emitted_path="${CLOUD_DB_ARTIFACT_DIR}/cleanup-${CLOUD_DB_RUN_ID}.json"
   mkdir -p "$(dirname "$emitted_path")"
-  python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" "$pre_tasks_count" "$pre_budget_count" <<'PY'
+  python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" "$pre_tasks_count" "$pre_budget_count" \
+          "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
-out_path, run_id, pre_tasks, pre_budget = sys.argv[1:]
+out_path, run_id, pre_tasks, pre_budget, kind_prefix, environment = sys.argv[1:]
 envelope = {
   "schemaVersion": 1,
-  "kind": "cloud-staging-cleanup-destination",
+  "kind": f"{kind_prefix}-cleanup-destination",
+  "environment": environment,
   "runId": run_id,
   "preCleanup": {
     "tasks_api":  {"tableCount": int(pre_tasks), "schemaPresent": False},
@@ -294,18 +316,20 @@ fi
 # schemas are recreated by pg_restore, not by cleanup.
 # ---------------------------------------------------------------------------
 
-emitted_path="./artifacts/cloud-staging/cleanup-${CLOUD_DB_RUN_ID}.json"
+emitted_path="${CLOUD_DB_ARTIFACT_DIR}/cleanup-${CLOUD_DB_RUN_ID}.json"
 mkdir -p "$(dirname "$emitted_path")"
 
 python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" \
         "$pre_tasks_count" "$pre_budget_count" \
         "$pre_tasks_schema_present" "$pre_budget_schema_present" \
-        "$drop_start_epoch" "$drop_end_epoch" <<'PY'
+        "$drop_start_epoch" "$drop_end_epoch" \
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
-out_path, run_id, pre_t, pre_b, pre_t_present, pre_b_present, start, end = sys.argv[1:]
+out_path, run_id, pre_t, pre_b, pre_t_present, pre_b_present, start, end, kind_prefix, environment = sys.argv[1:]
 envelope = {
   "schemaVersion": 1,
-  "kind": "cloud-staging-cleanup-destination",
+  "kind": f"{kind_prefix}-cleanup-destination",
+  "environment": environment,
   "runId": run_id,
   "preCleanup": {
     "tasks_api":  {"tableCount": int(pre_t), "schemaPresent": pre_t_present == "true"},
