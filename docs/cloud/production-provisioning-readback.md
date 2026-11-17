@@ -269,8 +269,11 @@ node infra/cloud/scripts/print-operator-evidence-template.mjs --out operator-evi
 #    The targets are already correct — do not edit them.
 
 # 3. merge the record into the artifact
+#    (the committed infra/cloud/evidence/production-operator-evidence.json
+#    is loaded automatically; use --operator-evidence only for a one-off
+#    capture against a different record)
 node infra/cloud/scripts/capture-production-provisioning-state.mjs \
-  --operator-evidence operator-evidence.json --out production-provisioning-state.json
+  --out production-provisioning-state.json
 
 # 4. decide the gates
 node tests/cloud/scripts/check-production-provisioning-state.mjs production-provisioning-state.json

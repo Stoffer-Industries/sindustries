@@ -44,8 +44,10 @@
 //        [--operator-evidence <path>]
 //
 // The operator read-backs (the five obligations no machine can prove) are
-// merged into the artifact from an operator-owned JSON file. The capture
-// performs no read for them: they are facts only the operator can observe.
+// merged into the artifact from the committed operator-evidence JSON file.
+// The capture performs no read for them: they are facts only the operator
+// can observe. The committed file is the default; --operator-evidence
+// overrides it for a one-off capture.
 // The file carries a boolean, a read-back time, a POINTER to the
 // read-back and the production surfaces it covered — never a value.
 // Credentials (read from the environment, never from a file in the repo):
@@ -55,7 +57,7 @@
 //   CLOUDFLARE_API_TOKEN  Cloudflare DNS API (zone records read)
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -70,6 +72,8 @@ const REPO_ROOT_DEFAULT = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
   return join(here, '..', '..', '..');
 })();
+
+const DEFAULT_OPERATOR_EVIDENCE_PATH = 'infra/cloud/evidence/production-operator-evidence.json';
 
 const NEON_API_BASE = 'https://console.neon.tech/api/v2';
 const FLY_GRAPHQL_ENDPOINT = 'https://api.fly.io/graphql';
@@ -190,6 +194,22 @@ function parseArgs(argv) {
     }
   }
   return options;
+}
+
+/**
+ * Resolve the operator-evidence input for a capture.
+ *
+ * The committed evidence record is the default so a normal capture carries
+ * the read-backs that have already been recorded in the repository. An
+ * explicit --operator-evidence path wins for a one-off capture against a
+ * different record.
+ *
+ * @param {{repoRoot: string, operatorEvidence?: string|null}} options
+ * @returns {string}
+ */
+export function resolveOperatorEvidencePath(options) {
+  if (options.operatorEvidence) return resolve(options.operatorEvidence);
+  return join(options.repoRoot, DEFAULT_OPERATOR_EVIDENCE_PATH);
 }
 
 /**
@@ -1291,14 +1311,15 @@ async function main(argv) {
     providers: { neon, fly, github, cloudflare },
   };
 
-  if (options.operatorEvidence) {
-    const loaded = loadOperatorEvidence(resolve(options.operatorEvidence), {
+  const operatorEvidencePath = resolveOperatorEvidencePath(options);
+  if (options.operatorEvidence || existsSync(operatorEvidencePath)) {
+    const loaded = loadOperatorEvidence(operatorEvidencePath, {
       capturedAt,
       repoRoot: options.repoRoot,
     });
     if (loaded.problems.length > 0) {
       throw new Error(
-        `the operator evidence file ${options.operatorEvidence} is not usable: ${loaded.problems.join('; ')}`,
+        `the operator evidence file ${operatorEvidencePath} is not usable: ${loaded.problems.join('; ')}`,
       );
     }
     artifact.operatorEvidence = loaded.evidence;
