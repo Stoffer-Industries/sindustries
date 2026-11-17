@@ -1192,6 +1192,18 @@ jobs:
 
       - name: Run Vercel env matrix contract test
         run: node --test tests/cloud/tests/check-vercel-env-matrix.test.mjs
+      - name: Check production Vercel deploy contract
+        run: node tests/cloud/scripts/check-production-vercel-deploy-contract.mjs
+
+      - name: Run production Vercel deploy contract test
+        run: node --test tests/cloud/tests/check-production-vercel-deploy-contract.test.mjs
+
+      - name: Run Vercel production project facts test
+        run: node --test infra/cloud/platform/tests/vercel-project-facts.test.mjs
+
+      - name: Run live Vercel bundle verifier test
+        run: node --test tests/cloud/tests/verify-live-vercel-bundle.test.mjs
+
 
       # Task 5cb4a8fe AC6 static check: docs/cloud/production-blockers.md is
       # the AC6 evidence register — the only place that tells an operator
