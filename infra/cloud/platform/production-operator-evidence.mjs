@@ -86,7 +86,18 @@ export const SPEND_BOUND_CONTROLS = {
     'a prepaid or capped billing method on the Fly production billing account, read back from the billing surface',
 };
 
-/** The operator obligations and the evidence slot that closes each one. */
+// The operator obligations and the evidence slot that closes each one.
+//
+// `flySpendOrderingDeviation` is not an obligation in the ordinary sense:
+// it is the CLOSURE PATH for an ordering that cannot be un-violated. The
+// approved design makes the production spend bound a hard gate BEFORE any
+// public exposure, so the checker compares the bound's read-back time with
+// the exposure time. When production was published before the bound
+// existed, no amount of later recording can make that order true — and a
+// gate that can only ever fail is a gate that blocks the task forever.
+// So the deviation is a recorded human fact, with the same shape as every
+// other read-back: a boolean, a time, a pointer to the acceptance and the
+// exposed surfaces the acceptance covers.
 export const OPERATOR_EVIDENCE_SLOTS = [
   {
     slot: 'flySpendLimit',
@@ -98,6 +109,16 @@ export const OPERATOR_EVIDENCE_SLOTS = [
     controls: Object.keys(SPEND_BOUND_CONTROLS),
     hint:
       'the read-back of the control that bounds production spend for the production app scope — a native Fly spend limit or the approved prepaid/capped billing method',
+  },
+  {
+    slot: 'flySpendOrderingDeviation',
+    gate: 'fly.spend-bound-ordering',
+    coverage: 'productionExposure',
+    label: 'Spend-bound ordering deviation acceptance',
+    step: 'Slice D step 6',
+    owner: 'Tom (acceptance) / Quinn (operator)',
+    hint:
+      'the written acceptance that production was publicly exposed BEFORE the spend bound was established — recorded only when the bound was read back after the exposure, so the deviation is accepted rather than hidden',
   },
   {
     slot: 'neonSeparationDenialProof',

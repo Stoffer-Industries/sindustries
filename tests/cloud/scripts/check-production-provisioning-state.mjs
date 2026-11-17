@@ -1661,6 +1661,161 @@ export function evaluateProvisioningState(state, options = {}) {
     }
   }
 
+  // --- AC5 ORDER: the spend bound BEFORE any public exposure ------------
+  //
+  // The gate above proves that a spend bound is RECORDED while production
+  // is exposed. This gate proves the ORDER the approved design makes a
+  // hard gate: the bound has to have been read back BEFORE production was
+  // publicly exposed.
+  //
+  // Without it the chain could not tell "the limit was set before the
+  // cutover" from "the limit was set after production was already live".
+  // The artifact carried no exposure time at all, so the order could only
+  // ever be asserted in prose — a gate that asserts an order it cannot
+  // read goes green on a fact it never looked at.
+  //
+  // The order cannot be un-violated: production DNS was published before
+  // this account had any spend bound, so the closure path is a recorded
+  // human acceptance of the deviation (`flySpendOrderingDeviation`), not
+  // a rewrite of history and not a gate that can never close.
+  {
+    const gate = 'fly.spend-bound-ordering';
+    const label = 'Fly spend bound established before public exposure';
+
+    const productionHostnames = new Set(
+      asArray(dnsExpectations.surfaces)
+        .map((surface) => surface?.productionHostname)
+        .filter((hostname) => typeof hostname === 'string' && hostname.length > 0),
+    );
+
+    // Every public exposure, with the time it happened. The DNS record's
+    // creation time is the publication; the probe's release time is when
+    // the production probe became live.
+    const exposureEvents = [];
+    for (const record of asArray(providers.cloudflare?.records)) {
+      if (!productionHostnames.has(record?.name)) continue;
+      exposureEvents.push({
+        surface: record.name,
+        at: typeof record?.createdOn === 'string' ? record.createdOn : null,
+      });
+    }
+    const probeApp = asArray(providers.fly?.apps).find(
+      (app) => app?.name === healthProbeApp,
+    );
+    const probeRunning = asArray(probeApp?.machineStates).some(
+      (machineState) => machineState === 'started',
+    );
+    if (probeRunning) {
+      exposureEvents.push({
+        surface: healthProbeApp ?? '(unnamed)',
+        at: typeof probeApp?.releaseCreatedAt === 'string' ? probeApp.releaseCreatedAt : null,
+      });
+    }
+
+    const timedExposure = exposureEvents
+      .filter((event) => isIsoTimestamp(event.at))
+      .map((event) => ({ ...event, at: Date.parse(event.at) }));
+    const exposureAt = timedExposure.length
+      ? Math.min(...timedExposure.map((event) => event.at))
+      : null;
+    const exposureAtIso = exposureAt === null
+      ? null
+      : new Date(exposureAt).toISOString();
+    const untimedExposure = exposureEvents
+      .filter((event) => !isIsoTimestamp(event.at))
+      .map((event) => event.surface);
+
+    const spendSlot = state.operatorEvidence?.flySpendLimit;
+    const spendRecorded = Boolean(spendSlot && typeof spendSlot === 'object' && spendSlot.recorded === true);
+    const spendReadBackAt = spendSlot?.readBackAt ?? null;
+    const spendReadBackMs = isIsoTimestamp(spendReadBackAt) ? Date.parse(spendReadBackAt) : null;
+    const deviationCoverage = operatorEvidenceCoverage(
+      state.operatorEvidence,
+      'flySpendOrderingDeviation',
+      expectedTargetsForSlot('flySpendOrderingDeviation'),
+    );
+
+    if (exposureEvents.length === 0) {
+      add(
+        row(gate, 'not-applicable', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason:
+            'nothing is publicly exposed yet, so there is no order to check; the spend bound must still be read back before production is published',
+        }),
+      );
+    } else if (untimedExposure.length > 0) {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Rowan',
+          label,
+          reason:
+            `production is publicly exposed (${exposureEvents.map((event) => event.surface).join(', ')}), ` +
+            `but the artifact carries no readable exposure time for ${untimedExposure.join(', ')}, ` +
+            'so the order the approved design requires cannot be proven',
+        }),
+      );
+    } else if (!spendRecorded) {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason:
+            `production is publicly exposed (${exposureEvents.map((event) => event.surface).join(', ')}), ` +
+            'but no spend-bound read-back is recorded, so the order cannot be shown',
+        }),
+      );
+    } else if (spendReadBackMs === null) {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Quinn (operator)',
+          label,
+          reason:
+            'the recorded spend-bound read-back carries no usable read-back time, so the order cannot be checked',
+        }),
+      );
+    } else if (spendReadBackMs <= exposureAt) {
+      add(
+        row(gate, 'met', {
+          step: 'Slice D step 6',
+          owner: 'Quinn / Tom (account plan decision)',
+          label,
+          reason:
+            `the spend bound was read back at ${spendReadBackAt}, before production was publicly exposed at ${exposureAtIso}`,
+        }),
+      );
+    } else if (deviationCoverage.recorded && deviationCoverage.covered) {
+      add(
+        row(gate, 'met', {
+          step: 'Slice D step 6',
+          owner: 'Tom (acceptance) / Quinn (operator)',
+          label,
+          reason:
+            `the spend bound was read back at ${spendReadBackAt}, AFTER production was publicly exposed at ${exposureAtIso} — ` +
+            'the order the approved design requires was not met, and the deviation is covered by the recorded acceptance ' +
+            `(${operatorEvidenceSummary(state.operatorEvidence, 'flySpendOrderingDeviation')})`,
+        }),
+      );
+    } else {
+      add(
+        row(gate, 'unmet', {
+          step: 'Slice D step 6',
+          owner: 'Tom (acceptance) / Quinn (operator)',
+          label,
+          reason:
+            `the spend bound was read back at ${spendReadBackAt}, AFTER production was publicly exposed at ${exposureAtIso} — ` +
+            'the order the approved design requires was not met. The exposure cannot be un-exposed by recording, so either ' +
+            'Tom/QA records the acceptance of the retroactive bound (operator-evidence slot `flySpendOrderingDeviation`) ' +
+            'or the exposure is rolled back until the bound is in place',
+        }),
+      );
+    }
+  }
+
   for (const entry of OPERATOR_REQUIRED_ROWS) {
     const slot = OPERATOR_EVIDENCE_SLOT_BY_GATE.get(entry.gate);
     const summary = slot ? operatorEvidenceSummary(state.operatorEvidence, slot) : null;

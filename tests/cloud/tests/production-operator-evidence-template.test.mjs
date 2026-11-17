@@ -301,7 +301,11 @@ test('a record that names only some of the surfaces stays open', () => {
 
 test('the template refuses to print when the repository names no surface for a slot', () => {
   const empty = slotsWithoutSurfaces({ platformAppScope: ['sindustries-platform-production'] });
-  assert.equal(empty.length, 4, 'every slot without an expected surface is named');
+  assert.equal(
+    empty.length,
+    5,
+    'every slot without an expected surface is named — the spend-bound slot is the only one covered here',
+  );
   for (const entry of empty) {
     assert.ok(entry.slot.length > 0, 'the refusal names the slot');
     assert.ok(entry.step.length > 0, 'the refusal names the Slice D step');

@@ -132,6 +132,13 @@ export async function loadOperatorTargetExpectations(repoRoot) {
     healthProbeApp: [environment.healthProbeApp],
     productionApiHostnames,
     productionHostnames,
+    // The surfaces a spend-bound ORDERING deviation is accepted for: the
+    // production hostnames that were published and the production
+    // health-probe app that was running while production spend was still
+    // unbounded. The acceptance is a statement about the exposure that
+    // happened, so it must name every exposed surface — the same rule
+    // every other slot follows.
+    productionExposure: [...productionHostnames, environment.healthProbeApp],
     // The denial proof must cover the production branch and BOTH the
     // staging and the dev credential: AC2 names the staging/dev
     // separation, so one refused credential does not prove it. These

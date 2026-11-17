@@ -99,6 +99,7 @@
           "exists": true,
           "organization": "Tom Stoffer",
           "releaseVersion": 7,
+          "releaseCreatedAt": "2026-11-15T21:00:00.000Z",
           "machineStates": [
             "started"
           ],
@@ -126,6 +127,7 @@
           "exists": true,
           "organization": "Tom Stoffer",
           "releaseVersion": 3,
+          "releaseCreatedAt": "2026-11-15T22:30:00.000Z",
           "machineStates": [
             "started"
           ],
@@ -224,49 +226,57 @@
           "name": "tasks-api.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-platform-production.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T23:00:00.000Z"
         },
         {
           "name": "budget-api.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-platform-production.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T23:00:00.000Z"
         },
         {
           "name": "content-scheduler-api.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-platform-production.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T23:00:00.000Z"
         },
         {
           "name": "health-probe.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-health-probe-production.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T23:00:00.000Z"
         },
         {
           "name": "tasks-api.staging.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-platform-staging.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T00:00:00.000Z"
         },
         {
           "name": "budget-api.staging.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-platform-staging.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T00:00:00.000Z"
         },
         {
           "name": "content-scheduler-api.staging.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-platform-staging.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T00:00:00.000Z"
         },
         {
           "name": "health-probe.staging.sindustries.co.nz",
           "type": "CNAME",
           "content": "sindustries-health-probe-staging.fly.dev",
-          "proxied": false
+          "proxied": false,
+          "createdOn": "2026-11-15T00:00:00.000Z"
         }
       ]
     }

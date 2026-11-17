@@ -222,6 +222,19 @@ credential boundary.
   gate enforces the order the approved design makes a hard gate: while a
   production hostname is published or the production health-probe app is
   running, an artifact with no recorded spend-limit read-back fails.
+- The ORDER itself is a second gate, `fly.spend-bound-ordering`: the
+  capture records WHEN production became publicly exposed (the Cloudflare
+  record's creation time and the production probe app's release creation
+  time), and the bound's read-back time is compared with it. Production
+  DNS was published at 2026-11-16T10:12:23Z and the production probe's
+  current release at 2026-11-16T20:32:20Z, so a bound read back after
+  that — which is what the approved prepaid/capped control will be — is an
+  order violation and fails the gate. The order cannot be un-violated by
+  recording, so the closure path is a recorded acceptance of the
+  deviation (`flySpendOrderingDeviation`, the same value-free shape, with
+  a pointer to the acceptance and the exposed surfaces it covers) or a
+  rollback of the exposure. That acceptance is Tom/QA's to give; the
+  repository does not record it on anyone's behalf.
 - A recorded read-back must also name the production surfaces it covered,
   in `targets`. A boolean on its own proves only that a statement was
   made: a record with the scope "done" would otherwise close the DNS
