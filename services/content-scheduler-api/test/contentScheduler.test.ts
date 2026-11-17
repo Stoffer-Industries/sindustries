@@ -372,14 +372,14 @@ describe('RealXClient', () => {
 // --- getXClient selection -------------------------------------------------
 
 describe('getXClient', () => {
-  it('returns FakeXClient by default', () => {
+  it('returns null when X_CLIENT is unset', () => {
     delete process.env.X_CLIENT;
     delete process.env.X_API_KEY;
     delete process.env.X_API_SECRET;
     delete process.env.X_ACCESS_TOKEN;
     delete process.env.X_ACCESS_TOKEN_SECRET;
     const client = getXClient();
-    expect(client).toBeInstanceOf(FakeXClient);
+    expect(client).toBeNull();
   });
 
   it('returns FakeXClient when X_CLIENT=fake', () => {
@@ -963,6 +963,7 @@ describe('POST /content-scheduler/items/:id/retry-publish (thread cleanup_requir
   });
 
   it('returns 409 NOT_CLEANUP_REQUIRED when item status is approved', async () => {
+    process.env.X_CLIENT = 'fake';
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(
       threadFixtureWithParts({ status: 'approved', publishError: null })
     );
@@ -971,6 +972,7 @@ describe('POST /content-scheduler/items/:id/retry-publish (thread cleanup_requir
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('NOT_CLEANUP_REQUIRED');
     expect(res.body.error.message).toMatch(/approved/);
+    delete process.env.X_CLIENT;
   });
 
   it('returns 409 CLEANUP_STILL_REQUIRED with undeleted tweet URLs when retry still fails', async () => {
