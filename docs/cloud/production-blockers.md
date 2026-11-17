@@ -215,9 +215,9 @@ credential boundary.
   Fly spend-limit surface) — and a record with no control or an unknown
   one is refused. A record without an inspectable pointer, or with a
   read-back stamped after the artifact was captured, is refused. The
-  Four are recorded in `production-provisioning-readback.md`; the Fly
-  spend-bound slot remains open because the approved control is not active
-  yet. The
+  All five read-backs are recorded in
+  `production-provisioning-readback.md`, including Tom's confirmed
+  prepaid/capped Fly billing method. The
   `fly.spend-limit-before-public-exposure`
   gate enforces the order the approved design makes a hard gate: while a
   production hostname is published or the production health-probe app is
