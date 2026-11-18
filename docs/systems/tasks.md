@@ -500,7 +500,7 @@ The two filters combine via AND: a UI can show "Quinn's outstanding gates AND th
 
 **CLI:** `tasks_api_client.py` exposes `--workflow-gate-owner <name>` and `--attention-owner <name>` for `list`, plus `--attention-owners <name...>` and `--clear-attention-owners` for `patch`.
 
-**Default landing view (apps/tasks, WS2 of task `66054ab4`):** the backlog view shifts from "Status: Open" to `?workflowGateOwner=<self>` for signed-in users on first mount, so normal handoffs surface through explicit workflow gates rather than the generic `Blocked` indicator. Anonymous sessions see no default. The shift is applied once per session; toggling the chip off or clearing the filter persists the user's explicit choice. The existing `Blocked` and `dependencyBlocked` indicators remain visible and backward compatible — the default does not suppress either plane.
+**Default landing view (apps/tasks, task `05cc9c02`):** the backlog applies **no ownership filter** on load. The earlier WS2 behaviour (task `66054ab4`) shifted the backlog to `?workflowGateOwner=<self>` for signed-in users on first mount; that default was removed because it silently hid ordinary active tasks that carry no workflow gate and no attention-owner handoff (for example a newly created task). `?workflowGateOwner` and `?attentionOwner` remain supported API filters and the `MY GATES` / `NEEDS MY ATTENTION` chips remain available, but both are now opt-in: the user selects the chip, and the filter applies until they clear it. The existing `Blocked` and `dependencyBlocked` indicators remain visible and backward compatible.
 
 ---
 
