@@ -79,10 +79,20 @@ if ! run_capture "$LOG" bash -c "source '$SCRIPT'; cloud_db_assert_environment '
   echo "FAIL: staging should be accepted" >&2; cat "$LOG" >&2; exit 1
 fi
 
-echo "test: assert_environment refuses production"
-LOG="$TMP/env-bad.log"
+echo "test: assert_environment accepts the production label"
+# `production` became an allowed label when the production cutover started
+# running through this same harness. The label alone grants nothing: the
+# production profile's own guards (declared endpoint allowlist + the
+# CLOUD_DB_PRODUCTION_ACK key) are what stop an unintended production
+# run, and they are covered by environment-profile.test.sh.
+LOG="$TMP/env-production.log"
 run_capture "$LOG" bash -c "source '$SCRIPT'; cloud_db_assert_environment 'production'"
-assert_dies_with "production refusal" "environment 'production' is not in allowed list" "$LOG"
+assert_succeeds "production label accepted" "$LOG"
+
+echo "test: assert_environment refuses an unknown label"
+LOG="$TMP/env-bad.log"
+run_capture "$LOG" bash -c "source '$SCRIPT'; cloud_db_assert_environment 'prod'"
+assert_dies_with "unknown environment refusal" "environment 'prod' is not in allowed list" "$LOG"
 
 # 2. cloud_db_assert_database_name
 echo "test: assert_database_name accepts allowed prefix"
@@ -90,6 +100,11 @@ LOG="$TMP/name-ok.log"
 if ! run_capture "$LOG" bash -c "source '$SCRIPT'; cloud_db_assert_database_name 'sindustries_staging_tasks'"; then
   echo "FAIL: staging-prefix name should be accepted" >&2; cat "$LOG" >&2; exit 1
 fi
+
+echo "test: assert_database_name refuses the staging prefix in a production run"
+LOG="$TMP/name-prod.log"
+run_capture "$LOG" bash -c "source '$SCRIPT'; cloud_db_resolve_environment production; cloud_db_assert_database_name 'sindustries_staging_tasks'"
+assert_dies_with "production staging-prefix refusal" "carries the staging prefix" "$LOG"
 
 echo "test: assert_database_name refuses missing prefix"
 LOG="$TMP/name-bad.log"
