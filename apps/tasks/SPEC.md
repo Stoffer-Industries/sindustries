@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-10-13 (avatar stack no-collapse alignment, task 479d76f8)
+**Last updated:** 2026-11-19 (description hit targets, task 88cd00e0)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 
@@ -25,7 +25,13 @@ A focused task management surface for Tom and the agent team. Supports capturing
 ### 2. View and edit a task
 1. User clicks a task card to expand it inline (accordion)
 2. User can edit all fields inline
-3. User can toggle markdown task-list checkboxes in the rendered description without entering raw-text edit mode; the checkbox state persists immediately
+3. The rendered description classifies every click before acting on it, so an interaction target is never mistaken for an edit trigger:
+   - A click on a checkbox toggles that acceptance criterion; the state persists immediately.
+   - A click on an acceptance-criteria **row** (the criterion's text) toggles that criterion — the row is a hit target, not an edit trigger.
+   - A click on a URL opens the link (Cmd/Ctrl-click opens it in a new tab) and never enters inline text edit mode; the browser default is never cancelled, so native navigation survives.
+   - A click on any other description text enters inline text edit mode.
+   - An explicit "Edit" control in the description header always enters inline text edit mode, and becomes "Done" while editing.
+   - The classification is scoped to the rendered description: a click is matched against the markdown it sits in, not against ancestor elements of the surrounding page.
 4. Rendered markdown description content wraps within the task card instead of overflowing horizontally
 5. User can navigate to a full-screen detail view via explicit action
 6. Changes persist on save
@@ -228,6 +234,7 @@ new planes is scoped separately.
 | Filter by assignee | `test/e2e/assignee-filter.spec.js` |
 | Task dependencies UI | `test/e2e/dependency-ui.spec.js` |
 | Markdown checkbox toggle + description wrapping | `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/src/utils/markdown.test.js` |
+| Description hit targets (AC row toggles, modifier-click opens the URL, plain text still edits) | `apps/tasks/src/components/MarkdownContent.test.jsx`, `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/test/e2e/description-edit-targets.spec.js` |
 | Filter by priority | `test/e2e/priority-filter.spec.js` |
 | Approvals sub-section (session login/logout and current actor, optimistic approve/revoke, per-row pending + rollback errors, immutable states, avatars/tooltips, empty states) | `apps/tasks/src/components/ApprovalsSection.test.jsx`, `apps/tasks/src/tasksApi.test.ts`, `apps/tasks/test/e2e/approval-checkboxes.spec.js` |
 

@@ -33,6 +33,16 @@ const defaultProps = {
 };
 
 describe('TaskEditor', () => {
+  /**
+   * Acceptance-criteria rows in the description preview. `marked` v17 emits no
+   * class on task-list items, so a row is matched by the checkbox it owns.
+   */
+  function acceptanceCriteriaRows() {
+    return Array.from(document.querySelectorAll('.description-preview li')).filter((li) =>
+      li.querySelector('input[type="checkbox"]')
+    );
+  }
+
   it('renders task title', () => {
     render(<TaskEditor {...defaultProps} />);
     expect(screen.getByLabelText('Detail title')).toHaveValue('Test Task');
@@ -128,6 +138,143 @@ describe('TaskEditor', () => {
       );
     });
     expect(screen.queryByLabelText('Detail description')).not.toBeInTheDocument();
+  });
+
+  it('toggles the acceptance criterion when its row text is clicked and stays in preview mode', async () => {
+    const onDraftChange = vi.fn();
+    const onPatch = vi.fn().mockResolvedValue(true);
+    render(
+      <TaskEditor
+        {...defaultProps}
+        draft={{ ...defaultProps.draft, description: '- [ ] first AC\n- [x] second AC' }}
+        onDraftChange={onDraftChange}
+        onPatch={onPatch}
+      />
+    );
+
+    const rows = acceptanceCriteriaRows();
+    expect(rows).toHaveLength(2);
+    fireEvent.click(rows[0]);
+
+    await waitFor(() => {
+      expect(onDraftChange).toHaveBeenCalledWith(
+        expect.objectContaining({ description: '- [x] first AC\n- [x] second AC' })
+      );
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ description: '- [x] first AC\n- [x] second AC' })
+      );
+    });
+    // The mis-click must not enter inline text edit mode.
+    expect(screen.queryByLabelText('Detail description')).not.toBeInTheDocument();
+  });
+
+  it('resolves a row click to that row’s own criterion', async () => {
+    const onPatch = vi.fn().mockResolvedValue(true);
+    render(
+      <TaskEditor
+        {...defaultProps}
+        draft={{ ...defaultProps.draft, description: '- [ ] first AC\n- [x] second AC' }}
+        onPatch={onPatch}
+      />
+    );
+
+    const rows = acceptanceCriteriaRows();
+    fireEvent.click(rows[1]);
+
+    await waitFor(() => {
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ description: '- [ ] first AC\n- [ ] second AC' })
+      );
+    });
+  });
+
+  it('does not enter edit mode when a URL is cmd-clicked and keeps the browser default', () => {
+    const { container } = render(
+      <TaskEditor
+        {...defaultProps}
+        draft={{ ...defaultProps.draft, description: 'See [the spec](#spec).' }}
+      />
+    );
+
+    const link = document.querySelector('.description-preview a[href]');
+    expect(link).toBeTruthy();
+
+    // React delegates to the root container, and the RTL container IS that
+    // root, so a listener here runs after React's handler and reads the real
+    // `defaultPrevented` state.
+    const seen = [];
+    const listener = (event) => seen.push(event.defaultPrevented);
+    container.addEventListener('click', listener);
+    try {
+      fireEvent.click(link, { metaKey: true });
+    } finally {
+      container.removeEventListener('click', listener);
+    }
+
+    expect(seen).toEqual([false]);
+    expect(screen.queryByLabelText('Detail description')).not.toBeInTheDocument();
+  });
+
+  it('opens a link inside an acceptance-criteria row without toggling the criterion', () => {
+    const onPatch = vi.fn().mockResolvedValue(true);
+    render(
+      <TaskEditor
+        {...defaultProps}
+        draft={{ ...defaultProps.draft, description: '- [ ] AC with a [link](#row-link) inside' }}
+        onPatch={onPatch}
+      />
+    );
+
+    const link = document.querySelector('.description-preview li a[href]');
+    expect(link).toBeTruthy();
+    fireEvent.click(link);
+
+    expect(onPatch).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Detail description')).not.toBeInTheDocument();
+  });
+
+  it('enters description edit mode through the explicit Edit control', () => {
+    render(<TaskEditor {...defaultProps} />);
+
+    expect(screen.queryByLabelText('Detail description')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit description' }));
+    expect(screen.getByLabelText('Detail description')).toHaveValue('Test description');
+  });
+
+  it('still enters edit mode on plain text when the card sits inside a list item', async () => {
+    // A task card is rendered inside a backlog <li>. The classifier must scope
+    // its row lookup to the markdown, or a plain-text click resolves to that
+    // outer <li>, finds a checkbox and toggles an acceptance criterion
+    // instead of entering edit mode.
+    const onPatch = vi.fn().mockResolvedValue(true);
+    render(
+      <ul>
+        <li>
+          <TaskEditor
+            {...defaultProps}
+            draft={{ ...defaultProps.draft, description: 'Plain paragraph.\n\n- [ ] first AC' }}
+            onPatch={onPatch}
+          />
+        </li>
+      </ul>
+    );
+
+    const paragraph = document.querySelector('.description-preview p');
+    expect(paragraph).toBeTruthy();
+    fireEvent.click(paragraph);
+
+    expect(screen.getByLabelText('Detail description')).toBeInTheDocument();
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+
+  it('leaves description edit mode through the explicit Done control', () => {
+    render(<TaskEditor {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit description' }));
+    expect(screen.getByLabelText('Detail description')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Done editing description' }));
+    expect(screen.queryByLabelText('Detail description')).not.toBeInTheDocument();
+    expect(screen.getByText('Test description')).toBeInTheDocument();
   });
 
   it('renders status select', () => {

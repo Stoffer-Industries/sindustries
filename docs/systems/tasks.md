@@ -1,7 +1,7 @@
 # Tasks
 
 **Type:** System reference (data plane + workflows)
-**Last updated:** 2026-11-05
+**Last updated:** 2026-11-19 (description interaction contract, task 88cd00e0)
 **Owner:** Rowan (engineering) · Quinn (workflow orchestration) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **App spec:** `apps/tasks/SPEC.md`
@@ -64,6 +64,17 @@ PostgreSQL
 ```
 
 The Tasks API is the single source of truth for task tracking. The frontend is a thin client — no local task state beyond a session's in-memory view.
+
+### Description interaction contract (task `88cd00e0`)
+
+The Tasks app classifies every click inside a rendered markdown description before acting on it, so an interaction target is never mistaken for an edit trigger. The classification is UI-local and changes no API contract: the description markdown and the checkbox index space remain exactly as they are, and the persisted format is unchanged.
+
+* A click on a checkbox toggles that acceptance criterion and never enters inline text edit mode.
+* A click on an acceptance-criteria **row** — the criterion's text — toggles that same criterion. The row is a hit target for its checkbox, not an edit trigger.
+* A click on a URL opens the link (Cmd/Ctrl-click opens it in a new tab) and never enters inline text edit mode. The classifier never cancels the browser default, so native navigation is preserved.
+* A click on any other description text enters inline text edit mode, and an explicit "Edit" control in the description header always does so.
+
+The classifier's lookups are scoped to the markdown root. An unscoped ancestor lookup escapes the markdown and matches the surrounding application — a task card is rendered inside a backlog `<li>`, so an unscoped `closest('li')` resolves a plain-text click to that outer list item and toggles an acceptance criterion instead of entering edit mode.
 
 ---
 

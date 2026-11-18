@@ -167,14 +167,18 @@ export function TaskEditor({
     setIsCommentComposerOpen(false);
   }
 
-  async function handleDescriptionCheckboxToggle(event, checkboxIndex) {
+  async function handleDescriptionCheckboxToggle(event, checkboxIndex, meta) {
     event.preventDefault();
     event.stopPropagation();
 
+    // `meta.checked` is the desired state resolved by the interaction
+    // classifier. A row click never activated the checkbox, so `event.target`
+    // is the row (no `.checked`), which is why the classifier decides it.
+    const nextChecked = meta?.checked ?? event.target.checked;
     const nextDescription = toggleMarkdownTaskCheckbox(
       draft.description,
       checkboxIndex,
-      event.target.checked
+      nextChecked
     );
     if (nextDescription === draft.description) return;
 
@@ -303,6 +307,20 @@ export function TaskEditor({
         <div className="description-field">
           <div className="description-header">
             <span className="small">Description</span>
+            <Button
+              type="button"
+              variant="ghost"
+              tone="display"
+              size="sm"
+              className="description-edit-btn"
+              aria-label={isDescriptionEditing ? 'Done editing description' : 'Edit description'}
+              // Keep focus in the textarea while the button is pressed, so the
+              // click handler decides when editing ends instead of the blur.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setIsDescriptionEditing((editing) => !editing)}
+            >
+              {isDescriptionEditing ? 'Done' : 'Edit'}
+            </Button>
           </div>
           {isDescriptionEditing ? (
             <Textarea

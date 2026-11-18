@@ -435,6 +435,29 @@
   font-size: 0.9rem;
 }
 
+/* Explicit edit affordance for the description (task `88cd00e0`).
+   Acceptance-criteria rows are checkbox hit targets, so they no longer enter
+   edit mode on click; this control is the deliberate path into editing. */
+.description-edit-btn {
+  flex-shrink: 0;
+}
+
+/* Task-list rows inside the description preview are checkbox hit targets: the
+   whole row toggles the acceptance criterion instead of entering inline edit
+   mode. Scoped to the preview so comment bodies keep their current behaviour.
+   `marked` v17 emits no class on task-list items, so the row is matched by
+   the checkbox it owns rather than by a class name. */
+.description-preview .markdown-body li:has(input[type="checkbox"]) {
+  padding: 3px 6px;
+  margin: 0.1em 0;
+  border-radius: var(--si-radius-sm);
+  cursor: pointer;
+}
+
+.description-preview .markdown-body li:has(input[type="checkbox"]):hover {
+  background: var(--si-color-bg-section);
+}
+
 /* Markdown rendered content */
 .markdown-body {
   color: inherit;
