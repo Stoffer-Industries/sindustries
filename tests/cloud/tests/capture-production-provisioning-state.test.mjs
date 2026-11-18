@@ -31,6 +31,7 @@ import {
   readHealthProbeTargets,
   readFlySecretNames,
   readFlyEgressAddresses,
+  readEnvironmentApprovalGate,
   readNeonBranchEndpointFingerprints,
   resolveOperatorEvidenceInput,
   resolveOperatorEvidencePath,
@@ -1304,4 +1305,98 @@ test('an app that does not exist is distinct from an unreadable egress read', as
   // An unreadable read is never an empty inventory: "could not look" and
   // "allocated nothing" name different owners.
   assert.deepEqual(unreadable.fingerprints, []);
+});
+
+// --- The production Environment's approval gate (task f2c23e26) ---------
+//
+// The cutover's FIRST key is the `production` GitHub Environment's
+// required reviewers — the runbook says a dispatch that has not been
+// approved never starts. Nothing read the Environment's protection rules,
+// so the key could be inert while the runbook still claimed it was live.
+// These cases prove the read can go red and that it records the gate's
+// SHAPE without recording a person.
+
+test('the approval gate is read from the environment resource', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, {
+        name: 'production',
+        protection_rules: [
+          {
+            type: 'required_reviewers',
+            reviewers: [
+              { type: 'User', reviewer: { login: 'quinnstoffer' } },
+              { type: 'User', reviewer: { login: 'Stoff81' } },
+            ],
+          },
+        ],
+        deployment_branch_policy: null,
+        can_admins_bypass: false,
+      }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: { Authorization: 'Bearer token-abc' },
+      }),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.protectionRuleTypes, ['required_reviewers']);
+  assert.equal(result.requiredReviewerCount, 2);
+  assert.equal(result.canAdminsBypass, false);
+});
+
+test('the approval gate records no reviewer identity', async () => {
+  // A reviewer's login is a person's identity and no gate needs it, so the
+  // artifact must not carry one.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, {
+        protection_rules: [
+          { type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { login: 'quinnstoffer' } }] },
+        ],
+      }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: {},
+      }),
+  );
+
+  assert.equal(JSON.stringify(result).includes('quinnstoffer'), false);
+});
+
+test('an environment with no protection rules reads as a gate with no reviewer', async () => {
+  const result = await withFetch(
+    () => jsonResponse(200, { protection_rules: [] }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: {},
+      }),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.protectionRuleTypes, []);
+  assert.equal(result.requiredReviewerCount, 0);
+});
+
+test('an unreadable approval gate is reported as unreadable, not as no reviewers', async () => {
+  // "Could not look" and "looked and found none" name different owners,
+  // so the read must not collapse them.
+  const result = await withFetch(
+    () => jsonResponse(403, { error: 'forbidden' }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: {},
+      }),
+  );
+
+  assert.equal(result.captured, false);
+  assert.match(result.error, /HTTP 403/);
 });
