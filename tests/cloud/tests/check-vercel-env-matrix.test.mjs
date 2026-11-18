@@ -93,6 +93,7 @@ const GOOD_VERCEL = JSON.stringify({
           env: {
             VITE_TASKS_API_BASE_URL: 'https://tasks-api.sindustries.co.nz/api/v1',
             VITE_CONTENT_SCHEDULER_API_BASE_URL: 'https://content-scheduler-api.sindustries.co.nz/api/v1',
+            VITE_TASKS_APP_URL: 'https://tasks.sindustries.co.nz',
           },
         },
       },
@@ -109,6 +110,7 @@ const GOOD_VERCEL = JSON.stringify({
           env: {
             VITE_TASKS_API_BASE_URL: 'https://tasks-api.staging.sindustries.co.nz/api/v1',
             VITE_CONTENT_SCHEDULER_API_BASE_URL: 'https://content-scheduler-api.staging.sindustries.co.nz/api/v1',
+            VITE_TASKS_APP_URL: 'https://tasks.staging.sindustries.co.nz',
           },
         },
       },
@@ -155,6 +157,25 @@ test('synthetic tree: matrix-derived VITE_* values + customDomain pass', async (
     const { stdout, stderr } = await exec('node', [SCRIPT, dir]);
     assert.match(stdout, /vercel-env-matrix check passed/, `expected pass line on stdout, got: ${stdout}`);
     assert.equal(stderr, '', `expected empty stderr, got: ${stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('synthetic tree: missing Tasks app URL fails instead of compiling localhost fallback', async () => {
+  const bad = JSON.parse(GOOD_VERCEL);
+  delete bad.vercelProjects[0].environments.production.env.VITE_TASKS_APP_URL;
+  const dir = makeTree([
+    ['infra/cloud/hostname-matrix.json', MATRIX],
+    ['infra/cloud/vercel-env-matrix.json', JSON.stringify(bad)],
+  ]);
+  try {
+    let err;
+    try { await exec('node', [SCRIPT, dir]); } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail when Mission Control has no Tasks app URL');
+    const out = (err.stderr || '') + (err.stdout || '');
+    assert.match(out, /missing required VITE_TASKS_APP_URL for mission-control/);
+    assert.match(out, /compile a localhost fallback/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

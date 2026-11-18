@@ -155,6 +155,31 @@ Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P
 
 **The synthetic drill is gone; the `tasks-api-down` and `budget-api-down` alerts are not.** `sindustries-tasks-api-down` and `sindustries-budget-api-down` are still committed rules (`infra/cloud/observability/grafana/alerts/tasks-api-down.json`, `budget-api-down.json`) and must still fire on a real outage. What no longer exists is the *drill* that used to produce a service-scoped outage on demand: since staging is one app, `failure-inject.sh tasks-api-down` / `tasks-api-up` and `budget-api-down` / `budget-api-up` refuse (see the handover checklist below). An operator reading "the drill refuses" must not conclude the alert is dead.
 
+### Agent dimension on gateway spans
+
+The `spanmetrics` connector's agent dimension is named `agent_id`, and every
+repo-owned emitter stamps that attribute itself. The OpenClaw gateway does
+not: it exports the agent that owns a run as `openclaw.agent` and never as
+`agent_id`, so gateway model-call series reached the tenant with
+`agent_id=null` after the local-to-cloud cutover (task `a7938522`).
+
+The collector bridges the two names in the traces pipeline
+(`transform/gateway_agent_id` in `infra/otel-collector/config.yaml`): it copies
+`openclaw.agent` onto `agent_id` **only when `agent_id` is absent**, so
+repo-owned spans keep their own value. The mapping is fill-if-absent with
+`error_mode: ignore` — a missing agent dimension is a reporting gap, not a
+reason to drop the span.
+
+Two consequences an operator should know:
+
+- `openclaw.agent` is documented as optional ("the agent that owns the run when
+  known"). A gateway run outside an agent session therefore stays untagged; the
+  dimension is not guaranteed on every gateway span.
+- The gateway's own native metrics still carry `openclaw.agent` as their label.
+  Only the exported spans and the `spanmetrics` series derived from them carry
+  `agent_id`; a query against the native gateway metric filters on
+  `openclaw.agent`.
+
 ### Provisioning contract and common failures
 
 - `GRAFANA_CLOUD_INSTANCE_URL` is the Grafana stack base URL used for dashboard, folder, datasource, and alert-rule APIs. It is not a Prometheus query endpoint.

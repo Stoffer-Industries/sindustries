@@ -31,7 +31,10 @@ import {
   readHealthProbeTargets,
   readFlySecretNames,
   readFlyEgressAddresses,
+  readEnvironmentApprovalGate,
+  readNeonBranchDatabases,
   readNeonBranchEndpointFingerprints,
+  readNeonProductionDatabases,
   resolveOperatorEvidenceInput,
   resolveOperatorEvidencePath,
 } from '../../../infra/cloud/scripts/capture-production-provisioning-state.mjs';
@@ -773,6 +776,118 @@ test('no host ever reaches the artifact from the Neon endpoint read', async () =
   assert.equal(serialized.includes('super-secret-value'), false);
 });
 
+// --- The cutover's DATABASE CAPACITY (task f2c23e26)
+//
+// A Neon branch can carry several compute endpoints — a read-write
+// endpoint plus read-only replicas — and those replicas share the
+// branch's storage. They are several ADDRESSES for ONE database, so a
+// count that treats them as separate databases can pass a "three
+// databases exist" gate while offering one database to restore into.
+// The count must be over logical DATABASES.
+
+test('the database count reads the branch DATABASES, not its endpoints', async () => {
+  const calls = [];
+  const result = await withFetch(
+    (url) => {
+      calls.push(url);
+      return jsonResponse(200, {
+        databases: [{ id: 1, branch_id: 'br-1', name: 'neondb' }],
+      });
+    },
+    () => readNeonBranchDatabases('proj-1', 'br-1', 'neon-key'),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.databaseIdentities, ['br-1/neondb']);
+  assert.ok(
+    calls.some((url) => url.endsWith('/projects/proj-1/branches/br-1/databases')),
+    `the databases resource is read, got: ${calls.join(', ')}`,
+  );
+  assert.equal(
+    calls.some((url) => url.endsWith('/endpoints')),
+    false,
+    'the endpoint resource answers a different question and is not read for this count',
+  );
+});
+
+test('several endpoints on one branch are ONE database, not several capacity slots', async () => {
+  // The regression the review asked for. A production branch with a
+  // read-write endpoint and two read-only replicas serves ONE database:
+  // the replicas share the branch's storage. Counting endpoint hosts
+  // would report three, and the three-database gate would pass with a
+  // single database to restore into — the failure the gate exists to
+  // prevent, arriving at the restore instead of before the dispatch.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, {
+        databases: [{ id: 1, branch_id: 'br-prod', name: 'neondb' }],
+      }),
+    () =>
+      readNeonProductionDatabases(
+        'proj-1',
+        [{ id: 'br-prod', name: 'production' }],
+        'neon-key',
+      ),
+  );
+
+  assert.equal(result.captured, true);
+  assert.equal(result.databaseCount, 1);
+  assert.deepEqual(result.databaseIdentities, ['br-prod/neondb']);
+});
+
+test('the databases of every production branch are counted once each', async () => {
+  const result = await withFetch(
+    (url) => {
+      if (url.includes('/branches/br-cutover/')) {
+        return jsonResponse(200, {
+          databases: [
+            { id: 2, branch_id: 'br-cutover', name: 'neondb' },
+            { id: 3, branch_id: 'br-cutover', name: 'neondb_cutover' },
+          ],
+        });
+      }
+      return jsonResponse(200, {
+        databases: [{ id: 1, branch_id: 'br-prod', name: 'neondb' }],
+      });
+    },
+    () =>
+      readNeonProductionDatabases(
+        'proj-1',
+        [
+          { id: 'br-prod', name: 'production' },
+          { id: 'br-cutover', name: 'production-cutover' },
+          { id: 'br-staging', name: 'staging' },
+        ],
+        'neon-key',
+      ),
+  );
+
+  assert.equal(result.captured, true);
+  // The staging branch's databases are not production databases and are
+  // never counted, and `neondb` on two different production branches is
+  // two distinct databases.
+  assert.equal(result.databaseCount, 3);
+  assert.equal(result.branchCount, 2);
+});
+
+test('an unreadable database read is a read error, not a count of zero', async () => {
+  // A count of zero would blame the operator for a read the capture
+  // never managed, and would read as "the branch serves no database".
+  const result = await withFetch(
+    () => jsonResponse(500, { message: 'boom' }),
+    () =>
+      readNeonProductionDatabases(
+        'proj-1',
+        [{ id: 'br-prod', name: 'production' }],
+        'neon-key',
+      ),
+  );
+
+  assert.equal(result.captured, false);
+  assert.ok(result.readError.length > 0, 'the failure carries a reason');
+  assert.match(result.readError, /production/);
+});
+
 // --- The deployed platform app's configuration (task fb1240c0, AC1/AC4)
 //
 // FLY MASKS SECRETS: the Machines API returns an app's NON-SECRET
@@ -1304,4 +1419,98 @@ test('an app that does not exist is distinct from an unreadable egress read', as
   // An unreadable read is never an empty inventory: "could not look" and
   // "allocated nothing" name different owners.
   assert.deepEqual(unreadable.fingerprints, []);
+});
+
+// --- The production Environment's approval gate (task f2c23e26) ---------
+//
+// The cutover's FIRST key is the `production` GitHub Environment's
+// required reviewers — the runbook says a dispatch that has not been
+// approved never starts. Nothing read the Environment's protection rules,
+// so the key could be inert while the runbook still claimed it was live.
+// These cases prove the read can go red and that it records the gate's
+// SHAPE without recording a person.
+
+test('the approval gate is read from the environment resource', async () => {
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, {
+        name: 'production',
+        protection_rules: [
+          {
+            type: 'required_reviewers',
+            reviewers: [
+              { type: 'User', reviewer: { login: 'quinnstoffer' } },
+              { type: 'User', reviewer: { login: 'Stoff81' } },
+            ],
+          },
+        ],
+        deployment_branch_policy: null,
+        can_admins_bypass: false,
+      }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: { Authorization: 'Bearer token-abc' },
+      }),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.protectionRuleTypes, ['required_reviewers']);
+  assert.equal(result.requiredReviewerCount, 2);
+  assert.equal(result.canAdminsBypass, false);
+});
+
+test('the approval gate records no reviewer identity', async () => {
+  // A reviewer's login is a person's identity and no gate needs it, so the
+  // artifact must not carry one.
+  const result = await withFetch(
+    () =>
+      jsonResponse(200, {
+        protection_rules: [
+          { type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { login: 'quinnstoffer' } }] },
+        ],
+      }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: {},
+      }),
+  );
+
+  assert.equal(JSON.stringify(result).includes('quinnstoffer'), false);
+});
+
+test('an environment with no protection rules reads as a gate with no reviewer', async () => {
+  const result = await withFetch(
+    () => jsonResponse(200, { protection_rules: [] }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: {},
+      }),
+  );
+
+  assert.equal(result.captured, true);
+  assert.deepEqual(result.protectionRuleTypes, []);
+  assert.equal(result.requiredReviewerCount, 0);
+});
+
+test('an unreadable approval gate is reported as unreadable, not as no reviewers', async () => {
+  // "Could not look" and "looked and found none" name different owners,
+  // so the read must not collapse them.
+  const result = await withFetch(
+    () => jsonResponse(403, { error: 'forbidden' }),
+    () =>
+      readEnvironmentApprovalGate({
+        repo: 'Stoffer-Industries/sindustries',
+        environment: 'production',
+        headers: {},
+      }),
+  );
+
+  assert.equal(result.captured, false);
+  assert.match(result.error, /HTTP 403/);
 });

@@ -14,7 +14,10 @@ function fixture() {
   ] }));
   writeFileSync(join(root, 'infra/cloud/vercel-env-matrix.json'), JSON.stringify({ vercelProjects: [{
     vercelProjectId: 'prod',
-    environments: { production: { servesEnvironment: 'production', customDomain: 'app.example.com', env: { VITE_TASKS_API_BASE_URL: 'https://api.example.com/api/v1' } } },
+    environments: { production: { servesEnvironment: 'production', customDomain: 'app.example.com', env: {
+      VITE_TASKS_API_BASE_URL: 'https://api.example.com/api/v1',
+      VITE_TASKS_APP_URL: 'https://tasks.example.com',
+    } } },
   }] }));
   return root;
 }
@@ -28,8 +31,8 @@ function fetcher(bundle, assetStatus = 200) {
 test('clean production bundle passes', async () => {
   const root = fixture();
   try {
-    const result = await verifyLiveBundle({ surface: 'mission-control', repoRoot: root, url: 'https://app.example.com/', fetchImpl: fetcher('https://api.example.com/api/v1') });
-    assert.equal(result.expectedValues, 1);
+    const result = await verifyLiveBundle({ surface: 'mission-control', repoRoot: root, url: 'https://app.example.com/', fetchImpl: fetcher('https://api.example.com/api/v1 https://tasks.example.com') });
+    assert.equal(result.expectedValues, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 13,
+  "environment": "production",
+  "capturedAt": "2026-11-19T00:00:00.000Z",
+  "providers": {
+    "neon": {
+      "captured": true,
+      "organization": {
+        "id": "org-dry-grass-92330972",
+        "name": "Stoffer Industries",
+        "plan": "free"
+      },
+      "project": {
+        "id": "odd-breeze-32823209",
+        "name": "sindustries",
+        "branchCount": 2,
+        "productionBranchCount": 1,
+        "databaseCount": 3,
+        "databaseCountReadError": null
+      },
+      "branch": {
+        "id": "br-long-haze-a7wrd3ci",
+        "name": "production",
+        "state": "ready",
+        "protected": false,
+        "endpointHostFingerprints": [
+          "895576ecde3f435b"
+        ],
+        "endpointHostsReadError": null
+      },
+      "roleNames": [
+        "neondb_owner",
+        "authenticator",
+        "anonymous",
+        "authenticated",
+        "sindustries_content_scheduler",
+        "sindustries_tasks_api",
+        "sindustries_budget_api"
+      ]
+    },
+    "github": {
+      "captured": true,
+      "repository": "Stoffer-Industries/sindustries",
+      "environment": "production",
+      "secretNames": [
+        "FLY_API_TOKEN",
+        "PRODUCTION_BUDGET_API_DATABASE_URL",
+        "PRODUCTION_HEALTH_PROBE_REDIS",
+        "PRODUCTION_TASKS_API_DATABASE_URL",
+        "TASKS_API_SOURCE_DSN",
+        "BUDGET_API_SOURCE_DSN",
+        "TASKS_API_DEST_DSN",
+        "BUDGET_API_DEST_DSN",
+        "RECOVERY_TASKS_API_DSN",
+        "RECOVERY_BUDGET_API_DSN"
+      ],
+      "variableNames": [],
+      "approvalGate": {
+        "captured": true,
+        "protectionRuleTypes": [
+          "required_reviewers"
+        ],
+        "requiredReviewerCount": 2,
+        "waitTimerMinutes": null,
+        "canAdminsBypass": false
+      }
+    }
+  }
+}

@@ -29,9 +29,17 @@ Required:
   --source-dsn-file <path>   Mode-0600 file containing the source DSN.
 
 Optional:
-  --output <path>            Output JSON path. Defaults to
-                             ./artifacts/cloud-staging/inventory-${run_id}.json.
-  --environment <staging>    Environment label. Defaults to "staging".
+  --output <path>            Output JSON path. Defaults to the
+                             environment's artifact directory
+                             (./artifacts/cloud-staging/inventory-<run-id>.json
+                             or ./artifacts/cloud-production/...).
+  --environment <staging|production>
+                             Environment label. Defaults to the
+                             ENVIRONMENT environment variable, then
+                             "staging".
+  --expected-host <host>     Declares an endpoint this run may touch.
+                             Repeatable. A production run MUST declare
+                             every endpoint it touches.
   --help                     Show this help.
 
 The source DSN must be a direct PostgreSQL URL. Schema scope is explicit in
@@ -41,13 +49,14 @@ USAGE
 
 SOURCE_DSN_FILE=""
 OUTPUT_PATH=""
-ENVIRONMENT="staging"
+ENVIRONMENT="${ENVIRONMENT:-staging}"
 
 while (( $# > 0 )); do
   case "$1" in
     --source-dsn-file) SOURCE_DSN_FILE="$2"; shift 2;;
     --output)          OUTPUT_PATH="$2"; shift 2;;
     --environment)     ENVIRONMENT="$2"; shift 2;;
+    --expected-host)   cloud_db_add_expected_host "$2"; shift 2;;
     --help|-h)         usage; exit 0;;
     *)                 cloud_db_die "unknown argument: $1";;
   esac
@@ -57,7 +66,9 @@ if [[ -z "$SOURCE_DSN_FILE" ]]; then
   cloud_db_die "--source-dsn-file is required"
 fi
 
-cloud_db_assert_environment "$ENVIRONMENT"
+cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_load_expected_targets_from_env
+cloud_db_assert_production_ack
 cloud_db_assign_run_id
 
 # ---------------------------------------------------------------------------
@@ -65,10 +76,10 @@ cloud_db_assign_run_id
 # ---------------------------------------------------------------------------
 
 cloud_db_load_secret SOURCE_DSN "$SOURCE_DSN_FILE"
-cloud_db_assert_no_production_dsn "source" "$SOURCE_DSN_FILE"
+cloud_db_assert_target_dsn "source" "$SOURCE_DSN"
 
 if [[ -z "$OUTPUT_PATH" ]]; then
-  OUTPUT_PATH="./artifacts/cloud-staging/inventory-${CLOUD_DB_RUN_ID}.json"
+  OUTPUT_PATH="${CLOUD_DB_ARTIFACT_DIR}/inventory-${CLOUD_DB_RUN_ID}.json"
 fi
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
@@ -162,14 +173,16 @@ activity_json="$(
 
 python3 - "$OUTPUT_PATH" "$CLOUD_DB_RUN_ID" "$server_version" \
         "$schemas_json" "$extensions_json" "$relation_counts_json" \
-        "$prisma_state_json" "$activity_json" <<'PY'
+        "$prisma_state_json" "$activity_json" \
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
 
-out_path, run_id, server_version, schemas, extensions, relations, prisma, activity = sys.argv[1:]
+out_path, run_id, server_version, schemas, extensions, relations, prisma, activity, kind_prefix, environment = sys.argv[1:]
 
 envelope = {
   "schemaVersion": 1,
-  "kind": "cloud-staging-inventory",
+  "kind": f"{kind_prefix}-inventory",
+  "environment": environment,
   "runId": run_id,
   "serverVersion": server_version.strip(),
   "schemas": json.loads(schemas) if schemas.strip() else [],

@@ -210,6 +210,12 @@ specimen mount.
   `event.origin` against the shell's `VITE_SHELL_ORIGIN` env var
   (default `http://localhost:5174`) before applying the value.
 - Optional override via `VITE_TASKS_API_BASE_URL`.
+- The embedded Tasks application URL is configured via `VITE_TASKS_APP_URL`;
+  local development defaults to `http://localhost:5173`, while deployed builds
+  fail closed when the variable is missing. The Vercel environment matrix
+  supplies the environment-appropriate staging or production Tasks hostname,
+  so a missing variable cannot point staging at production or the iframe at
+  localhost.
 - The Flow metrics dashboard issues a single GET against the Tasks API with
   `?includeArchived=true&sort=priority&limit=10000` so the dashboard covers
   the full archive (including done/closed tasks) without per-page pagination.

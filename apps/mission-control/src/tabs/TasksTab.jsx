@@ -1,10 +1,14 @@
 import React from 'react';
 
-function tasksAppUrl() {
-  // Prefer build-time env var (set by Tiltfile / CI). Falls back to the
-  // dev default: tasks-app on 5173, mission-control on 5176. Prodlike
-  // overrides both ports via mode-env.sh.
-  return import.meta.env.VITE_TASKS_APP_URL ?? 'http://localhost:5173';
+export function tasksAppUrl(env = import.meta.env) {
+  // Prefer the explicit build-time value. Deployed builds must fail closed:
+  // a missing Vercel variable must never point staging at production or
+  // compile a localhost iframe into a deployed Mission Control bundle.
+  if (env.VITE_TASKS_APP_URL) return env.VITE_TASKS_APP_URL;
+  if (env.PROD) {
+    throw new Error('VITE_TASKS_APP_URL is required for production builds');
+  }
+  return 'http://localhost:5173';
 }
 
 /**

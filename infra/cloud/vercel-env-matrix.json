@@ -14,7 +14,8 @@
           "customDomain": "mission-control.staging.sindustries.co.nz",
           "env": {
             "VITE_TASKS_API_BASE_URL": "https://tasks-api.staging.sindustries.co.nz/api/v1",
-            "VITE_CONTENT_SCHEDULER_API_BASE_URL": "https://content-scheduler-api.staging.sindustries.co.nz/api/v1"
+            "VITE_CONTENT_SCHEDULER_API_BASE_URL": "https://content-scheduler-api.staging.sindustries.co.nz/api/v1",
+            "VITE_TASKS_APP_URL": "https://tasks.staging.sindustries.co.nz"
           }
         }
       },
@@ -30,7 +31,8 @@
           "customDomain": "mission-control.sindustries.co.nz",
           "env": {
             "VITE_TASKS_API_BASE_URL": "https://tasks-api.sindustries.co.nz/api/v1",
-            "VITE_CONTENT_SCHEDULER_API_BASE_URL": "https://content-scheduler-api.sindustries.co.nz/api/v1"
+            "VITE_CONTENT_SCHEDULER_API_BASE_URL": "https://content-scheduler-api.sindustries.co.nz/api/v1",
+            "VITE_TASKS_APP_URL": "https://tasks.sindustries.co.nz"
           }
         }
       },

@@ -41,8 +41,18 @@ Required:
   --confirm <run-id>                 Must match CLOUD_DB_RUN_ID.
 
 Optional:
-  --archive-dir <path>               Where to write archives (default
-                                     ./artifacts/cloud-staging).
+  --archive-dir <path>               Where to write archives (default:
+                                     the environment's artifact directory,
+                                     ./artifacts/cloud-staging or
+                                     ./artifacts/cloud-production).
+  --environment <staging|production> Environment label. Defaults to the
+                                     ENVIRONMENT environment variable, then
+                                     "staging". A production run also
+                                     requires CLOUD_DB_PRODUCTION_ACK=1.
+  --expected-host <host>             Declares an endpoint this run may
+                                     touch. Repeatable. A production run
+                                     MUST declare every endpoint it
+                                     touches.
   --recovery                         Also restore into a recovery DB and
                                      re-reconcile.
   --interruption <kind>              Run a single interruption drill:
@@ -69,6 +79,7 @@ RECOVERY=0
 INTERRUPTION="none"
 CLEANUP_DESTINATION_FLAG=0
 CONFIRM=""
+ENVIRONMENT="${ENVIRONMENT:-staging}"
 
 while (( $# > 0 )); do
   case "$1" in
@@ -77,6 +88,8 @@ while (( $# > 0 )); do
     --dest-tasks-dsn-file)    DEST_TASKS_FILE="$2";  shift 2;;
     --dest-budget-dsn-file)   DEST_BUDGET_FILE="$2"; shift 2;;
     --archive-dir)            ARCHIVE_DIR="$2";      shift 2;;
+    --environment)            ENVIRONMENT="$2";      shift 2;;
+    --expected-host)          cloud_db_add_expected_host "$2"; shift 2;;
     --recovery)               RECOVERY=1;            shift;;
     --interruption)           INTERRUPTION="$2";     shift 2;;
     --cleanup-destination)    CLEANUP_DESTINATION_FLAG=1; shift;;
@@ -85,6 +98,18 @@ while (( $# > 0 )); do
     --help|-h)                usage; exit 0;;
     *)                        cloud_db_die "unknown argument: $1";;
   esac
+done
+
+cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_load_expected_targets_from_env
+cloud_db_assert_production_ack
+
+# Every sub-script receives the same environment label and the same
+# declared endpoint allowlist, so no step can drift to a different
+# environment or endpoint than the one the operator authorised.
+EXPECTED_HOST_FLAGS=()
+for host in "${CLOUD_DB_TARGET_HOSTS[@]}"; do
+  EXPECTED_HOST_FLAGS+=(--expected-host "$host")
 done
 
 for v in SRC_TASKS_FILE SRC_BUDGET_FILE DEST_TASKS_FILE DEST_BUDGET_FILE CONFIRM; do
@@ -111,7 +136,7 @@ case "$INTERRUPTION" in
   *) cloud_db_die "--interruption must be dump, restore, or none" ;;
 esac
 
-ARCHIVE_DIR="${ARCHIVE_DIR:-./artifacts/cloud-staging}"
+ARCHIVE_DIR="${ARCHIVE_DIR:-$CLOUD_DB_ARTIFACT_DIR}"
 mkdir -p "$ARCHIVE_DIR"
 
 # ---------------------------------------------------------------------------
@@ -121,7 +146,9 @@ mkdir -p "$ARCHIVE_DIR"
 INVENTORY_OUT="${ARCHIVE_DIR}/inventory-${CLOUD_DB_RUN_ID}.json"
 "$(dirname "${BASH_SOURCE[0]}")/inventory.sh" \
   --source-dsn-file "$SRC_TASKS_FILE" \
-  --output "$INVENTORY_OUT" >/dev/null
+  --output "$INVENTORY_OUT" \
+  --environment "$ENVIRONMENT" \
+  "${EXPECTED_HOST_FLAGS[@]}" >/dev/null
 
 cloud_db_info "step 1 inventory complete"
 
@@ -138,6 +165,8 @@ DUMP_RESULT="$(
   "$(dirname "${BASH_SOURCE[0]}")/dump.sh" \
     --source-dsn-file "$SRC_TASKS_FILE" \
     --archive-dir "$ARCHIVE_DIR" \
+    --environment "$ENVIRONMENT" \
+    "${EXPECTED_HOST_FLAGS[@]}" \
     "${DUMP_KEEP_PARTIAL_FLAG[@]}"
 )"
 
@@ -166,7 +195,9 @@ if [[ "$CLEANUP_DESTINATION_FLAG" -eq 1 ]]; then
       --dest-tasks-dsn-file   "$DEST_TASKS_FILE" \
       --dest-budget-dsn-file  "$DEST_BUDGET_FILE" \
       --confirm "$CONFIRM" \
-      --confirm-cleanup-destination
+      --confirm-cleanup-destination \
+      --environment "$ENVIRONMENT" \
+      "${EXPECTED_HOST_FLAGS[@]}"
   )"
   cloud_db_info "step 2.5 destination cleanup complete envelope=${CLEANUP_OUT}"
 fi
@@ -186,6 +217,8 @@ RESTORE_OUT="$(
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
     --result-dir "$ARCHIVE_DIR" \
+    --environment "$ENVIRONMENT" \
+    "${EXPECTED_HOST_FLAGS[@]}" \
     "${RESTORE_INTENTIONAL_FAILURE_FLAG[@]}"
 )"
 
@@ -202,7 +235,9 @@ cloud_db_info "step 3 restore complete"
 MIGRATE_OUT="$("$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
   --tasks-dsn-file "$DEST_TASKS_FILE" \
   --budget-dsn-file "$DEST_BUDGET_FILE" \
-  --result-dir "$ARCHIVE_DIR")"
+  --result-dir "$ARCHIVE_DIR" \
+  --environment "$ENVIRONMENT" \
+  "${EXPECTED_HOST_FLAGS[@]}")"
 
 cloud_db_info "step 4 migrations complete"
 
@@ -217,6 +252,7 @@ RECONCILE_EXIT=0
   --source-budget-dsn-file "$SRC_BUDGET_FILE" \
   --dest-tasks-dsn-file    "$DEST_TASKS_FILE" \
   --dest-budget-dsn-file   "$DEST_BUDGET_FILE" \
+  --environment "$ENVIRONMENT" \
   --output "$RECONCILE_OUT" || RECONCILE_EXIT=$?
 
 if (( RECONCILE_EXIT != 0 )); then
@@ -253,7 +289,9 @@ if (( RECOVERY )); then
   DUMP2_OUT="$(
     "$(dirname "${BASH_SOURCE[0]}")/dump.sh" \
       --source-dsn-file "$DEST_TASKS_FILE" \
-      --archive-dir "$ARCHIVE_DIR"
+      --archive-dir "$ARCHIVE_DIR" \
+      --environment "$ENVIRONMENT" \
+      "${EXPECTED_HOST_FLAGS[@]}"
   )"
   DUMP2_ARCHIVE_PATH="${ARCHIVE_DIR}/$(basename "$DUMP2_OUT" .dump-result.json).dump"
   DUMP2_SHA="$(cat "${DUMP2_ARCHIVE_PATH}.sha256")"
@@ -263,12 +301,16 @@ if (( RECOVERY )); then
     --destination-dsn-file "$RECOVERY_TASKS_FILE" \
     --archive "$DUMP2_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP2_SHA" \
-    --result-dir "$ARCHIVE_DIR" >/dev/null
+    --result-dir "$ARCHIVE_DIR" \
+    --environment "$ENVIRONMENT" \
+    "${EXPECTED_HOST_FLAGS[@]}" >/dev/null
 
   "$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
     --tasks-dsn-file "$RECOVERY_TASKS_FILE" \
     --budget-dsn-file "$RECOVERY_BUDGET_FILE" \
-    --result-dir "$ARCHIVE_DIR" >/dev/null
+    --result-dir "$ARCHIVE_DIR" \
+    --environment "$ENVIRONMENT" \
+    "${EXPECTED_HOST_FLAGS[@]}" >/dev/null
 
   RECOVERY_OUT="${ARCHIVE_DIR}/reconcile-recovery-${CLOUD_DB_RUN_ID}.json"
   "$(dirname "${BASH_SOURCE[0]}")/reconcile.mjs" \
@@ -276,6 +318,7 @@ if (( RECOVERY )); then
     --source-budget-dsn-file "$DEST_BUDGET_FILE" \
     --dest-tasks-dsn-file    "$RECOVERY_TASKS_FILE" \
     --dest-budget-dsn-file   "$RECOVERY_BUDGET_FILE" \
+    --environment "$ENVIRONMENT" \
     --output "$RECOVERY_OUT" || cloud_db_die "recovery reconcile FAILED; see ${RECOVERY_OUT}"
 
   cloud_db_info "step 6 recovery complete"
@@ -289,10 +332,11 @@ OUTPUT_PATH="${OUTPUT_PATH:-${ARCHIVE_DIR}/drill-${CLOUD_DB_RUN_ID}.json}"
 
 python3 - "$OUTPUT_PATH" "$CLOUD_DB_RUN_ID" \
         "$INVENTORY_OUT" "$DUMP_OUT" "$CLEANUP_OUT" "$RESTORE_OUT" \
-        "$MIGRATE_OUT" "$RECONCILE_OUT" "$RECOVERY_OUT" <<'PY'
+        "$MIGRATE_OUT" "$RECONCILE_OUT" "$RECOVERY_OUT" \
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, os, sys, pathlib
 
-out_path, run_id, inv, dump, cleanup, restore, migrate, reconcile, recovery = sys.argv[1:]
+out_path, run_id, inv, dump, cleanup, restore, migrate, reconcile, recovery, kind_prefix, environment = sys.argv[1:]
 
 def safe_load(p):
   if not p: return None
@@ -300,9 +344,9 @@ def safe_load(p):
 
 envelope = {
   "schemaVersion": 1,
-  "kind": "cloud-staging-drill",
+  "kind": f"{kind_prefix}-drill",
   "runId": run_id,
-  "environment": "staging",
+  "environment": environment,
   "interruption": os.environ.get("CLOUD_DB_DRILL_INTERRUPTION", "none"),
   "cleanupDestination": os.path.basename(cleanup) if cleanup else None,
   "steps": {
@@ -321,4 +365,22 @@ with open(out_path, "w", encoding="utf-8") as fh:
 PY
 
 cloud_db_info "drill complete verdict=PASS run=${CLOUD_DB_RUN_ID}"
+
+# ---------------------------------------------------------------------------
+# Step 8: evidence manifest
+#
+# The manifest digests every artefact this run produced and rolls up the
+# verdicts, so one file answers "what did this run produce, and did it
+# pass". It is written last, after the drill envelope, so the envelope
+# is covered by the digest set too.
+# ---------------------------------------------------------------------------
+
+MANIFEST_OUT="$(
+  "$(dirname "${BASH_SOURCE[0]}")/manifest.sh" \
+    --artifact-dir "$ARCHIVE_DIR" \
+    --environment "$ENVIRONMENT" \
+    --run-id "$CLOUD_DB_RUN_ID"
+)"
+cloud_db_info "step 8 manifest complete envelope=${MANIFEST_OUT}"
+
 printf '%s\n' "$OUTPUT_PATH"

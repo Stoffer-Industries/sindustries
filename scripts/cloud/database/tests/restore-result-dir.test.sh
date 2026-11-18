@@ -50,11 +50,14 @@ check "restore.sh derives RESULT_PATH from RESULT_DIR" \
 check "restore.sh has no hardcoded ./artifacts/cloud-staging RESULT_PATH" \
   bash -c "! grep -qE 'RESULT_PATH=\"\./artifacts' '$RESTORE_SH'"
 
-# 2. restore.sh must accept --result-dir and default it.
+# 2. restore.sh must accept --result-dir and default it. The default is
+#    the active environment profile's artifact directory
+#    (CLOUD_DB_ARTIFACT_DIR), so a production restore does not write
+#    production artefacts into the staging directory.
 check "restore.sh accepts --result-dir" \
   grep -qE '^\s+--result-dir\)' "$RESTORE_SH"
-check "restore.sh defaults RESULT_DIR to ./artifacts/cloud-staging" \
-  grep -qE '^RESULT_DIR="\$\{RESULT_DIR:-\./artifacts/cloud-staging\}"' "$RESTORE_SH"
+check "restore.sh defaults RESULT_DIR to the profile artifact dir" \
+  grep -qE '^RESULT_DIR="\$\{RESULT_DIR:-\$CLOUD_DB_ARTIFACT_DIR\}"' "$RESTORE_SH"
 check "restore.sh creates the result dir" \
   grep -qE '^mkdir -p "\$RESULT_DIR"' "$RESTORE_SH"
 
