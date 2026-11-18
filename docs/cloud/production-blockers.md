@@ -1,11 +1,15 @@
 # Production hostname blockers — task `5cb4a8fe`
 
-**Status:** As of slice 5 (Vercel env matrix + production-blockers list), the
-**infrastructure** for production hostnames is implemented. The blockers below
-are the **operator-owned** setup steps Quinn and Tom must complete before any
-production hostname resolves to a real deployment. Until each item is closed
-the production `*.sindustries.co.nz` hostnames either fail DNS, fail TLS, or
-point at staging infrastructure.
+**Status:** The **infrastructure** for production hostnames is implemented, and
+the production hostnames are live: every per-surface production hostname
+resolves to the deployment the matrix names, presents a valid certificate and
+serves traffic. The rows still marked `Pending` below are the
+**operator-owned** setup steps Quinn and Tom must complete; each one names
+the evidence needed to close it. A row is marked `Closed` only where the
+work has landed and the evidence is recorded here or in
+[`docs/cloud/production-provisioning-readback.md`](production-provisioning-readback.md).
+Until an open row is closed, the production hostnames it covers either fail
+DNS, fail TLS, or point at staging infrastructure.
 
 This document is the AC6 evidence register. Slice 5 of the implementation PR
 references it; slice 5 marks the task as `[implementer-prs]`-eligible (subject
@@ -33,6 +37,12 @@ project allowlist, production branch, Fly app inventory, Fly-managed Upstash dat
 inventory, GitHub `production` Environment inventory, Cloudflare DNS, and
 production hostname resolution. The findings are recorded in §5 below.
 
+**Production API hostname read-back:** 2026-11-18 — the four Fly-hosted
+production surfaces were re-read (CNAME target, TLS certificate and health
+response), which closes the four §1 DNS rows and the §2 API TLS row that
+still read `Pending`. See
+[§9](#9-observed-state-live-verification-2026-11-13).
+
 ---
 
 ## Blockers (must close before production cutover)
@@ -41,13 +51,13 @@ production hostname resolution. The findings are recorded in §5 below.
 
 | Surface | Production hostname | Required DNS record | CNAME target (matrix contract) | Owner | Status |
 | --- | --- | --- | --- | --- | --- |
-| Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | — | Quinn | Pending |
+| Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | — | Quinn | Closed 2026-11-18 — the apex resolves to the Cloudflare-proxied A record and serves the SIndustries site over HTTPS (HTTP 200); the origin behind the proxy is not recorded in this repository |
 | Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | `cname.vercel-dns.com` | Quinn | Closed 2026-11-18 — CNAME added, resolves to the matrix CNAME target |
 | Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | `cname.vercel-dns.com` | Quinn | Closed 2026-11-18 — CNAME added, resolves to the matrix CNAME target |
-| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
-| Budget API | `budget-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
-| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
-| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe-production` | `sindustries-health-probe-production.fly.dev` | Quinn | Pending |
+| Tasks API | `tasks-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Closed 2026-11-18 — CNAME resolves to the matrix CNAME target and the hostname serves the production deployment; read-back in §9 |
+| Budget API | `budget-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Closed 2026-11-18 — CNAME resolves to the matrix CNAME target and the hostname serves the production deployment; read-back in §9 |
+| Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Closed 2026-11-18 — CNAME resolves to the matrix CNAME target and the hostname serves the production deployment; read-back in §9 |
+| Health probe | `health-probe.sindustries.co.nz` | CNAME → Fly app `sindustries-health-probe-production` | `sindustries-health-probe-production.fly.dev` | Quinn | Closed 2026-11-18 — CNAME resolves to the matrix CNAME target and the hostname serves the production probe app; read-back in §9 |
 | Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | — | Not applicable |
 
 **Notes:**
@@ -83,7 +93,7 @@ production hostname resolution. The findings are recorded in §5 below.
 | Surface | Production hostname | TLS strategy | Owner | Status |
 | --- | --- | --- | --- | --- |
 | Frontends (Vercel) | mission-control, tasks | Vercel issues the certificate via Let's Encrypt once a deployment carries the custom-domain alias | Quinn (trigger) | Closed 2026-11-18 — the first production deployments landed and both hostnames now present a valid Vercel-provisioned Let's Encrypt certificate (issuer Let's Encrypt CN=YR1; `mission-control.sindustries.co.nz` valid 2026-11-17 → 2027-02-15, `tasks.sindustries.co.nz` valid 2026-11-18 → 2027-02-16) |
-| APIs (Fly) | tasks-api, budget-api, content-scheduler-api, health-probe | `fly certs add <hostname>` per Fly app (Let's Encrypt via Fly) | Quinn | Pending |
+| APIs (Fly) | tasks-api, budget-api, content-scheduler-api, health-probe | `fly certs add <hostname>` per Fly app (Let's Encrypt via Fly) | Quinn | Closed 2026-11-18 — each of the four hostnames presents a valid Let's Encrypt certificate whose CN is the stable hostname itself (Let's Encrypt CN=YE2, valid 2026-11-16 → 2027-02-14); read-back in §9 |
 
 **Staging TLS state (live, verified 2026-11-13):** the four Fly staging
 hostnames present valid Let's Encrypt certificates whose CN and SAN
@@ -543,6 +553,29 @@ it asserts that every expected production value is present in the deployed
 bundle and that no staging hostname leaks into it. Both surfaces pass —
 `{"surface":"mission-control","url":"https://mission-control.sindustries.co.nz/","assets":1,"expectedValues":2}`
 and `{"surface":"tasks-app","url":"https://tasks.sindustries.co.nz/","assets":1,"expectedValues":1}`.
+
+#### Production API hostname read-back (observed 2026-11-18)
+
+The four Fly-hosted production surfaces were re-read on 2026-11-18 — CNAME
+target, TLS certificate and health response — which closes the four §1 DNS
+rows and the §2 API TLS row that still read `Pending`. The closure evidence
+is the operator read-back in
+[`docs/cloud/production-provisioning-readback.md`](production-provisioning-readback.md)
+§4: resolution read from two independent public resolvers, CNAME targets
+read back from Cloudflare, and a certificate whose CN is the stable hostname.
+The table below is an independent read-back of the same state.
+
+| Surface | Matrix contract | Observed 2026-11-18 | Consequence |
+| --- | --- | --- | --- |
+| Tasks API | CNAME → consolidated Fly app `sindustries-platform-production` → `sindustries-platform-production.fly.dev` | CNAME `sindustries-platform-production.fly.dev`; certificate CN `tasks-api.sindustries.co.nz` (Let's Encrypt CN=YE2, valid 2026-11-16 → 2027-02-14); `/health` HTTP 200 | **Closed.** The hostname resolves to the production deployment and serves production traffic |
+| Budget API | CNAME → consolidated Fly app `sindustries-platform-production` → `sindustries-platform-production.fly.dev` | CNAME `sindustries-platform-production.fly.dev`; certificate CN `budget-api.sindustries.co.nz` (Let's Encrypt CN=YE2, valid 2026-11-16 → 2027-02-14); `/health` HTTP 200 | **Closed.** Same shape as the Tasks API |
+| Content Scheduler API | CNAME → consolidated Fly app `sindustries-platform-production` → `sindustries-platform-production.fly.dev` | CNAME `sindustries-platform-production.fly.dev`; certificate CN `content-scheduler-api.sindustries.co.nz` (Let's Encrypt CN=YE2, valid 2026-11-16 → 2027-02-14); `/health` HTTP 200 | **Closed.** Same shape as the Tasks API |
+| Health probe | CNAME → Fly app `sindustries-health-probe-production` → `sindustries-health-probe-production.fly.dev` | CNAME `sindustries-health-probe-production.fly.dev`; certificate CN `health-probe.sindustries.co.nz` (Let's Encrypt CN=YE2, valid 2026-11-16 → 2027-02-14); `/healthz` HTTP 200 | **Closed.** The hostname resolves to the production probe app |
+| Apex | `sindustries.co.nz` | Resolves to the Cloudflare-proxied A record; HTTPS serves the SIndustries site (HTTP 200) | **Closed.** The apex resolves to the real deployment; the origin behind the proxy is not recorded in this repository |
+
+Every observed CNAME equals the matrix's `cnameTargets.production` value, and
+every certificate's CN is the stable hostname itself, so no production
+hostname resolves to a staging deployment.
 
 **Operator action — closed on the staging side (2026-11-13).** The
 deployments that attach the custom-domain alias and provision the
