@@ -2,7 +2,7 @@
 status: shipped
 task_id: 88cd00e0-50ee-4733-8a59-670282525eb6
 product_spec: n/a
-shipped_pr: null
+shipped_pr: 1026
 shipped_date: 2026-11-19
 ---
 
