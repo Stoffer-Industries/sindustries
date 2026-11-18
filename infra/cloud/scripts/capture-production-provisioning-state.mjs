@@ -306,6 +306,78 @@ async function fetchJson(url, init = {}) {
 }
 
 /**
+ * Is this branch part of the PRODUCTION environment?
+ *
+ * The cutover's source, destination and recovery databases must all be
+ * PRODUCTION databases. A staging database cannot serve as the
+ * destination: the harness's endpoint allowlist is operator-declared, so
+ * a staging host that is declared passes the allowlist, and production
+ * data would be restored into a staging database.
+ *
+ * The rule is a NAME rule because the capture already identifies the
+ * production branch by name. It also lets an operator put the
+ * destination and recovery databases on a DEDICATED production branch
+ * (`production-cutover`) instead of adding databases to the live one.
+ */
+export function isProductionEnvironmentBranch(name) {
+  const normalized = String(name ?? '').trim().toLowerCase();
+  return normalized === 'production' || normalized.startsWith('production-');
+}
+
+/**
+ * Read the DISTINCT databases the PRODUCTION branches serve.
+ *
+ * The production cutover needs three databases that are not the same
+ * database: the SOURCE, a DESTINATION that is empty before the restore,
+ * and a RECOVERY database that the destination's archive is restored into
+ * and reconciled against. The workflow refuses a source and a destination
+ * that share a host, and a recovery database that IS the destination
+ * would make the reconcile compare a database with itself — evidence
+ * that looks green and proves nothing.
+ *
+ * A database is identified by its endpoint host, so the count of distinct
+ * endpoint hosts across the production branches is the count of databases
+ * the cutover can choose between. It is a CAPACITY count, not a topology
+ * claim: the gate that uses it asks whether three databases exist, not
+ * which database plays which role.
+ *
+ * A branch whose endpoints cannot be read is recorded as a READ ERROR, not
+ * as a branch with no databases: an unreadable branch makes the count a
+ * lower bound, and a lower bound must never read as "the databases exist".
+ *
+ * @param {string} projectId
+ * @param {Array<{id?: string, name?: string}>} branches
+ * @param {string} apiKey
+ * @returns {Promise<{captured: boolean, hostFingerprints: string[], readError: string|null, branchCount: number}>}
+ */
+export async function readNeonProductionDatabases(projectId, branches, apiKey) {
+  const productionBranches = (Array.isArray(branches) ? branches : []).filter((branch) =>
+    isProductionEnvironmentBranch(branch?.name),
+  );
+
+  const hostFingerprints = [];
+  let readError = null;
+
+  for (const branch of productionBranches) {
+    const result = await readNeonBranchEndpointFingerprints(projectId, branch?.id, apiKey);
+    if (!result.captured) {
+      readError ??= `the endpoints of branch ${branch?.name ?? 'unknown'} could not be read: ${result.error}`;
+      continue;
+    }
+    for (const fingerprint of result.hostFingerprints) {
+      if (!hostFingerprints.includes(fingerprint)) hostFingerprints.push(fingerprint);
+    }
+  }
+
+  return {
+    captured: readError === null,
+    hostFingerprints,
+    readError,
+    branchCount: productionBranches.length,
+  };
+}
+
+/**
  * Read the FINGERPRINTS of the hosts that serve the named Neon branch.
  *
  * WHY THIS EXISTS
@@ -436,6 +508,18 @@ async function captureNeon({ projectName }) {
       apiKey,
     );
 
+    // The cutover needs three DISTINCT databases (source, an empty
+    // destination, and a recovery database to reconcile against), so the
+    // project's whole database inventory is counted — not only the
+    // production branch's. The destination and the recovery database may
+    // live on either, and a count that only saw the production branch
+    // would report a shortfall that provisioning could not fix.
+    const productionDatabases = await readNeonProductionDatabases(
+      project.id,
+      branchesResponse?.branches ?? [],
+      apiKey,
+    );
+
     return {
       captured: true,
       organization: {
@@ -454,6 +538,22 @@ async function captureNeon({ projectName }) {
         allowedIpFingerprints: fingerprintIpSet(allowedIps),
         protectedBranchesOnly: settings?.allowed_ips?.protected_branches_only === true,
         blockPublicConnections: settings?.block_public_connections === true,
+        // How many branches the project has, and how many DISTINCT
+        // databases those branches serve. The count is what tells the
+        // readiness gate whether the destination and recovery databases
+        // exist yet — six DSN secrets can be registered against databases
+        // that do not exist, and the cutover would fail at the restore.
+        branchCount: Array.isArray(branchesResponse?.branches)
+          ? branchesResponse.branches.length
+          : 0,
+        productionBranchCount: productionDatabases.branchCount,
+        databaseCount: productionDatabases.hostFingerprints.length,
+        // A read that failed is recorded as a REASON, never as a count of
+        // zero databases: an unreadable branch makes this a lower bound,
+        // and a lower bound must not read as "the databases exist".
+        databaseCountReadError: productionDatabases.captured
+          ? null
+          : productionDatabases.readError,
       },
       branch: {
         id: productionBranch.id,
@@ -1482,7 +1582,7 @@ async function main(argv) {
     // still claimed a dispatch cannot start unapproved. Rule types and a
     // count only — a reviewer's login is a person's identity and no gate
     // needs it.
-    schemaVersion: 11,
+    schemaVersion: 12,
     environment: 'production',
     capturedAt,
     providers: { neon, fly, github, cloudflare },
