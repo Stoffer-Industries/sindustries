@@ -83,6 +83,21 @@ const REQUIRED_WITHOUT_RECOVERY = CUTOVER_DSN_SECRET_NAMES.filter(
   (name) => !name.startsWith('RECOVERY_'),
 );
 
+/**
+ * The artifact schema version whose `databaseCount` counts DISTINCT
+ * LOGICAL DATABASES.
+ *
+ * The capture counted Neon ENDPOINT HOSTS up to schema version 12, and a
+ * Neon branch can carry several compute endpoints — a read-write endpoint
+ * plus read-only replicas — that share one branch's storage. Under that
+ * count, one database could read as three capacity slots, so an artifact
+ * captured before version 13 cannot answer whether three databases exist:
+ * its number means something else. Refusing the stale artifact is the
+ * difference between a gate that measures the right thing and one that
+ * measures a proxy and believes it.
+ */
+export const DATABASE_IDENTITY_SCHEMA_VERSION = 13;
+
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -224,6 +239,14 @@ export function evaluateCutoverReadiness(state) {
           'the Neon project could not be read, so the destination and recovery databases cannot be proven to exist — a cutover that restores into a database that does not exist fails after the dump, with the source already quiesced',
       }),
     );
+  } else if (state?.schemaVersion !== DATABASE_IDENTITY_SCHEMA_VERSION) {
+    rows.push(
+      row('neon.cutover-database-capacity', 'unmet', {
+        owner: 'Quinn (operator)',
+        label: 'The cutover\'s source, destination and recovery databases exist',
+        reason: `the artifact was captured under schema version ${JSON.stringify(state?.schemaVersion ?? null)}, whose \`databaseCount\` counts Neon ENDPOINT HOSTS rather than distinct databases — one branch can serve one database behind several read-replica endpoints — so its count cannot answer this gate. Re-capture the provisioning state with the current capture script`,
+      }),
+    );
   } else if (neon.project?.databaseCountReadError) {
     rows.push(
       row('neon.cutover-database-capacity', 'unmet', {
@@ -242,7 +265,7 @@ export function evaluateCutoverReadiness(state) {
         row('neon.cutover-database-capacity', 'unmet', {
           owner: 'Quinn (operator)',
           label: 'The cutover\'s source, destination and recovery databases exist',
-          reason: `the production Neon environment serves ${databaseCount} database(s); the cutover needs ${requiredDatabases} distinct ones — the source, a destination that is empty before the restore, and a recovery database to reconcile against — so ${requiredDatabases - databaseCount} database(s) must be created (on the \`production\` branch, or on a branch named \`production-*\`) before the DSN secrets can point at databases that exist`,
+          reason: `the production Neon environment serves ${databaseCount} distinct database(s); the cutover needs ${requiredDatabases} — the source, a destination that is empty before the restore, and a recovery database to reconcile against — so ${requiredDatabases - databaseCount} more database(s) must be created before the DSN secrets can point at databases that exist. A read replica of an existing branch does not count: it is another address for the SAME database. The destination and the recovery database must also sit behind an endpoint OTHER than the source's, because the dispatch refuses a destination behind the source's host (exit 10) — create a branch named \`production-*\` and put them there`,
         }),
       );
     } else {
@@ -250,7 +273,7 @@ export function evaluateCutoverReadiness(state) {
         row('neon.cutover-database-capacity', 'met', {
           owner: 'Quinn (operator)',
           label: 'The cutover\'s source, destination and recovery databases exist',
-          reason: `the production Neon environment serves ${databaseCount} database(s), so the source, the destination and the recovery database can be three distinct databases`,
+          reason: `the production Neon environment serves ${databaseCount} distinct database(s), so the source, the destination and the recovery database can be three distinct databases — the destination and the recovery database must still be behind an endpoint other than the source's, or the dispatch refuses them (exit 10)`,
         }),
       );
     }

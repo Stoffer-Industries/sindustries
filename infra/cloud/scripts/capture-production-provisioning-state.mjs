@@ -325,6 +325,54 @@ export function isProductionEnvironmentBranch(name) {
 }
 
 /**
+ * Read the LOGICAL DATABASES the named Neon branch serves.
+ *
+ * The Neon v2 API exposes a branch's DATABASES at
+ * `/projects/{id}/branches/{branch_id}/databases`. The branch's ENDPOINTS
+ * are a different resource answering a different question: an endpoint is
+ * an ADDRESS, and one branch may carry several of them — a read-write
+ * endpoint plus read-only replicas — all serving the SAME storage. Only
+ * the databases resource answers "how many databases can the cutover
+ * choose between".
+ *
+ * A database is identified by its BRANCH and its NAME. The name alone is
+ * not unique — `neondb` exists on every branch of the project — so the
+ * branch is part of the identity.
+ *
+ * @param {string} projectId
+ * @param {string} branchId
+ * @param {string} apiKey
+ * @returns {Promise<{captured: boolean, databaseIdentities?: string[], error?: string}>}
+ */
+export async function readNeonBranchDatabases(projectId, branchId, apiKey) {
+  if (!projectId || !branchId) {
+    return {
+      captured: false,
+      error: 'no Neon project or branch id was supplied, so no database could be read',
+    };
+  }
+  const headers = { Authorization: `Bearer ${apiKey}` };
+  let response;
+  try {
+    response = await fetchJson(
+      `${NEON_API_BASE}/projects/${projectId}/branches/${branchId}/databases`,
+      { headers },
+    );
+  } catch (error) {
+    return { captured: false, error: error.message };
+  }
+  const databases = Array.isArray(response?.databases) ? response.databases : [];
+  const databaseIdentities = [];
+  for (const database of databases) {
+    const name = typeof database?.name === 'string' ? database.name.trim() : '';
+    if (!name) continue;
+    const identity = `${branchId}/${name}`;
+    if (!databaseIdentities.includes(identity)) databaseIdentities.push(identity);
+  }
+  return { captured: true, databaseIdentities };
+}
+
+/**
  * Read the DISTINCT databases the PRODUCTION branches serve.
  *
  * The production cutover needs three databases that are not the same
@@ -335,43 +383,53 @@ export function isProductionEnvironmentBranch(name) {
  * would make the reconcile compare a database with itself — evidence
  * that looks green and proves nothing.
  *
- * A database is identified by its endpoint host, so the count of distinct
- * endpoint hosts across the production branches is the count of databases
- * the cutover can choose between. It is a CAPACITY count, not a topology
- * claim: the gate that uses it asks whether three databases exist, not
- * which database plays which role.
+ * A DATABASE is the unit, and a Neon database is identified by its BRANCH
+ * and its NAME — never by the endpoint that serves it. A branch can carry
+ * several compute endpoints (a read-write endpoint plus read-only
+ * replicas), and those replicas share the branch's storage: they are
+ * several ADDRESSES for ONE database. Counting endpoint hosts therefore
+ * turns one logical database into several capacity slots, and a project
+ * with one production branch and two read replicas would pass a "three
+ * databases exist" gate while offering one database to restore into —
+ * the exact failure the gate exists to prevent, arriving later and
+ * further from the operator than it should.
  *
- * A branch whose endpoints cannot be read is recorded as a READ ERROR, not
+ * The count is a CAPACITY count, not a topology claim: the gate that uses
+ * it asks whether three databases exist, not which database plays which
+ * role.
+ *
+ * A branch whose databases cannot be read is recorded as a READ ERROR, not
  * as a branch with no databases: an unreadable branch makes the count a
  * lower bound, and a lower bound must never read as "the databases exist".
  *
  * @param {string} projectId
  * @param {Array<{id?: string, name?: string}>} branches
  * @param {string} apiKey
- * @returns {Promise<{captured: boolean, hostFingerprints: string[], readError: string|null, branchCount: number}>}
+ * @returns {Promise<{captured: boolean, databaseIdentities: string[], databaseCount: number, readError: string|null, branchCount: number}>}
  */
 export async function readNeonProductionDatabases(projectId, branches, apiKey) {
   const productionBranches = (Array.isArray(branches) ? branches : []).filter((branch) =>
     isProductionEnvironmentBranch(branch?.name),
   );
 
-  const hostFingerprints = [];
+  const databaseIdentities = [];
   let readError = null;
 
   for (const branch of productionBranches) {
-    const result = await readNeonBranchEndpointFingerprints(projectId, branch?.id, apiKey);
+    const result = await readNeonBranchDatabases(projectId, branch?.id, apiKey);
     if (!result.captured) {
-      readError ??= `the endpoints of branch ${branch?.name ?? 'unknown'} could not be read: ${result.error}`;
+      readError ??= `the databases of branch ${branch?.name ?? 'unknown'} could not be read: ${result.error}`;
       continue;
     }
-    for (const fingerprint of result.hostFingerprints) {
-      if (!hostFingerprints.includes(fingerprint)) hostFingerprints.push(fingerprint);
+    for (const identity of result.databaseIdentities) {
+      if (!databaseIdentities.includes(identity)) databaseIdentities.push(identity);
     }
   }
 
   return {
     captured: readError === null,
-    hostFingerprints,
+    databaseIdentities,
+    databaseCount: databaseIdentities.length,
     readError,
     branchCount: productionBranches.length,
   };
@@ -547,7 +605,7 @@ async function captureNeon({ projectName }) {
           ? branchesResponse.branches.length
           : 0,
         productionBranchCount: productionDatabases.branchCount,
-        databaseCount: productionDatabases.hostFingerprints.length,
+        databaseCount: productionDatabases.databaseCount,
         // A read that failed is recorded as a REASON, never as a count of
         // zero databases: an unreadable branch makes this a lower bound,
         // and a lower bound must not read as "the databases exist".
@@ -1582,7 +1640,17 @@ async function main(argv) {
     // still claimed a dispatch cannot start unapproved. Rule types and a
     // count only — a reviewer's login is a person's identity and no gate
     // needs it.
-    schemaVersion: 12,
+    // Version 13: `project.databaseCount` counts DISTINCT LOGICAL
+    // DATABASES (a branch and a database name), not distinct endpoint
+    // hosts. Version 12 counted hosts, and a Neon branch can carry
+    // several compute endpoints — a read-write endpoint plus read-only
+    // replicas — that share one branch's storage, so one database could
+    // be counted as three capacity slots and a "three databases exist"
+    // gate could pass with a single database on the branch. An artifact
+    // captured under version 12 therefore cannot answer that gate: its
+    // count means something else. The cutover readiness checker refuses
+    // a version 12 artifact rather than reading its count as capacity.
+    schemaVersion: 13,
     environment: 'production',
     capturedAt,
     providers: { neon, fly, github, cloudflare },
