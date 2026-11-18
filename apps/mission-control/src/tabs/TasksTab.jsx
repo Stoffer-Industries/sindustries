@@ -1,11 +1,13 @@
 import React from 'react';
 
 export function tasksAppUrl(env = import.meta.env) {
-  // Prefer the explicit build-time value. Production must never fall back to
-  // localhost: a missing Vercel variable would otherwise compile a broken
-  // iframe into the deployed Mission Control bundle.
+  // Prefer the explicit build-time value. Deployed builds must fail closed:
+  // a missing Vercel variable must never point staging at production or
+  // compile a localhost iframe into a deployed Mission Control bundle.
   if (env.VITE_TASKS_APP_URL) return env.VITE_TASKS_APP_URL;
-  if (env.PROD) return 'https://tasks.sindustries.co.nz';
+  if (env.PROD) {
+    throw new Error('VITE_TASKS_APP_URL is required for production builds');
+  }
   return 'http://localhost:5173';
 }
 

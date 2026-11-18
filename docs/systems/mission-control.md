@@ -112,19 +112,18 @@ oriented (the W27 SPEC's flow 1 contract).
 ## Known gaps
 
 The W28 audit flagged two structural issues with the current
-implementation that are tracked but not yet fixed.
+implementation; H1 is resolved below and M4 remains tracked.
 
-### H1 — hard-coded Tasks-app iframe URL (resolved for dev)
+### H1 — hard-coded Tasks-app iframe URL (resolved)
 
-The dev-side half of H1 (no `VITE_TASKS_APP_URL` override) was
-resolved by `8d19ac2 refactor(tasks): update tasks app URL handling to
-use environment variable` (Tue Jul 7 2026). The iframe URL is now
-derived from `import.meta.env.VITE_TASKS_APP_URL ?? 'http://localhost:5173'`
-(`apps/mission-control/src/tabs/TasksTab.jsx`), with the Tilt dev
-environment exporting the variable per `infra/tilt/Tiltfile`. The
-single-URL production deploy half of H1 (no reverse proxy or bundled
-mount in place today) remains open — see [Production](#production) for
-the option set.
+The iframe URL is resolved from the explicit `VITE_TASKS_APP_URL` build
+variable (`apps/mission-control/src/tabs/TasksTab.jsx`). Local development
+falls back to `http://localhost:5173`, but deployed builds fail closed when
+the variable is absent rather than silently selecting a host. The Vercel
+environment matrix supplies the environment-appropriate Tasks hostname for
+staging (`https://tasks.staging.sindustries.co.nz`) and production
+(`https://tasks.sindustries.co.nz`), preventing a missing staging value from
+embedding production data or a deployed bundle from embedding localhost.
 
 ### M4 — no sandbox, referrerpolicy, or CSP frame-ancestors
 
