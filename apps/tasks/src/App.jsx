@@ -46,10 +46,6 @@ export function App() {
   const initialStatusSelection = ['open', 'ready', 'doing', 'acceptance'];
   const [filters, setFilters] = useState({ q: '', status: initialStatusSelection.join(','), priority: '', tag: '', assignee: '', taskType: '', workflowGateOwner: '', attentionOwner: '', includeArchived: false });
   const { actor: currentUser } = useCurrentUser();
-  // Tracks whether the discovery-queue default landing view has been applied
-  // for this session. Once applied (or explicitly cleared), the user owns the
-  // filter and we never re-apply the default. See the default-effect below.
-  const [defaultWorkflowGateApplied, setDefaultWorkflowGateApplied] = useState(false);
   const [selectedStatuses, setSelectedStatuses] = useState(() => new Set(initialStatusSelection));
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
   const statusMenuRef = useRef(null);
@@ -104,21 +100,11 @@ export function App() {
     setSelectedStatuses((current) => (current.size === 0 ? new Set(['open']) : current));
   }, [view]);
 
-  // Default landing view: surface the signed-in user's outstanding workflow
-  // gates on first mount of the backlog view. Replaces the prior "default
-  // open" behaviour for signed-in users — normal handoffs are routed through
-  // explicit workflow gates, not the generic `Blocked` indicator. Anonymous
-  // visitors see no default. Once applied, the user's explicit choices take
-  // over (toggling the chip off or clearing the filter persists).
-  useEffect(() => {
-    if (view !== 'backlog') return;
-    if (defaultWorkflowGateApplied) return;
-    if (!currentUser) return;
-    setFilters((current) => (current.workflowGateOwner
-      ? current
-      : { ...current, workflowGateOwner: currentUser }));
-    setDefaultWorkflowGateApplied(true);
-  }, [view, currentUser, defaultWorkflowGateApplied]);
+  // No ownership filter is applied on load. The backlog opens on the normal
+  // active task set, including tasks that have no workflow gate or
+  // attention-owner handoff. `MY GATES` and `NEEDS MY ATTENTION` are
+  // explicit, user-selected filters only — silently defaulting either one
+  // hides ordinary work from signed-in users on first load.
 
   // Persist view to localStorage
   useEffect(() => {

@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.jsx';
+import { fetchAuthSession } from './tasksApi.ts';
 
 // Mock the auth-session call so App mount doesn't drain a tasks-fetch mock
 // in tests that rely on `vi.fn().mockResolvedValueOnce(...)` chains. The
@@ -687,5 +688,136 @@ describe('tasks ui', () => {
     const archivedCard = await screen.findByTestId('card-archived-task');
     expect(archivedCard).toHaveClass('si-card--archived');
     expect(within(archivedCard).getByRole('button', { name: 'Archived task' })).toBeInTheDocument();
+  });
+
+  // AC1-AC4: the backlog must not silently apply an ownership filter on load.
+  // A signed-in user sees the normal active task set, including tasks with no
+  // workflow gate or attention-owner handoff. `MY GATES` and
+  // `NEEDS MY ATTENTION` stay available as explicit, user-selected filters.
+  describe('default backlog view', () => {
+    // Let the auth session resolve and any effect-driven refetch settle, so a
+    // filter applied by a default effect would be observable here.
+    async function settleSignedInSession() {
+      const gatesChip = screen.getByRole('button', { name: 'My outstanding workflow gates' });
+      await waitFor(() => expect(gatesChip).toBeEnabled());
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      return gatesChip;
+    }
+
+    function taskListCalls(fetchMock) {
+      return fetchMock.mock.calls.filter(([url]) => String(url).includes('/tasks?'));
+    }
+
+    it('does not apply a workflow-gate or attention filter on first load', async () => {
+      fetchAuthSession.mockResolvedValueOnce({ displayName: 'Rowan' });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ data: [mockTask({ id: 'plain-task', title: 'Plain task' })] }) });
+
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<App />);
+      fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+
+      const gatesChip = await settleSignedInSession();
+
+      expect(gatesChip).toHaveAttribute('aria-pressed', 'false');
+      expect(gatesChip).toHaveTextContent('MY GATES: ANYONE');
+
+      const attentionChip = screen.getByRole('button', { name: 'Tasks that need my attention' });
+      expect(attentionChip).toHaveAttribute('aria-pressed', 'false');
+      expect(attentionChip).toHaveTextContent('NEEDS MY ATTENTION: ANYONE');
+
+      const calls = taskListCalls(fetchMock);
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [url] of calls) {
+        expect(String(url)).not.toContain('workflowGateOwner=');
+        expect(String(url)).not.toContain('attentionOwner=');
+      }
+    });
+
+    it('shows tasks with no workflow gate or attention-owner handoff to a signed-in user', async () => {
+      fetchAuthSession.mockResolvedValueOnce({ displayName: 'Rowan' });
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [
+            mockTask({ id: 'ungated-task', title: 'Ordinary active task', workflowGates: [], attentionOwners: [] }),
+            mockTask({
+              id: 'gated-task',
+              title: 'Task with a gate',
+              workflowGates: [{ type: 'tech_design', owner: 'Rowan', state: 'outstanding' }]
+            })
+          ]
+        })
+      });
+
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<App />);
+      fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+
+      await screen.findByRole('list', { name: 'Backlog list' });
+      await settleSignedInSession();
+
+      expect(screen.getByRole('button', { name: 'Ordinary active task' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Task with a gate' })).toBeInTheDocument();
+    });
+
+    it('applies the MY GATES filter only when explicitly selected', async () => {
+      fetchAuthSession.mockResolvedValueOnce({ displayName: 'Rowan' });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ data: [mockTask({ id: 'plain-task', title: 'Plain task' })] }) });
+
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<App />);
+      fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+
+      const gatesChip = await settleSignedInSession();
+      expect(gatesChip).toHaveTextContent('MY GATES: ANYONE');
+
+      fireEvent.click(gatesChip);
+
+      await waitFor(() => {
+        const gatedCall = fetchMock.mock.calls.find(([url]) => String(url).includes('workflowGateOwner=Rowan'));
+        expect(gatedCall?.[0]).toContain('workflowGateOwner=Rowan');
+      });
+      expect(gatesChip).toHaveAttribute('aria-pressed', 'true');
+      expect(gatesChip).toHaveTextContent('MY GATES: ROWAN');
+
+      // The chip stays a toggle: selecting it again clears the filter.
+      fireEvent.click(gatesChip);
+      await waitFor(() => expect(gatesChip).toHaveAttribute('aria-pressed', 'false'));
+    });
+
+    it('applies the NEEDS MY ATTENTION filter only when explicitly selected', async () => {
+      fetchAuthSession.mockResolvedValueOnce({ displayName: 'Rowan' });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ data: [mockTask({ id: 'plain-task', title: 'Plain task' })] }) });
+
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<App />);
+      fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+
+      await settleSignedInSession();
+
+      const attentionChip = screen.getByRole('button', { name: 'Tasks that need my attention' });
+      expect(attentionChip).toHaveTextContent('NEEDS MY ATTENTION: ANYONE');
+
+      fireEvent.click(attentionChip);
+
+      await waitFor(() => {
+        const attentionCall = fetchMock.mock.calls.find(([url]) => String(url).includes('attentionOwner=Rowan'));
+        expect(attentionCall?.[0]).toContain('attentionOwner=Rowan');
+      });
+      expect(attentionChip).toHaveAttribute('aria-pressed', 'true');
+      expect(attentionChip).toHaveTextContent('NEEDS MY ATTENTION: ROWAN');
+    });
   });
 });

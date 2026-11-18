@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-11-19 (description hit targets, task 88cd00e0)
+**Last updated:** 2026-11-19 (default backlog view, task 05cc9c02)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 
@@ -59,6 +59,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
 1. User applies filters: status, priority, assignee, tag, due date range, text search
 2. List updates to show matching tasks only
 3. Filter state is preserved in URL query parameters
+4. No ownership filter is applied on load. The backlog opens on the normal active task set, including tasks that have no workflow gate or attention-owner handoff. `MY GATES` and `NEEDS MY ATTENTION` are explicit, user-selected filters only — silently defaulting either one hides ordinary work from signed-in users on first load.
 
 ### 5. Assign a task
 1. User selects an assignee from a dropdown of reserved values (Tom, Quinn, Rowan, Lox, Ivy)
@@ -99,7 +100,9 @@ detail-view composer land in WS3.
    "My outstanding gates" (issues `?workflowGateOwner=<self>`) and
    "Needs my attention" (issues `?attentionOwner=<self>`). Both filters
    combine via AND with the existing status/priority/assignee filters
-   and persist in the URL query string.
+   and persist in the URL query string. Both are opt-in: the backlog applies
+   neither on load, so a signed-in user sees every active task until they
+   select a chip.
 4. PATCH affordances for attention owners expose a clearly named
    "Attention needed from" editor (not "Blocked by"). Replacing the
    list replaces the full set; clearing all rows leaves every other
@@ -236,6 +239,7 @@ new planes is scoped separately.
 | Markdown checkbox toggle + description wrapping | `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/src/utils/markdown.test.js` |
 | Description hit targets (AC row toggles, modifier-click opens the URL, plain text still edits) | `apps/tasks/src/components/MarkdownContent.test.jsx`, `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/test/e2e/description-edit-targets.spec.js` |
 | Filter by priority | `test/e2e/priority-filter.spec.js` |
+| Backlog default view — no ownership filter on load; `MY GATES` / `NEEDS MY ATTENTION` apply only when explicitly selected | `apps/tasks/src/App.test.jsx` (`default backlog view`) |
 | Approvals sub-section (session login/logout and current actor, optimistic approve/revoke, per-row pending + rollback errors, immutable states, avatars/tooltips, empty states) | `apps/tasks/src/components/ApprovalsSection.test.jsx`, `apps/tasks/src/tasksApi.test.ts`, `apps/tasks/test/e2e/approval-checkboxes.spec.js` |
 
 ---
