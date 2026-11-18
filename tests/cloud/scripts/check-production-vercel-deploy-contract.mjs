@@ -43,6 +43,15 @@ if (scopeSecretRefs !== 1) {
 if (/toms-projects-[a-z0-9]+/.test(workflow)) {
   errors.push('workflow must not hardcode a Vercel team scope');
 }
+
+// The Vercel CLI resolves the app directory as join(repoRoot, project.rootDirectory),
+// where repoRoot is the linked directory. A step that runs the CLI from inside
+// the app path therefore resolves <app path>/<rootDirectory>, which does not
+// exist, and the build dies with `spawn sh ENOENT`. The CLI must run at the
+// repository root and let the project's rootDirectory select the app.
+if (/working-directory:\s*\$\{\{\s*steps\.facts\.outputs\.app_path\s*\}\}/.test(workflow)) {
+  errors.push('the Vercel CLI must run at the repository root, not inside the app path: the project rootDirectory is applied to the linked directory');
+}
 if (/mission-control\.sindustries\.co\.nz|tasks\.sindustries\.co\.nz|sindustries-mission-control|sindustries-tasks/.test(workflow)) {
   errors.push('workflow must not duplicate project names or production hostnames from the matrices');
 }

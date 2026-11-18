@@ -112,8 +112,13 @@ jobs:
         run: npm install --global vercel@${{ env.VERCEL_CLI_VERSION }}
 
       - name: Bind production project and pull environment
+        # The Vercel CLI resolves the app directory as
+        # join(repoRoot, project.rootDirectory), where repoRoot is the linked
+        # directory. These steps therefore run at the repository root: the
+        # production projects set rootDirectory to the app path, so running
+        # the CLI from inside that path resolves a directory that does not
+        # exist and the build dies with `spawn sh ENOENT`.
         if: steps.gate.outputs.enabled == 'true'
-        working-directory: ${{ steps.facts.outputs.app_path }}
         run: |
           set -euo pipefail
           vercel link --yes --project "${{ steps.facts.outputs.project }}" --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
@@ -121,13 +126,11 @@ jobs:
 
       - name: Build production candidate
         if: steps.gate.outputs.enabled == 'true'
-        working-directory: ${{ steps.facts.outputs.app_path }}
         run: vercel build --target="$VERCEL_TARGET" --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
 
       - name: Deploy production candidate
         if: steps.gate.outputs.enabled == 'true'
         id: candidate
-        working-directory: ${{ steps.facts.outputs.app_path }}
         run: |
           set -euo pipefail
           candidate_url="$(vercel deploy --prebuilt --target="$VERCEL_TARGET" --skip-domain --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN")"

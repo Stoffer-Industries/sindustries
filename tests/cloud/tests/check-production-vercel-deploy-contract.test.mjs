@@ -45,3 +45,20 @@ test('contract check rejects a lone Vercel scope export and a hardcoded team sco
     assert.match(`${failure.stdout}${failure.stderr}`, /must be exported together|must not hardcode/);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
+
+test('contract check rejects running the Vercel CLI inside the app path', async () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'vercel-deploy-contract-cwd-'));
+  try {
+    mkdirSync(join(fixture, '.github/workflows'), { recursive: true });
+    const source = readFileSync(join(root, workflowPath), 'utf8')
+      .replace(
+        '      - name: Build production candidate\n        if: steps.gate.outputs.enabled == \'true\'\n',
+        '      - name: Build production candidate\n        if: steps.gate.outputs.enabled == \'true\'\n        working-directory: ${{ steps.facts.outputs.app_path }}\n'
+      );
+    writeFileSync(join(fixture, workflowPath), source);
+    let failure;
+    try { await exec('node', [script, fixture]); } catch (error) { failure = error; }
+    assert.ok(failure);
+    assert.match(`${failure.stdout}${failure.stderr}`, /must run at the repository root/);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
