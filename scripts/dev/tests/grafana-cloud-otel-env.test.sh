@@ -232,6 +232,70 @@ for dim in agent_id llm.model; do
 done
 
 # ---------------------------------------------------------------------------
+# 3b. Gateway spans must carry the agent dimension the dashboards query.
+#
+# The OpenClaw gateway exports the agent that owns a run as `openclaw.agent`
+# and never as `agent_id`, so gateway model-call series used to arrive in the
+# tenant with `agent_id=null` (task a7938522, AC4). The collector maps the
+# attribute the gateway does send onto the dimension name this repo queries.
+# Without the mapping the cutover is complete but the agent dimension is
+# empty, and no dashboard can break model usage down by agent.
+# ---------------------------------------------------------------------------
+
+if grep -qE '^\s*transform/gateway_agent_id:' "$COLLECTOR_CONFIG"; then
+  ok "collector config declares the transform/gateway_agent_id processor"
+else
+  fail "collector config does not declare the transform/gateway_agent_id processor"
+fi
+
+if grep -q 'set(attributes\["agent_id"\], attributes\["openclaw.agent"\])' "$COLLECTOR_CONFIG"; then
+  ok "gateway agent mapping copies openclaw.agent onto agent_id"
+else
+  fail "gateway agent mapping does not copy openclaw.agent onto agent_id"
+fi
+
+# Fill-if-absent: repo-owned emitters stamp agent_id themselves and their
+# value must not be overwritten by the gateway mapping.
+if grep -q 'attributes\["agent_id"\] == nil' "$COLLECTOR_CONFIG"; then
+  ok "gateway agent mapping is fill-if-absent"
+else
+  fail "gateway agent mapping overwrites an existing agent_id"
+fi
+
+# The mapping must run on the traces pipeline, before the spanmetrics
+# connector derives the series that carry the agent dimension.
+traces_processors="$(python3 - "$COLLECTOR_CONFIG" <<'PY'
+import re, sys
+
+lines = open(sys.argv[1]).read().splitlines()
+current = None
+processors = {}
+for line in lines:
+    m = re.match(r"^    ([A-Za-z0-9/_-]+):\s*$", line)
+    if m and m.group(1) in ("traces", "metrics", "metrics/spanmetrics"):
+        current = m.group(1)
+        processors[current] = []
+        continue
+    if current is None:
+        continue
+    if re.match(r"^    [A-Za-z0-9/_-]+:", line):
+        current = None
+        continue
+    m = re.match(r"^      processors:\s*\[(.*)\]\s*$", line)
+    if m:
+        processors[current] = [p.strip() for p in m.group(1).split(",") if p.strip()]
+
+print(",".join(processors.get("traces", [])))
+PY
+)"
+
+if [[ "$traces_processors" == *transform/gateway_agent_id* ]]; then
+  ok "traces pipeline runs the gateway agent mapping"
+else
+  fail "traces pipeline does not run the gateway agent mapping (got: $traces_processors)"
+fi
+
+# ---------------------------------------------------------------------------
 # 4. The compose service must hand the collector its export environment.
 # ---------------------------------------------------------------------------
 
