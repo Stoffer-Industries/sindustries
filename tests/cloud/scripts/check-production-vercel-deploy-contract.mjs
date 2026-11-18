@@ -23,6 +23,26 @@ requirePattern(/--skip-domain/, 'candidate must stay off the stable domain until
 requirePattern(/vercel promote/, 'candidate must be promoted explicitly');
 requirePattern(/verify-live-vercel-bundle\.mjs/, 'workflow must verify the promoted live bundle');
 requirePattern(/openssl x509 -noout -checkhost/, 'workflow must verify the stable hostname certificate');
+
+// The Vercel CLI resolves a project from the VERCEL_ORG_ID/VERCEL_PROJECT_ID
+// env pair when either is exported: `getLinkedProject` fails outright when
+// only one of them is set, and ignores the .vercel/project.json link a
+// previous `vercel link` wrote. A workflow that binds by the matrix-owned
+// project name must therefore export neither of the reserved names and let
+// the link file carry the resolved ids.
+const envExports = [...workflow.matchAll(/^\s+(VERCEL_[A-Z0-9_]+):/gm)].map((match) => match[1]);
+const orgExported = envExports.includes('VERCEL_ORG_ID');
+const projectExported = envExports.includes('VERCEL_PROJECT_ID');
+if (orgExported !== projectExported) {
+  errors.push('VERCEL_ORG_ID and VERCEL_PROJECT_ID must be exported together or not at all: the Vercel CLI rejects a lone scope env var and ignores the linked project');
+}
+const scopeSecretRefs = [...workflow.matchAll(/secrets\.VERCEL_ORG_ID/g)].length;
+if (scopeSecretRefs !== 1) {
+  errors.push('the team scope must be read from the VERCEL_ORG_ID repository secret exactly once');
+}
+if (/toms-projects-[a-z0-9]+/.test(workflow)) {
+  errors.push('workflow must not hardcode a Vercel team scope');
+}
 if (/mission-control\.sindustries\.co\.nz|tasks\.sindustries\.co\.nz|sindustries-mission-control|sindustries-tasks/.test(workflow)) {
   errors.push('workflow must not duplicate project names or production hostnames from the matrices');
 }
