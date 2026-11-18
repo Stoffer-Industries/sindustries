@@ -1,0 +1,239 @@
+# .github/workflows/cloud-production-db-cutover.yml
+#
+# Production data cutover: the same transfer + restore harness that the
+# staging drill runs, against the production environment (task f2c23e26).
+#
+# workflow_dispatch only — never on push, never on schedule. A production
+# data move is an operator action with a deliberate window, not something
+# a merge can start.
+#
+# THREE INDEPENDENT KEYS must all line up before a single row moves:
+#
+#   1. The `production` GitHub Environment. Its reviewers are the
+#      approval gate; a dispatch that has not been approved cannot start.
+#   2. The typed confirmation `MIGRATE PRODUCTION` in the dispatch input.
+#      This is what sets CLOUD_DB_PRODUCTION_ACK=1 for the run — the
+#      second key the scripts require. A typo cannot start a run.
+#   3. The declared endpoints. The operator names every host the run may
+#      touch; the scripts refuse any endpoint that is not on that list.
+#      The production Neon database is named `neondb`, the same as
+#      staging, so the endpoint list is the only thing that can identify
+#      the target.
+#
+# Required secrets (configured on the `production` GitHub Environment):
+#   * TASKS_API_SOURCE_DSN    — read-only DSN for source tasks_api
+#   * BUDGET_API_SOURCE_DSN   — read-only DSN for source budget_api
+#   * TASKS_API_DEST_DSN      — owner DSN for destination tasks_api
+#   * BUDGET_API_DEST_DSN     — owner DSN for destination budget_api
+#   * RECOVERY_TASKS_API_DSN  — owner DSN for the recovery database
+#                               (only required when --recovery)
+#   * RECOVERY_BUDGET_API_DSN — owner DSN for the recovery database
+#                               (only required when --recovery)
+#
+# Runbook: docs/runbooks/production-data-migration-restore.md
+
+name: cloud-production-db-cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: 'Type MIGRATE PRODUCTION to confirm this run may move production data.'
+        required: true
+        type: string
+      source_host:
+        description: 'host[:port] of the source endpoint (must match the source DSN exactly).'
+        required: true
+        type: string
+      destination_host:
+        description: 'host[:port] of the destination endpoint (must match the destination DSN exactly).'
+        required: true
+        type: string
+      recovery:
+        description: 'Also restore the migrated data into a recovery database and re-reconcile (AC3 evidence).'
+        required: false
+        type: boolean
+        default: false
+      interruption:
+        description: 'Run a single interruption drill: dump, restore, or none. A non-none value leaves a partial artefact in place for forensic inspection.'
+        required: false
+        type: string
+        default: 'none'
+      cleanup_destination:
+        description: 'DESTRUCTIVE: drop the tasks_api and budget_api schemas in the destination before restoring. Only for a destination a previous failed run left behind. Two-key auth: this input plus CLEANUP_DESTINATION=1, which the drill script also requires.'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-production-database
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    name: Production cutover
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 90
+    env:
+      ENVIRONMENT: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install repository deps
+        run: npm ci
+
+      - name: Install PostgreSQL 18 client and shellcheck
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-18 shellcheck
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      - name: Lint cloud database scripts
+        run: npm run lint:cloud-db
+
+      - name: Write DSNs to mode-0600 files
+        env:
+          TASKS_SOURCE: ${{ secrets.TASKS_API_SOURCE_DSN }}
+          BUDGET_SOURCE: ${{ secrets.BUDGET_API_SOURCE_DSN }}
+          TASKS_DEST: ${{ secrets.TASKS_API_DEST_DSN }}
+          BUDGET_DEST: ${{ secrets.BUDGET_API_DEST_DSN }}
+          TASKS_RECOVERY: ${{ secrets.RECOVERY_TASKS_API_DSN }}
+          BUDGET_RECOVERY: ${{ secrets.RECOVERY_BUDGET_API_DSN }}
+        run: |
+          set -euo pipefail
+          required=(TASKS_SOURCE BUDGET_SOURCE TASKS_DEST BUDGET_DEST)
+          if [[ "${{ inputs.recovery }}" == "true" ]]; then
+            required+=(TASKS_RECOVERY BUDGET_RECOVERY)
+          fi
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "Required production environment secret for $name is missing or empty" >&2
+              exit 11
+            fi
+          done
+          mkdir -p "$RUNNER_TEMP/cloud-production-secrets"
+          chmod 0700 "$RUNNER_TEMP/cloud-production-secrets"
+          for pair in \
+              "tasks-source:tasks.dsn:$TASKS_SOURCE" \
+              "budget-source:budget.dsn:$BUDGET_SOURCE" \
+              "tasks-dest:tasks-dest.dsn:$TASKS_DEST" \
+              "budget-dest:budget-dest.dsn:$BUDGET_DEST"; do
+            name="${pair%%:*}"
+            rest="${pair#*:}"
+            file="${rest%%:*}"
+            value="${rest#*:}"
+            printf '%s' "$value" > "$RUNNER_TEMP/cloud-production-secrets/$name-$file"
+            chmod 0600 "$RUNNER_TEMP/cloud-production-secrets/$name-$file"
+          done
+          if [[ "${{ inputs.recovery }}" == "true" ]]; then
+            printf '%s' "$TASKS_RECOVERY"  > "$RUNNER_TEMP/cloud-production-secrets/tasks-recovery.dsn"
+            printf '%s' "$BUDGET_RECOVERY" > "$RUNNER_TEMP/cloud-production-secrets/budget-recovery.dsn"
+            chmod 0600 "$RUNNER_TEMP/cloud-production-secrets/tasks-recovery.dsn"
+            chmod 0600 "$RUNNER_TEMP/cloud-production-secrets/budget-recovery.dsn"
+          fi
+
+      - name: Pre-flight safety checks
+        env:
+          CONFIRM: ${{ inputs.confirm_production }}
+          SOURCE_HOST: ${{ inputs.source_host }}
+          DESTINATION_HOST: ${{ inputs.destination_host }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM" != "MIGRATE PRODUCTION" ]]; then
+            echo "confirm_production must be exactly: MIGRATE PRODUCTION" >&2
+            exit 10
+          fi
+          if [[ "$ENVIRONMENT" != "production" ]]; then
+            echo "ENVIRONMENT must be production" >&2
+            exit 10
+          fi
+          if [[ -z "$SOURCE_HOST" || -z "$DESTINATION_HOST" ]]; then
+            echo "source_host and destination_host are required" >&2
+            exit 10
+          fi
+          if [[ "$SOURCE_HOST" == "$DESTINATION_HOST" ]]; then
+            echo "source_host and destination_host must differ" >&2
+            exit 10
+          fi
+          command -v pg_dump >/dev/null
+          command -v pg_restore >/dev/null
+          psql --version | grep -q '18\.'
+
+      - name: Run the cutover
+        env:
+          CONFIRM: ${{ inputs.confirm_production }}
+          SOURCE_HOST: ${{ inputs.source_host }}
+          DESTINATION_HOST: ${{ inputs.destination_host }}
+          CLOUD_DB_DRILL_INTERRUPTION: ${{ inputs.interruption }}
+          CLOUD_DB_PRODUCTION_ACK: ${{ inputs.confirm_production == 'MIGRATE PRODUCTION' && '1' || '' }}
+          CLEANUP_DESTINATION: ${{ inputs.cleanup_destination == true && '1' || '' }}
+        run: |
+          set -euo pipefail
+          SEC="$RUNNER_TEMP/cloud-production-secrets"
+          RECOVERY_FLAG=""
+          if [[ "${{ inputs.recovery }}" == "true" ]]; then
+            RECOVERY_FLAG="--recovery"
+          fi
+          CLEANUP_FLAG=""
+          if [[ "${{ inputs.cleanup_destination }}" == "true" ]]; then
+            CLEANUP_FLAG="--cleanup-destination"
+          fi
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 3)"
+          export CLOUD_DB_RUN_ID="$RUN_ID"
+          ./scripts/cloud/database/drill.sh \
+            --source-tasks-dsn-file  "$SEC/tasks-source-tasks.dsn" \
+            --source-budget-dsn-file "$SEC/budget-source-budget.dsn" \
+            --dest-tasks-dsn-file    "$SEC/tasks-dest-tasks-dest.dsn" \
+            --dest-budget-dsn-file   "$SEC/budget-dest-budget-dest.dsn" \
+            --environment production \
+            --expected-host "$SOURCE_HOST" \
+            --expected-host "$DESTINATION_HOST" \
+            --confirm "$RUN_ID" \
+            --interruption "${{ inputs.interruption }}" \
+            $RECOVERY_FLAG \
+            $CLEANUP_FLAG \
+            --archive-dir "$RUNNER_TEMP/cloud-production-artifacts" \
+            --output      "$RUNNER_TEMP/cloud-production-artifacts/drill-final.json"
+
+      - name: Upload redacted evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-production-db-cutover-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/cloud-production-artifacts/*.json
+            ${{ runner.temp }}/cloud-production-artifacts/*.sha256
+            ${{ runner.temp }}/cloud-production-artifacts/*.log
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Fail if reconcile FAILED
+        run: |
+          set -euo pipefail
+          f="$RUNNER_TEMP/cloud-production-artifacts/reconcile-*.json"
+          if compgen -G "$f" >/dev/null; then
+            latest=$(ls -1t $f | head -n1)
+            verdict=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).verdict || 'unknown')" "$latest")
+            if [[ "$verdict" != "PASS" ]]; then
+              echo "reconcile verdict=$verdict; failing the workflow" >&2
+              exit 20
+            fi
+          fi
