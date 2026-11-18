@@ -1,8 +1,43 @@
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "environment": "production",
   "capturedAt": "2026-11-19T00:00:00.000Z",
   "providers": {
+    "neon": {
+      "captured": true,
+      "organization": {
+        "id": "org-dry-grass-92330972",
+        "name": "Stoffer Industries",
+        "plan": "free"
+      },
+      "project": {
+        "id": "odd-breeze-32823209",
+        "name": "sindustries",
+        "branchCount": 2,
+        "productionBranchCount": 1,
+        "databaseCount": 3,
+        "databaseCountReadError": null
+      },
+      "branch": {
+        "id": "br-long-haze-a7wrd3ci",
+        "name": "production",
+        "state": "ready",
+        "protected": false,
+        "endpointHostFingerprints": [
+          "895576ecde3f435b"
+        ],
+        "endpointHostsReadError": null
+      },
+      "roleNames": [
+        "neondb_owner",
+        "authenticator",
+        "anonymous",
+        "authenticated",
+        "sindustries_content_scheduler",
+        "sindustries_tasks_api",
+        "sindustries_budget_api"
+      ]
+    },
     "github": {
       "captured": true,
       "repository": "Stoffer-Industries/sindustries",

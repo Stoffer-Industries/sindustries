@@ -18,8 +18,11 @@
 //   5. An Environment whose admins may bypass the gate fails.
 //   6. An unreadable GitHub provider fails.
 //   7. An unreadable approval gate fails.
-//   8. The checker's secret list matches the workflow's secret reads.
-//   9. The CLI exits 0 on a ready artifact and 1 on an unready one.
+//   8. A Neon project with too few databases fails and names the shortfall.
+//   9. An unreadable Neon provider fails.
+//   10. An incomplete Neon inventory fails rather than counting a lower bound.
+//  11. The checker's secret list matches the workflow's secret reads.
+//  12. The CLI exits 0 on a ready artifact and 1 on an unready one.
 //
 // Run with: node --test tests/cloud/tests/check-production-cutover-readiness.test.mjs
 
@@ -62,7 +65,7 @@ test('the unmodified artifact passes every gate', () => {
   assert.equal(ok, true);
   assert.deepEqual(
     rows.map((entry) => entry.status),
-    ['met', 'met', 'met'],
+    ['met', 'met', 'met', 'met'],
   );
 });
 
@@ -162,6 +165,51 @@ test('an unreadable approval gate fails', () => {
   const gate = gateFor(rows, 'github.production-approval-gate');
   assert.equal(gate.status, 'unmet');
   assert.match(gate.reason, /could not be read/i);
+});
+
+test('a Neon project with too few databases fails and names the shortfall', () => {
+  // The live production project served ONE database on 2026-11-19: the
+  // source. The cutover needs three distinct databases — the source, a
+  // destination that is empty before the restore, and a recovery database
+  // to reconcile against. A secret can be registered against a database
+  // that does not exist, and the workflow's secret check would pass it,
+  // so the shortfall has to be caught here or the cutover fails at the
+  // RESTORE — after the dump, with the source already quiesced.
+  const state = loadFixture();
+  state.providers.neon.project.databaseCount = 1;
+
+  const { ok, rows } = evaluateCutoverReadiness(state);
+  assert.equal(ok, false);
+  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  assert.equal(gate.status, 'unmet');
+  assert.match(gate.reason, /1 database\(s\)/);
+  assert.match(gate.reason, /2 database\(s\) must be created/);
+});
+
+test('an unreadable Neon provider fails rather than passing vacuously', () => {
+  const state = loadFixture();
+  state.providers.neon = { captured: false, error: 'HTTP 403' };
+
+  const { ok, rows } = evaluateCutoverReadiness(state);
+  assert.equal(ok, false);
+  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  assert.equal(gate.status, 'unmet');
+  assert.match(gate.reason, /could not be read/i);
+});
+
+test('an incomplete Neon inventory fails rather than counting a lower bound', () => {
+  // One branch of the project could not be read. The count that came back
+  // is a LOWER BOUND, so it must not read as "the databases exist".
+  const state = loadFixture();
+  state.providers.neon.project.databaseCount = 3;
+  state.providers.neon.project.databaseCountReadError =
+    'the endpoints of branch staging could not be read: HTTP 500';
+
+  const { ok, rows } = evaluateCutoverReadiness(state);
+  assert.equal(ok, false);
+  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  assert.equal(gate.status, 'unmet');
+  assert.match(gate.reason, /LOWER BOUND/);
 });
 
 test("the checker's secret list matches the workflow's secret reads", () => {

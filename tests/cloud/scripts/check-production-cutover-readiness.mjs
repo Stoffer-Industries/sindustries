@@ -30,6 +30,18 @@
 // artifact (names, flags and counts only — never a value) and decides
 // whether the cutover MAY be dispatched.
 //
+// A THIRD fact sat in the same position. A cutover DSN secret can be
+// REGISTERED against a database that does not exist: the workflow's
+// secret check asks only whether the secret is non-empty, so a DSN
+// pointing at a database that was never created passes it and fails at
+// the RESTORE — after the dump, with the source already quiesced. The
+// cutover also needs three DISTINCT databases (the source, a destination
+// that is empty before the restore, and a recovery database the
+// destination's archive is restored into and reconciled against), and
+// the destination and the recovery database must be PRODUCTION
+// databases: the endpoint allowlist is operator-declared, so a staging
+// host that is declared passes it.
+//
 // It fails closed. An environment that could not be read is an OPEN gate,
 // not a silent pass: "not captured" is not "fine".
 //
@@ -181,6 +193,64 @@ export function evaluateCutoverReadiness(state) {
           owner: 'Quinn (operator)',
           label: 'The `production` Environment refuses an unapproved dispatch',
           reason: `the production Environment requires ${reviewerCount} reviewer(s) and admins cannot bypass the gate`,
+        }),
+      );
+    }
+  }
+
+  // --- Gate 4: the cutover's databases exist -----------------------------
+  //
+  // Six DSN secrets can be REGISTERED against databases that do not
+  // exist. The workflow only checks that the secrets are non-empty, so a
+  // secret pointing at a database that was never created passes the
+  // secret check and fails at the RESTORE — after the dump, after the
+  // source has been quiesced, with the operator mid-procedure.
+  //
+  // The cutover needs three DISTINCT databases: the source, a
+  // destination that is empty before the restore, and a recovery
+  // database that the destination's archive is restored into and
+  // reconciled against. A recovery database that IS the destination
+  // would make the reconcile compare a database with itself: evidence
+  // that looks green and proves nothing.
+  const neon = state?.providers?.neon;
+  const requiredDatabases = 3;
+
+  if (!neon || neon.captured !== true) {
+    rows.push(
+      row('neon.cutover-database-capacity', 'unmet', {
+        owner: 'Quinn (operator)',
+        label: 'The cutover\'s source, destination and recovery databases exist',
+        reason:
+          'the Neon project could not be read, so the destination and recovery databases cannot be proven to exist — a cutover that restores into a database that does not exist fails after the dump, with the source already quiesced',
+      }),
+    );
+  } else if (neon.project?.databaseCountReadError) {
+    rows.push(
+      row('neon.cutover-database-capacity', 'unmet', {
+        owner: 'Quinn (operator)',
+        label: 'The cutover\'s source, destination and recovery databases exist',
+        reason: `the Neon database inventory could not be read completely (${neon.project.databaseCountReadError}), so the database count is a LOWER BOUND and the destination and recovery databases cannot be proven to exist`,
+      }),
+    );
+  } else {
+    const databaseCount = Number.isFinite(neon.project?.databaseCount)
+      ? neon.project.databaseCount
+      : 0;
+
+    if (databaseCount < requiredDatabases) {
+      rows.push(
+        row('neon.cutover-database-capacity', 'unmet', {
+          owner: 'Quinn (operator)',
+          label: 'The cutover\'s source, destination and recovery databases exist',
+          reason: `the production Neon environment serves ${databaseCount} database(s); the cutover needs ${requiredDatabases} distinct ones — the source, a destination that is empty before the restore, and a recovery database to reconcile against — so ${requiredDatabases - databaseCount} database(s) must be created (on the \`production\` branch, or on a branch named \`production-*\`) before the DSN secrets can point at databases that exist`,
+        }),
+      );
+    } else {
+      rows.push(
+        row('neon.cutover-database-capacity', 'met', {
+          owner: 'Quinn (operator)',
+          label: 'The cutover\'s source, destination and recovery databases exist',
+          reason: `the production Neon environment serves ${databaseCount} database(s), so the source, the destination and the recovery database can be three distinct databases`,
         }),
       );
     }
