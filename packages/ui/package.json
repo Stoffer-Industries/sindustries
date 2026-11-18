@@ -35,7 +35,8 @@
     }
   },
   "dependencies": {
-    "@sindustries/design-tokens": "file:../design-tokens"
+    "@sindustries/design-tokens": "file:../design-tokens",
+    "cn": "0.2.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",

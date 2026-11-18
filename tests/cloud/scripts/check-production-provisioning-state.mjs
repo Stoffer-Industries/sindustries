@@ -19,8 +19,9 @@
 // value) with `infra/cloud/scripts/capture-production-provisioning-state.mjs`,
 // and this checker decides, per Slice D step, whether the gate is met. It
 // fails closed: an artifact that was not captured, a provider that could not
-// be read, a missing app, an empty IP allowlist, a missing source secret, or
-// a value-shaped credential in the artifact all fail with a named reason.
+// be read, a missing app, an incomplete Neon connectivity control, a missing
+// source secret, or a value-shaped credential in the artifact all fail with a
+// named reason.
 //
 // The expected names are read from the environment manifest — the single
 // source of truth — so the state cannot be green against a production
@@ -58,6 +59,7 @@ import {
 } from '../../../infra/cloud/platform/egress-allowlist-facts.mjs';
 import {
   OPERATOR_EVIDENCE_SLOTS,
+  isNeonFreePlan,
   operatorEvidenceCoverage,
   operatorEvidenceRecorded,
   operatorEvidenceSummary,
@@ -76,7 +78,7 @@ const DEFAULTS = (() => {
 })();
 
 /** The artifact shape this checker understands. */
-export const SUPPORTED_SCHEMA_VERSION = 9;
+export const SUPPORTED_SCHEMA_VERSION = 10;
 
 /** The operator obligation gate → the evidence slot that closes it. */
 const OPERATOR_EVIDENCE_SLOT_BY_GATE = new Map(
@@ -130,6 +132,14 @@ const OPERATOR_REQUIRED_ROWS = [
     label: 'Staging/dev denial proof',
     reason:
       'The separation proof needs a connection attempt from a staging and a dev credential; the capture never touches credentials. The operator records it in the AC2 evidence artifact.',
+  },
+  {
+    gate: 'neon.service-role-scope',
+    step: 'Slice D step 2',
+    owner: 'Quinn (operator)',
+    label: 'Production service-role scope proof',
+    reason:
+      'The Neon provider role inventory proves one role exists per schema but does not expose SQL grants. The operator records the read-back proving each service role is confined to its own schema.',
   },
   {
     gate: 'health.production-probe-interval',
@@ -473,6 +483,63 @@ export function evaluateProvisioningState(state, options = {}) {
 
   // --- Neon: AC2 — branch, service roles, connectivity restriction -------
 
+  // Neon Free cannot express an IP allowlist. The production organisation
+  // deliberately remains on Free, so the accepted AC2 control is the
+  // isolation the live branch can actually enforce: one service role per
+  // production schema, each confined to that schema, plus refused staging
+  // and dev connections. The decision is a recorded human acceptance; the
+  // role inventory and denial proof are machine- and operator-read facts.
+  //
+  // These facts are computed before the provider gate so the allowlist and
+  // egress gates below can distinguish "not configured" from "not the
+  // selected control". A Free-plan artifact with no accepted replacement
+  // must still fail closed.
+  const neonProvider = providers.neon ?? {};
+  const neonPlan = String(neonProvider.organization?.plan ?? '');
+  const neonRoleNames = asArray(neonProvider.roleNames);
+  const neonServiceRoles = neonRoleNames.filter((name) => !NEON_DEFAULT_ROLES.has(name));
+  const neonMissingSchemas = expectedSchemas.filter(
+    (schema) =>
+      !neonServiceRoles.some((role) => role.toLowerCase().includes(schema.toLowerCase())),
+  );
+  const neonDuplicateSchemas = expectedSchemas.filter(
+    (schema) =>
+      neonServiceRoles.filter((role) => role.toLowerCase().includes(schema.toLowerCase())).length > 1,
+  );
+  const neonUnexpectedServiceRoles = neonServiceRoles.filter(
+    (role) =>
+      !expectedSchemas.some((schema) => role.toLowerCase().includes(schema.toLowerCase())),
+  );
+  const neonServiceRolesSatisfied =
+    expectedSchemas.length > 0 &&
+    neonMissingSchemas.length === 0 &&
+    neonDuplicateSchemas.length === 0 &&
+    neonUnexpectedServiceRoles.length === 0;
+  const neonSeparationCoverage = operatorEvidenceCoverage(
+    state.operatorEvidence,
+    'neonSeparationDenialProof',
+    expectedTargetsForSlot('neonSeparationDenialProof'),
+  );
+  const neonRoleScopeCoverage = operatorEvidenceCoverage(
+    state.operatorEvidence,
+    'neonServiceRoleScopeProof',
+    expectedTargetsForSlot('neonServiceRoleScopeProof'),
+  );
+  const neonDecisionCoverage = operatorEvidenceCoverage(
+    state.operatorEvidence,
+    'neonFreeTierIsolationAcceptance',
+    expectedTargetsForSlot('neonFreeTierIsolationAcceptance'),
+  );
+  const neonDecisionControl = state.operatorEvidence?.neonFreeTierIsolationAcceptance?.control;
+  const neonDecisionControlKnown = neonDecisionControl === 'schema-scoped-service-roles';
+  const neonFreeTierIsolationAccepted =
+    isNeonFreePlan(neonPlan) &&
+    neonServiceRolesSatisfied &&
+    neonRoleScopeCoverage.covered &&
+    neonSeparationCoverage.covered &&
+    neonDecisionCoverage.covered &&
+    neonDecisionControlKnown;
+
   if (providerCaptured('neon')) {
     const neon = providers.neon;
     const branch = neon.branch ?? {};
@@ -505,12 +572,9 @@ export function evaluateProvisioningState(state, options = {}) {
       );
     }
 
-    const roleNames = asArray(neon.roleNames);
-    const serviceRoles = roleNames.filter((name) => !NEON_DEFAULT_ROLES.has(name));
-    const missingSchemas = expectedSchemas.filter(
-      (schema) =>
-        !serviceRoles.some((role) => role.toLowerCase().includes(schema.toLowerCase())),
-    );
+    const roleNames = neonRoleNames;
+    const serviceRoles = neonServiceRoles;
+    const missingSchemas = neonMissingSchemas;
     if (expectedSchemas.length === 0) {
       // Comparing the observed roles against no expected schema proves
       // nothing, so this gate cannot be met by an empty expectation set.
@@ -534,6 +598,24 @@ export function evaluateProvisioningState(state, options = {}) {
           })`,
         }),
       );
+    } else if (neonDuplicateSchemas.length > 0) {
+      add(
+        row('neon.service-roles', 'unmet', {
+          step: 'Slice D step 1',
+          owner: 'Quinn (operator)',
+          label: 'Production Neon service roles',
+          reason: `more than one service role matches schema(s): ${neonDuplicateSchemas.join(', ')}; the contract is exactly one role per schema`,
+        }),
+      );
+    } else if (neonUnexpectedServiceRoles.length > 0) {
+      add(
+        row('neon.service-roles', 'unmet', {
+          step: 'Slice D step 1',
+          owner: 'Quinn (operator)',
+          label: 'Production Neon service roles',
+          reason: `unexpected service role(s) do not map to a production schema: ${neonUnexpectedServiceRoles.join(', ')}`,
+        }),
+      );
     } else {
       add(
         row('neon.service-roles', 'met', {
@@ -545,9 +627,66 @@ export function evaluateProvisioningState(state, options = {}) {
       );
     }
 
+    if (isNeonFreePlan(neonPlan)) {
+      const missing = [];
+      if (!neonServiceRolesSatisfied) {
+        missing.push('exactly one service role per production schema is not proven');
+      }
+      if (!neonRoleScopeCoverage.covered) {
+        missing.push(
+          'the service-role scope proof is not recorded against every required schema',
+        );
+      }
+      if (!neonSeparationCoverage.covered) {
+        missing.push(
+          'the staging/dev denial proof is not recorded against every required surface',
+        );
+      }
+      if (!neonDecisionCoverage.covered) {
+        missing.push(
+          "Tom's Free-tier connectivity-restriction acceptance is not recorded against every required surface",
+        );
+      }
+      if (!neonDecisionControlKnown) {
+        missing.push(
+          "the acceptance does not name the `schema-scoped-service-roles` control",
+        );
+      }
+      add(
+        row('neon.connectivity-restriction', neonFreeTierIsolationAccepted ? 'met' : 'unmet', {
+          step: 'Slice D step 2',
+          owner: 'Tom (acceptance) / Quinn (operator)',
+          label: 'Neon Free-tier connectivity restriction',
+          reason: neonFreeTierIsolationAccepted
+            ? 'Neon is on the Free plan, so no IP allowlist is asserted; the accepted control is one schema-scoped service role per production schema, with the role-scope read-back recorded and staging and dev connections to the production branch denied'
+            : `the Neon organization is on the Free plan, where IP Allow is unavailable, and the accepted replacement control is not complete: ${missing.join('; ')}`,
+        }),
+      );
+    } else {
+      add(
+        row('neon.connectivity-restriction', 'not-applicable', {
+          step: 'Slice D step 2',
+          owner: 'Tom (acceptance) / Quinn (operator)',
+          label: 'Neon Free-tier connectivity restriction',
+          reason:
+            `the Neon organization plan is ${neon.organization?.plan ?? 'unknown'}, so the Free-tier replacement control does not apply; the IP-allowlist path decides connectivity`,
+        }),
+      );
+    }
+
     const project = neon.project ?? {};
     const allowedIpCount = Number(project.allowedIpCount ?? 0);
-    if (!Number.isFinite(allowedIpCount) || allowedIpCount < 1) {
+    if (neonFreeTierIsolationAccepted) {
+      add(
+        row('neon.ip-allowlist', 'not-applicable', {
+          step: 'Slice D step 2',
+          owner: 'Tom (acceptance) / Quinn (operator)',
+          label: 'Neon IP allowlist',
+          reason:
+            'the Neon organization deliberately remains on the Free plan, where IP Allow is unavailable; no IP allowlist is asserted. The accepted connectivity control is schema-scoped service-role isolation with staging and dev connections denied',
+        }),
+      );
+    } else if (!Number.isFinite(allowedIpCount) || allowedIpCount < 1) {
       add(
         row('neon.ip-allowlist', 'unmet', {
           step: 'Slice D step 2',
@@ -652,7 +791,17 @@ export function evaluateProvisioningState(state, options = {}) {
       }
     }
 
-    if (productionApps.length === 0) {
+    if (neonFreeTierIsolationAccepted) {
+      add(
+        row(sourceGate, 'not-applicable', {
+          step: 'Slice D step 2',
+          owner: 'Tom (acceptance) / Quinn (operator)',
+          label,
+          reason:
+            'the Free-tier replacement control does not use a Neon IP allowlist, so Fly app-scoped egress addresses are not required for AC2. Any allocation already made for the abandoned allowlist path is a cleanup candidate, not an open AC2 gate',
+        }),
+      );
+    } else if (productionApps.length === 0) {
       add(
         row(sourceGate, 'unmet', {
           step: 'Slice D step 2',
@@ -704,7 +853,17 @@ export function evaluateProvisioningState(state, options = {}) {
     const allowlistCount = Number(neonProject.allowedIpCount ?? 0);
     const sourceGateUnmet = unallocated.length > 0 || unreadable.length > 0;
 
-    if (sourceGateUnmet) {
+    if (neonFreeTierIsolationAccepted) {
+      add(
+        row(matchGate, 'not-applicable', {
+          step: 'Slice D step 2',
+          owner: 'Tom (acceptance) / Quinn (operator)',
+          label: 'Neon allowlist matches the allocated source addresses',
+          reason:
+            'the Free-tier replacement control does not use a Neon IP allowlist, so there is no allowlist/source-address match to decide',
+        }),
+      );
+    } else if (sourceGateUnmet) {
       add(
         row(matchGate, 'unmet', {
           step: 'Slice D step 2',
@@ -2333,12 +2492,20 @@ async function main(argv) {
       (entry) => operatorGates.has(entry.gate) && entry.status === 'met',
     ).length;
     const operatorOpen = rows.filter((entry) => entry.status === 'operator-required').length;
-    stdout.write(
-      `All ${machineMet} machine-verifiable gate(s) are met; ` +
-        `${operatorBacked} operator obligation(s) are backed by a recorded read-back` +
-        (operatorOpen > 0 ? `; ${operatorOpen} still need operator evidence.` : '.') +
-        '\n',
-    );
+    // A not-applicable gate is neither met nor unmet — the IP-allowlist
+    // gates on a Free-plan account are the case in point. Leaving them out
+    // of the summary would let "all gates are met" read as if the
+    // allowlist had been proven, so the count is stated explicitly.
+    const notApplicable = rows.filter((entry) => entry.status === 'not-applicable').length;
+    const summaryParts = [
+      `All ${machineMet} machine-verifiable gate(s) are met`,
+      `${operatorBacked} operator obligation(s) are backed by a recorded read-back`,
+    ];
+    if (operatorOpen > 0) summaryParts.push(`${operatorOpen} still need operator evidence`);
+    if (notApplicable > 0) {
+      summaryParts.push(`${notApplicable} gate(s) are not applicable (not met)`);
+    }
+    stdout.write(`${summaryParts.join('; ')}.\n`);
     return 0;
   }
 

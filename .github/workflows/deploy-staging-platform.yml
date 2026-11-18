@@ -25,26 +25,26 @@
 # in one step: the app is created if it is absent and the secrets are
 # registered with it, so the app is never deployable without them.
 #
-# Two transitional guards remain, both removed at cutover:
+# Two transition-era safeguards remain, but the facts behind them changed
+# after the 2026-11-07 cutover:
 #
 #   1. DEPLOY_OPT_IN — the deploy itself is off until the staging
 #      environment variable STAGING_PLATFORM_DEPLOY_ENABLED is "true".
-#      Merging this workflow must not silently cut staging over: the
-#      platform's auto-post worker starts consuming the BullMQ queue as
-#      soon as the platform is deployed, while
-#      sindustries-auto-post-worker-staging is still running. The cutover
-#      order is in docs/runbooks/platform-consolidation-rollback.md §3
-#      Step 1 — scale the old worker app to zero BEFORE the platform
-#      deploy, not after. The operator path (infra/cloud/bin/deploy
-#      platform) is gated by the same variable, so the opt-in cannot be
-#      bypassed.
+#      Its original purpose was to prevent the platform's auto-post worker
+#      and the retired per-service worker from consuming the same BullMQ
+#      queue during cutover. Task 219fb673 destroyed the four per-service
+#      staging apps before the platform was deployed, so the platform's
+#      worker is now the only consumer. The opt-in remains as a deliberate
+#      deployment control on every staging deploy. The operator path
+#      (infra/cloud/bin/deploy platform) is gated by the same variable, so
+#      it cannot be bypassed.
 #
-#   2. STABLE DNS — the three stable staging hostnames do not resolve until
-#      the CNAMEs move (task 5cb4a8fe, blocked on a Cloudflare
-#      Zone:DNS:Edit token only Tom holds). The smoke check therefore
-#      verifies the services through the provider hostname's path-prefix
-#      routes, and reports the stable hostname as UNREACHABLE rather than
-#      failing when DNS has not landed yet.
+#   2. STABLE DNS — the three stable staging hostnames now resolve and
+#      serve the consolidated platform (task 5cb4a8fe). The smoke check
+#      still verifies the services through the provider hostname's
+#      path-prefix routes, then reports the stable hostname separately. A
+#      stable-hostname miss remains advisory rather than blocking the
+#      deploy, while the provider path-route check remains mandatory.
 #
 # Quinn-owned: FLY_API_TOKEN must be registered once as a repo secret.
 # Rowan references it by name only — no value is hardcoded in this file.
@@ -152,10 +152,11 @@ jobs:
           TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
 
-      # Guard 1 — remove at cutover. The deploy stays off until the
-      # cutover sequence has been run (docs/runbooks/platform-consolidation-
-      # rollback.md §3): the platform's auto-post worker would otherwise
-      # consume the same BullMQ queue as the still-running old worker app.
+      # Guard 1 — explicit staging deploy opt-in. The deploy stays off
+      # until STAGING_PLATFORM_DEPLOY_ENABLED is "true". Its original
+      # pre-cutover purpose was to prevent concurrent BullMQ consumers;
+      # the 2026-11-07 cutover destroyed the retired per-service apps, so
+      # the platform worker is now the only consumer.
       - name: Check whether the platform deploy is enabled
         id: deploy
         run: |
@@ -165,7 +166,7 @@ jobs:
             echo "Platform deploy enabled"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Platform deploy not enabled::The platform app is provisioned and its secrets are registered, but the deploy is SKIPPED. Set the staging environment variable STAGING_PLATFORM_DEPLOY_ENABLED=true to enable it, after step 1 of the cutover sequence in docs/runbooks/platform-consolidation-rollback.md §3 (the old auto-post worker is scaled to zero BEFORE the platform is deployed)."
+            echo "::notice title=Platform deploy not enabled::The platform app is provisioned and its secrets are registered, but the deploy is SKIPPED. Set the staging environment variable STAGING_PLATFORM_DEPLOY_ENABLED=true to enable it. Staging now runs only the consolidated platform app; the original pre-cutover queue-contention concern was discharged when the retired per-service apps were destroyed on 2026-11-07."
           fi
         env:
           STAGING_PLATFORM_DEPLOY_ENABLED: ${{ vars.STAGING_PLATFORM_DEPLOY_ENABLED }}
@@ -215,9 +216,10 @@ jobs:
             exit 1
           fi
 
-      # Smoke check 2 — the stable hostnames. They only resolve once the
-      # CNAMEs move (task 5cb4a8fe), so an unresolvable hostname is
-      # reported and not treated as a failure.
+      # Smoke check 2 — the stable hostnames. Their staging CNAMEs are now
+      # live (task 5cb4a8fe), but a hostname miss is still reported
+      # separately instead of masking the mandatory provider path-route
+      # check above.
       - name: Smoke check (stable staging hostnames)
         if: steps.deploy.outputs.enabled == 'true'
         run: |
@@ -228,7 +230,7 @@ jobs:
             if curl --fail --silent --show-error --max-time 10 "$URL" >/dev/null 2>&1; then
               echo "Smoke OK for $HOST"
             else
-              echo "::notice title=Stable hostname not yet reachable::$HOST did not answer. Expected until the CNAME moves (task 5cb4a8fe — blocked on a Cloudflare Zone:DNS:Edit token only Tom holds)."
+              echo "::notice title=Stable hostname not reachable::$HOST did not answer. The stable staging CNAMEs are live, so this indicates a transient DNS/TLS or service-reachability problem; the provider-hostname path-route smoke check above remains the blocking readiness check."
             fi
           done
 

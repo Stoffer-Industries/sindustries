@@ -20,7 +20,7 @@
 //      compares against, so the template and the gate cannot drift.
 //   3. The template is NOT a record: merged into the artifact it closes
 //      nothing, so a blank form can never be read as a read-back.
-//   4. A record filled in from the template closes the five operator
+//   4. A record filled in from the template closes the six operator
 //      obligations through the checker — the operator path works end to
 //      end from the repository alone.
 //   5. A record that names only some of the surfaces stays open.
@@ -74,15 +74,20 @@ function loadFixture() {
  */
 function filledInRecord() {
   const record = operatorEvidenceTemplate(EXPECTED_TARGETS);
-  for (const entry of Object.values(record)) {
+  for (const [slot, entry] of Object.entries(record)) {
     entry.recorded = true;
     entry.readBackAt = '2026-11-15T23:00:00Z';
     entry.scope = 'production';
     entry.evidenceRef = 'tests/cloud/fixtures/operator-evidence-readback.txt';
-    // The spend slot must say WHICH control bounded production spend:
-    // this account has no native Fly spend limit, so the approved control
-    // is the prepaid/capped billing method.
-    if ('control' in entry) entry.control = 'prepaid-capped-billing-method';
+    // Each controlled slot must say WHICH control it records. The spend
+    // slot names the capped billing method; the Neon slot names the
+    // schema-scoped role isolation accepted for the Free plan.
+    if ('control' in entry) {
+      entry.control =
+        slot === 'neonFreeTierIsolationAcceptance'
+          ? 'schema-scoped-service-roles'
+          : 'prepaid-capped-billing-method';
+    }
   }
   return record;
 }
@@ -101,11 +106,16 @@ test('the printed template validates against the operator evidence contract', as
   }
 });
 
-test('the template names the control the spend slot must record, and no other slot does', () => {
+test('the template names the controls the controlled slots must record', () => {
   const template = operatorEvidenceTemplate(EXPECTED_TARGETS);
   assert.equal(template.flySpendLimit.control, null, 'the spend slot carries the control field');
+  assert.equal(
+    template.neonFreeTierIsolationAcceptance.control,
+    null,
+    'the Neon slot carries its own control field',
+  );
   for (const entry of OPERATOR_EVIDENCE_SLOTS) {
-    if (entry.slot === 'flySpendLimit') continue;
+    if (['flySpendLimit', 'neonFreeTierIsolationAcceptance'].includes(entry.slot)) continue;
     assert.ok(
       !('control' in template[entry.slot]),
       `the "${entry.slot}" slot declares no control, so it must not carry one`,
@@ -126,6 +136,14 @@ test('a filled-in record that names an unknown control does not close the spend 
   record.flySpendLimit.control = 'hope';
   const validation = validateOperatorEvidence(record, { repoRoot: REPO_ROOT });
   assert.equal(validation.ok, false, 'an unknown control is refused');
+  assert.match(validation.problems.join(' '), /unknown control/);
+});
+
+test('a Neon acceptance that names an unknown connectivity control is refused', () => {
+  const record = filledInRecord();
+  record.neonFreeTierIsolationAcceptance.control = 'ip-allowlist';
+  const validation = validateOperatorEvidence(record, { repoRoot: REPO_ROOT });
+  assert.equal(validation.ok, false, 'an unknown Neon connectivity control is refused');
   assert.match(validation.problems.join(' '), /unknown control/);
 });
 
@@ -169,7 +187,7 @@ test('the template is not a record: merged into the artifact it closes nothing',
     assert.equal(ok, false, 'a blank record does not close the delivery');
 
     const operatorRequired = rows.filter((row) => row.status === 'operator-required');
-    assert.equal(operatorRequired.length, 5, 'every obligation stays open without a read-back');
+    assert.equal(operatorRequired.length, 6, 'every obligation stays open without a read-back');
     assert.ok(
       failures.map((failure) => failure.gate).includes('fly.spend-limit-before-public-exposure'),
       'the exposure without a spend-limit read-back still fails the ordering gate',
@@ -179,7 +197,7 @@ test('the template is not a record: merged into the artifact it closes nothing',
   }
 });
 
-test('a record filled in from the template closes the five operator obligations', () => {
+test('a record filled in from the template closes the six operator obligations', () => {
   const state = loadFixture();
   state.operatorEvidence = filledInRecord();
 
@@ -190,12 +208,13 @@ test('a record filled in from the template closes the five operator obligations'
     [
       'fly.spend-limit-readback',
       'neon.separation-denial-proof',
+      'neon.service-role-scope',
       'health.production-probe-interval',
       'health.production-api-responses',
       'dns.resolution-and-tls-readback',
     ].includes(row.gate),
   );
-  assert.equal(operatorRows.length, 5, 'the five operator-only obligations are reported');
+  assert.equal(operatorRows.length, 6, 'the six operator-only obligations are reported');
   for (const row of operatorRows) {
     assert.equal(row.status, 'met', `${row.gate} is closed by the recorded read-back`);
   }
@@ -303,7 +322,7 @@ test('the template refuses to print when the repository names no surface for a s
   const empty = slotsWithoutSurfaces({ platformAppScope: ['sindustries-platform-production'] });
   assert.equal(
     empty.length,
-    5,
+    7,
     'every slot without an expected surface is named — the spend-bound slot is the only one covered here',
   );
   for (const entry of empty) {

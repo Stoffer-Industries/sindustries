@@ -147,7 +147,7 @@ The consolidated platform (task `219fb673`) trades isolation for cost.
 | One image, one release | A deploy redeploys all four services even if the change only touched one service's source. |
 | One process group | Per-service scaling is impossible. The only scaling axis is "more platform machines", which would run all four services again — so it is not a scaling lever. |
 | Rollback is app-wide | `fly releases rollback` restores the whole platform to a prior image. It cannot roll one service back. |
-| DNS is separate from the app | The stable staging hostnames are not created yet (the operator-owned DNS step in task `5cb4a8fe` is still open), and the per-service apps a CNAME move would point at were destroyed on 2026-11-07, so there is no DNS backout to move. The backout inside the platform app is `fly releases rollback` — see `docs/runbooks/platform-consolidation-rollback.md`. |
+| DNS is separate from the app | The stable staging hostnames are live (task `5cb4a8fe`): each CNAME points at the consolidated platform app, so DNS still moves independently of the app. The per-service apps a CNAME move could once have pointed at were destroyed on 2026-11-07, so there is no per-service DNS backout to move. The backout inside the platform app is `fly releases rollback` — see `docs/runbooks/platform-consolidation-rollback.md`. |
 | Health is shared | The platform's `/__status` answers **503** when any child is not running, because Fly's `http_check` reads the status code and not the body. One child stuck in a permanent crash loop therefore fails the whole platform's health and Fly restarts the Machine. That is the shared-fate trade taken deliberately: one bad service takes the platform's health down with it, rather than the platform reporting healthy while nginx proxies to a dead upstream. |
 | The platform never scales to zero | `min_machines_running = 1` keeps the Machine running. The auto-post worker is queue-bound — no HTTP listener, no route, no traffic at 3am — so a platform allowed to stop would leave queued auto-posts unprocessed until an unrelated request auto-started it. The old per-service worker app had no `[http_service]` at all and therefore never auto-stopped. The cost consequence: the platform is billed for one always-on Machine, not an idle one, and the before/after comparison in the cutover runbook compares **one always-on 2GB Machine** against the four always-on per-service apps it replaces. |
 | Secret visibility is shared | Every child inherits the app-level environment, so `TASKS_API_*`, `BUDGET_API_*` and `X_*` secrets on the platform app are readable by every child, not only the service that owns them. The variables that a child's own mapping owns (`DATABASE_URL`, `REDIS_URL`, `CONTENT_SCHEDULER_REDIS_URL`, `CONTENT_SCHEDULER_API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `PORT`) are **not** inherited — each child gets only the value its own `PLATFORM_*` source maps onto it, so "unset" means absent rather than another service's value. |
@@ -224,13 +224,13 @@ does not allow the spend limit to be set directly. The full operator order
 is Slice D of
 [`docs/specs/production-environment-provisioning-tech-design.md`](../specs/production-environment-provisioning-tech-design.md).
 
-**The spend limit comes before real traffic.** The production app carries a
-live budget and a public API surface, so the organisation/app spend limit
-must be set — and read back — **before** the platform canary deploy or any
-public hostname is enabled. It is not a post-cutover tidy-up: the limit is
-what bounds the blast radius of a runaway production deploy, and the
-health probe must not go out before it either (the operator order deploys
-the platform first and the probe last).
+**The spend bound is designed to come before real traffic.** The
+production app carries a live budget and a public API surface, so the
+organisation/app spend bound must be set — and read back — **before** the
+platform canary deploy or any public hostname is enabled. It is not a
+post-cutover tidy-up: the limit is what bounds the blast radius of a
+runaway production deploy, and the health probe must not go out before it
+either (the operator order deploys the platform first and the probe last).
 
 That order is enforced, not only documented. The provisioning-state checker
 decides a `fly.spend-limit-before-public-exposure` gate: while a
@@ -250,8 +250,19 @@ by recording — so the closure path is a recorded human acceptance of the
 deviation (`flySpendOrderingDeviation`, the same value-free shape as every
 other read-back, and it must name every exposed surface — the production
 hostnames, the health-probe app and the production platform app), or the
-exposure is rolled back until the bound is in
-place. The read-back itself is operator evidence — a boolean, the time it
+exposure is rolled back until the bound is in place.
+
+On this account Fly exposes no native spend-limit surface, so the approved
+bound is a dedicated prepaid/capped billing method. The actual production
+bound was read back after public exposure. Tom explicitly accepted that
+irreversible ordering deviation on 2026-11-18 and selected the capped card
+as the external financial control; the recorded acceptance names every
+exposed surface and is kept in
+`infra/cloud/evidence/production-operator-evidence.json`. The checker does
+not rewrite the chronology: it still reports that the bound followed
+exposure and cites the recorded acceptance as the closure path.
+
+The read-back itself is operator evidence — a boolean, the time it
 was read back, the CONTROL that bounded the spend (a native Fly spend
 limit, or the approved prepaid/capped billing method — this account has
 no native Fly spend-limit surface), and a required pointer to the
@@ -260,10 +271,12 @@ the artifact's `operatorEvidence` section by
 `infra/cloud/scripts/capture-production-provisioning-state.mjs`. The
 committed `infra/cloud/evidence/production-operator-evidence.json` is
 loaded automatically; `--operator-evidence <file>` overrides it for a
-one-off capture. The same section closes the other four
-obligations no machine can prove (the staging/dev Neon denial proof, one
-successful production probe interval, the production API health responses
-and the DNS resolution/TLS read-back).
+one-off capture. The same section closes the four operator read-backs no
+machine can prove (the staging/dev Neon denial proof, one successful
+production probe interval, the production API health responses and the
+DNS resolution/TLS read-back) and carries the two explicit human
+decision records (the Neon Free-tier control and the spend-order
+deviation).
 
 A recorded read-back is only as good as what it covers, so it also names
 the production surfaces it was read back against, in `targets`. A boolean
@@ -310,18 +323,19 @@ Fly-hosted production DNS/TLS surfaces were provisioned. The value-free live
 read-backs are in
 [`docs/cloud/production-provisioning-readback.md`](../cloud/production-provisioning-readback.md).
 
-**The Neon connectivity restriction has two prerequisites.** AC2's "connectivity
-restricted to production services" needs (1) a Neon plan that can express an
-IP allowlist and (2) the Fly **app-scoped static egress addresses** the
-allowlist must carry — Fly's shared egress ranges are not a fixed set, so an
-allowlist built from them drifts. The second is an allocation, not a plan
-change: the live read-back on 2026-11-18 found **neither production app has
-an app-scoped static egress address allocated**, so upgrading the Neon plan
-alone would leave nothing to allow. The provisioning capture reads the
-allocation (count, region and a fingerprint per address) and the Neon
-allowlist entries as fingerprints — never the addresses themselves — and the
-checker decides `neon.ip-allowlist-source` and `neon.ip-allowlist-match`
-from them. See
+**The Neon connectivity control is schema-scoped service-role isolation.**
+The production Neon organisation deliberately remains on the Free plan,
+where IP Allow is unavailable. Tom's 2026-11-18 decision re-specifies
+AC2's evidence around the control this account can enforce: one
+write-capable, schema-scoped login role per production schema, with the
+staging and dev credentials both proved unable to connect to the
+production branch. The provisioning-state checker decides
+`neon.connectivity-restriction` from the live role inventory, the denial
+proof and the recorded acceptance; on a complete Free-plan record the
+IP-allowlist gates are **not applicable**, not green. The checker never
+claims an allowlist that the provider cannot express. The abandoned
+app-scoped Fly egress allocations are a cleanup candidate, not an open AC2
+gate. See
 [`docs/cloud/production-neon-contract.md`](../cloud/production-neon-contract.md).
 
 ---
@@ -602,11 +616,11 @@ Asserting `providerFallback` against a staging hostname demands a CNAME to the *
 
 The static checks `tests/cloud/scripts/check-stable-hostname-matrix.mjs` and `tests/cloud/scripts/check-stable-url-fallbacks.mjs` enforce the matrix on every CI run; both pass on the committed tree at the time of writing.
 
-Until the stable CNAMEs land, staging is reached on the one consolidated platform app, one path prefix per API surface. The four per-service staging Fly apps (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`, `sindustries-content-scheduler-api-staging`, `sindustries-auto-post-worker-staging`) were destroyed by the 2026-11-07 cutover (task `219fb673`); the three API services and the auto-post worker now run as supervisor children of the platform app, and the in-container nginx router strips the matched path prefix before proxying. The shared router topology lives in `infra/cloud/platform/nginx.conf.template`; the supervisor renders the environment-specific hostnames from the environment manifest at boot.
+Staging is reached on the one consolidated platform app — one path prefix per API surface on the provider hostname, and the root of each surface on its own stable hostname, because the stable staging CNAMEs are live. The four per-service staging Fly apps (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`, `sindustries-content-scheduler-api-staging`, `sindustries-auto-post-worker-staging`) were destroyed by the 2026-11-07 cutover (task `219fb673`); the three API services and the auto-post worker now run as supervisor children of the platform app, and the in-container nginx router strips the matched path prefix before proxying. The shared router topology lives in `infra/cloud/platform/nginx.conf.template`; the supervisor renders the environment-specific hostnames from the environment manifest at boot.
 
-- `https://sindustries-platform-staging.fly.dev/tasks-api/health` <!-- stable-fallback: documented-migration; superseded by https://tasks-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
-- `https://sindustries-platform-staging.fly.dev/budget-api/health` <!-- stable-fallback: documented-migration; superseded by https://budget-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
-- `https://sindustries-platform-staging.fly.dev/content-scheduler-api/health` <!-- stable-fallback: documented-migration; superseded by https://content-scheduler-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
+- `https://sindustries-platform-staging.fly.dev/tasks-api/health` <!-- stable-fallback: documented-migration; superseded by https://tasks-api.staging.sindustries.co.nz/health — the stable staging CNAME and cert are live (verified 2026-11-18) -->
+- `https://sindustries-platform-staging.fly.dev/budget-api/health` <!-- stable-fallback: documented-migration; superseded by https://budget-api.staging.sindustries.co.nz/health — the stable staging CNAME and cert are live (verified 2026-11-18) -->
+- `https://sindustries-platform-staging.fly.dev/content-scheduler-api/health` <!-- stable-fallback: documented-migration; superseded by https://content-scheduler-api.staging.sindustries.co.nz/health — the stable staging CNAME and cert are live (verified 2026-11-18) -->
 - auto-post worker — it has no HTTP surface of its own (it is a queue-bound child process with no listener). Its health is observed on the content-scheduler-api surface at `https://sindustries-platform-staging.fly.dev/content-scheduler-api/api/v1/content-scheduler/auto-post/health` <!-- stable-fallback: documented-migration; auto-post worker keeps no public URL on the stable hostname matrix either (task 5cb4a8fe) -->
 
 The same host-and-path-prefix pairs are recorded per surface in `infra/cloud/hostname-matrix.json` (`stagingRoutes`).
@@ -648,7 +662,7 @@ The workflow is deliberately narrow:
 
 A failing row in that workflow is the honest signal that a surface is not serving as the matrix describes. The workflow produces evidence; it does not assert an AC.
 
-**The expectation this section carried until 2026-11-15 was wrong, and the workflow is what caught it.** It previously stated that the two Vercel frontends were expected to fail because the matrix names Vercel projects that do not exist. That conflated two different projects. The names the matrix records for the **production** hostnames (`vercelProject`) do not exist in the Vercel team — that gap is real and still open. The **staging** hostnames are bound to the staging projects the matrix already records as `vercelStagingProject`, and those serve. The first dispatch of this workflow returns `verdict: pass` for both frontend rows; the AC5 staging clause is therefore evidenced, and what remains open is the production half of AC2/AC6.
+**The expectation this section carried until 2026-11-15 was wrong, and the workflow is what caught it.** It previously stated that the two Vercel frontends were expected to fail because the matrix names Vercel projects that do not exist. That conflated two different projects. The names the matrix records for the **production** hostnames (`vercelProject`) did not exist in the Vercel team when this section was written; that gap closed on 2026-11-18, when task `5044e708` provisioned the two production projects and bound their custom domains. The **staging** hostnames are bound to the staging projects the matrix already records as `vercelStagingProject`, and those serve. The first dispatch of this workflow returns `verdict: pass` for both frontend rows; the AC5 staging clause is therefore evidenced.
 
 ### Live AC5 harness result — public-internet runner (2026-11-15 NZ)
 
@@ -668,7 +682,7 @@ A failing row in that workflow is the honest signal that a surface is not servin
 
 Three rows carry no CORS column value because they are not CORS origins: the two frontends are browser entry points rather than API servers, and the health probe exposes no browser-facing surface. The harness records `cors: null` for those rows rather than a pass, so the table above does not overstate them.
 
-This credential-free public-runner result did **not** cover the representative authenticated staging workflow (`representativeWorkflow: skip`, owned by `tests/cloud/staging-workflows.mjs`). The separate staging-validation run below now covers that leg. The production half of AC2/AC6 remains open — the production hostnames still have no DNS records, no certificates and no owning Vercel project, which is recorded in the AC6 register [`docs/cloud/production-blockers.md`](../../docs/cloud/production-blockers.md).
+This credential-free public-runner result did **not** cover the representative authenticated staging workflow (`representativeWorkflow: skip`, owned by `tests/cloud/staging-workflows.mjs`). The separate staging-validation run below now covers that leg. The production hostnames have moved since: every per-surface production hostname now resolves to the deployment the matrix names and presents a certificate whose CN is the hostname itself (read back 2026-11-18), so the production DNS/TLS state is recorded as closed in the AC6 register [`docs/cloud/production-blockers.md`](../../docs/cloud/production-blockers.md). What still sits on the production side is the smoke-and-cutover activity the register tracks as a separate task, not the hostname state.
 
 A caveat worth keeping in view: the harness proves a hostname resolves and serves. It cannot tell a staging deployment from a production one behind the same hostname, because both are verified through reachability and TLS only. Environment separation for the two Vercel frontends therefore rests on the distinct Vercel projects recorded by the matrix (`vercelStagingProject` for staging and `vercelProject` for production), not on this verdict.
 
@@ -690,25 +704,27 @@ One accepted limitation remains explicit in the result: the deeper Budget API li
 
 Together, run `43595192346` and run `43606147320` now supply the complete AC5 staging evidence: public frontend roots/assets, API health, Content Scheduler auto-post health, and representative authenticated staging workflows all work through the stable hostnames. The task checkbox remains untouched pending Tom/QA's gate.
 
-Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the consolidated platform app (the router already serves each stable hostname at the root of its own surface) and update the smoke-check URLs in the live deploy workflow, `.github/workflows/deploy-staging-platform.yml`. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; each still defines its own `deploy` job, but nothing calls them since their caller jobs were removed from `ci.yml` on 2026-11-07) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
+The stable staging CNAMEs are live: each `<service>.staging.sindustries.co.nz` CNAME points at the consolidated platform app (the router serves each stable hostname at the root of its own surface), and the live deploy workflow `.github/workflows/deploy-staging-platform.yml` now smoke-checks both routes — the provider-host path-prefix routes are the blocking readiness check, and the stable hostnames are reported alongside them. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; each still defines its own `deploy` job, but nothing calls them since their caller jobs were removed from `ci.yml` on 2026-11-07) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
 
 ## Vercel env var matrix (task `5cb4a8fe`)
 
-The **Vercel half** of AC3 — the contract between the hostname matrix and the VITE_* env vars the two Vercel frontends consume at build time — lives at [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json). The contract records, per Vercel project, per environment, which VITE_* env vars to set and what value to set them to. Every matrix-derived value is the production or staging hostname from `infra/cloud/hostname-matrix.json`; the static check `tests/cloud/scripts/check-vercel-env-matrix.mjs` enforces that on every CI run.
+The **Vercel half** of AC3 — the contract between the hostname matrix and the VITE_* env vars the two Vercel frontends consume at build time — lives at [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json). The contract records, per Vercel project, which Sindustries environment its production deployment target serves, which VITE_* env vars to set and what value to set them to. Every matrix-derived value is the production or staging hostname from `infra/cloud/hostname-matrix.json`; the static check `tests/cloud/scripts/check-vercel-env-matrix.mjs` enforces that on every CI run.
 
-| Vercel project | App | Production env | Preview env (staging) |
+| Vercel project | App | Serves | Build-time vars |
 | --- | --- | --- | --- |
-| `sindustries-mission-control` | `apps/mission-control` | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` |
-| `sindustries-tasks` | `apps/tasks` | `VITE_TASKS_API_BASE_URL` | `VITE_TASKS_API_BASE_URL` |
+| `sindustries-mission-control` | `apps/mission-control` | production | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` |
+| `sindustries-mission-control-staging` | `apps/mission-control` | staging | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` |
+| `sindustries-tasks` | `apps/tasks` | production | `VITE_TASKS_API_BASE_URL` |
+| `sindustries-tasks-app-staging` | `apps/tasks` | staging | `VITE_TASKS_API_BASE_URL` |
 
 Out of scope for this matrix (recorded in `outOfScope[]`):
 
 - `sindustries-gymtrack` — owned by the Clerk cutover (task `bb09eaed`); GymTrack's VITE_SUPABASE_URL / VITE_AUTH_PROVIDER / VITE_GYMTRACK_MCP_BASE_URL env vars are not in scope for `5cb4a8fe`.
 - `sindustries-website` — static marketing content with no API surface; no VITE_* env vars.
 
-Quinn sets the actual values in the Vercel dashboard per the contract; the contract itself is the engineer's responsibility and is the part this slice ships.
+Quinn sets the actual values in the Vercel dashboard per the contract; the contract itself is the engineer's responsibility. The project is the environment boundary: each of the four projects has exactly one Vercel production target, and there is no shared-project preview target carrying staging.
 
-The custom domains Vercel serves each project on (production: `mission-control.sindustries.co.nz` / `tasks.sindustries.co.nz`; preview → staging: `mission-control.staging.sindustries.co.nz` / `tasks.staging.sindustries.co.nz`) are also recorded in the matrix JSON and enforced by the same static check, so a typo in either the env var value or the custom domain fails CI rather than silently shipping to Vercel.
+The custom domain each project serves is also recorded in the matrix JSON and enforced by the same static check, so a typo in either the env var value or the custom domain fails CI rather than silently shipping to Vercel.
 
 ## Production blockers (task `5cb4a8fe`)
 
@@ -718,7 +734,7 @@ The static checks above are the cross-environment safety net: a staging URL acci
 
 `tests/cloud/scripts/check-production-blockers-register.mjs` closes the last gap in that net: the register and the matrix are two files, and a rename in the matrix that did not reach the register would leave the operator-facing document pointing at a project that does not exist. The check asserts every surface with a production hostname has a row in the register and that the row carries the matrix's exact project/app identifier.
 
-The register's §9 records the live state of the DNS, TLS and Vercel control planes as observed on 2026-11-11, including the two places where they disagree with the contract: the matrix names Vercel projects (`sindustries-mission-control`, `sindustries-tasks`) that are not in the Vercel team, while the staging deployments that do exist sit under `sindustries-mission-control-staging` / `sindustries-tasks-app-staging` and hold the verified custom-domain bindings. The project-model decision that reconciles the two is Quinn's, and it gates the two frontend rows of the register.
+The production projects `sindustries-mission-control` and `sindustries-tasks` were provisioned on 2026-11-18 with their production custom domains and VITE_* values. `infra/cloud/vercel-env-matrix.json` records that observed state with `provisioned: true`; the blockers register remains the evidence surface for first-deployment TLS and live-bundle verification.
 
 ---
 
@@ -740,7 +756,15 @@ If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only 
 
 ## Deploy procedure (reference)
 
-`.github/workflows/ci.yml` is the deployment orchestrator. It detects changed deployable surfaces, runs CI, and emits one stable `CI / merge gate` result. The active `main` ruleset requires that result. Deploy workflows expose `workflow_call` only, so they cannot race or bypass the CI run for the same commit.
+`.github/workflows/ci.yml` is the deployment orchestrator. It detects changed deployable surfaces, runs CI, and emits one stable `CI / merge gate` result. The active `main` ruleset requires that result. Automated deploys are downstream of that gate; the production frontend workflow additionally exposes an operator-only manual dispatch.
+
+- Mission Control and the Tasks app share the manually dispatchable, reusable `deploy-production-vercel-frontends.yml` workflow. A dispatch selects one surface, preserving independent project concurrency and rollback boundaries.
+- The workflow resolves the Vercel project, app path, workspace name and custom domain from `hostname-matrix.json` plus `vercel-env-matrix.json` through `vercel-project-facts.mjs`; those values are never duplicated in workflow YAML.
+- `PRODUCTION_VERCEL_DEPLOY_ENABLED=true` in the production GitHub environment is the explicit deploy gate. A matrix row with `provisioned: false`, a missing credential, or a closed gate fails or skips before a Vercel mutation.
+- The workflow installs from the repository root lockfile, tests and builds the selected workspace, then links the selected project with an explicit team scope. It deploys a production-target candidate with `--skip-domain`, smoke-checks that candidate, and promotes that exact deployment.
+- The Vercel CLI runs at the repository root, not inside the app path. It resolves the app directory as `join(repoRoot, project.rootDirectory)`, and the production projects set `rootDirectory` to the app path, so a CLI run from inside that path resolves a directory that does not exist and the build dies with `spawn sh ENOENT` (observed on run `44210902125`).
+- After promotion it verifies the stable hostname over HTTPS, checks the certificate hostname, and inspects the emitted JavaScript bundle. Every production VITE_* value must be present and no staging hostname may appear.
+- `check-production-vercel-deploy-contract.mjs` protects this sequence in the merge gate. `verify-live-vercel-bundle.mjs` is both the deployment-time AC4 check and an offline-tested verifier.
 
 - Pull-request website staging starts only after the merge gate succeeds.
 - A website change on `main` deploys a production-configured candidate to staging, smoke-checks that exact deployment URL, then promotes the same deployment to production.
@@ -752,11 +776,12 @@ If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only 
 
 ### Vercel credential topology
 
-`VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `VERCEL_TOKEN` are **repository-level** secrets. Neither the `staging` nor the `production` GitHub environment defines Vercel secrets of its own, so both website deploy jobs authenticate with the same token against the same team — the environment a job runs in does not select a team.
+`VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `VERCEL_TOKEN` are **repository-level** secrets. The website deploy uses all three. The production frontend workflow uses only `VERCEL_ORG_ID` and `VERCEL_TOKEN`: its project name is non-secret repo-owned contract data resolved from the Vercel env matrix. The production GitHub environment supplies the deployment gate and environment protection; selecting that environment does not itself select a Vercel team or project.
 
-That makes the team scope something the workflow has to state, not something it can infer: the token's own default scope is the personal account that owns the team, not the team itself, and an unscoped request resolves the deployment under that default. Two consequences for anyone touching these jobs:
+That makes the team scope something each workflow has to state, not something it can infer: the token's own default scope is the personal account that owns the team, not the team itself, and an unscoped request resolves the deployment under that default. Three consequences for anyone touching these jobs:
 
 - A job that must act on a deployment created by another job needs the project context and the team scope explicitly (`vercel link --project "$VERCEL_PROJECT_ID" --scope "$VERCEL_ORG_ID"`, or `--scope "$VERCEL_ORG_ID"` on the mutating call itself). The production promotion job is the case in point.
+- A frontend production job binds by the matrix-owned project name and carries `--scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"` on every Vercel link, pull, build, deploy and promote call. Never replace either value with a literal. `VERCEL_TEAM_SCOPE` is the `VERCEL_ORG_ID` repository secret under a name the CLI does not reserve, because the CLI treats `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` as a paired contract: `getLinkedProject` refuses to resolve a project when only one of them is exported (`You specified VERCEL_ORG_ID but you forgot to specify VERCEL_PROJECT_ID`, observed on run `44209522804`) and then ignores the `.vercel/project.json` link that `vercel link` had already written. A job that binds by project name therefore exports neither reserved name and lets the link file carry the resolved org and project ids.
 - The scope must stay bound to the job-scope secret. A literal team id or slug in a workflow is a second source of truth, and it is the one that drifts when the team changes.
 
 Fly reusable workflows run a credential preflight, install a commit-pinned setup action and version-pinned `flyctl`, run `flyctl deploy --strategy canary`, then smoke-check:

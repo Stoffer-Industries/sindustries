@@ -84,20 +84,48 @@ CLERK_ISSUER="$(
 
 create_clerk_session() {
   local user_id="$1"
-  jq -n --arg user_id "$user_id" '{user_id: $user_id}' |
-    curl --fail --silent --show-error -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" -H "Content-Type: application/json" --data-binary @- "https://api.clerk.com/v1/sessions"
+  local ticket ticket_json sign_in_json
+
+  # Clerk only permits POST /v1/sessions on development instances. Production
+  # test users must be signed in through the documented sign-in-token flow:
+  # mint a short-lived ticket with the Backend API, redeem it through the
+  # instance Frontend API, then use the resulting real session below.
+  ticket_json="$(
+    jq -n --arg user_id "$user_id" '{user_id: $user_id, expires_in_seconds: 300}' |
+      curl --fail --silent --show-error -X POST \
+        -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+        -H "Content-Type: application/json" \
+        --data-binary @- "https://api.clerk.com/v1/sign_in_tokens"
+  )"
+  ticket="$(jq -er '.token' <<<"$ticket_json")"
+
+  sign_in_json="$(
+    curl --fail --silent --show-error -X POST \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -H "Origin: https://gymtrack.sindustries.co.nz" \
+      --data-urlencode 'strategy=ticket' \
+      --data-urlencode "ticket=$ticket" \
+      "https://clerk.sindustries.co.nz/v1/client/sign_ins"
+  )"
+  jq -e '.response.created_session_id // empty' <<<"$sign_in_json" >/dev/null
+  printf '%s\n' "$sign_in_json"
 }
 
 create_clerk_token() {
   local session_id="$1"
-  curl --fail --silent --show-error -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" "https://api.clerk.com/v1/sessions/$session_id/tokens" |
+  curl --fail --silent --show-error -X POST \
+    -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+    -H "Content-Type: application/json" \
+    "https://api.clerk.com/v1/sessions/$session_id/tokens" |
     jq -er '.jwt'
 }
 
+echo "→ Minting production Clerk sign-in tickets and redeeming sessions"
 SESSION_A_JSON="$(create_clerk_session "$CLERK_TEST_USER_A_ID")"
+SESSION_A_ID="$(jq -er '.response.created_session_id' <<<"$SESSION_A_JSON")"
 SESSION_B_JSON="$(create_clerk_session "$CLERK_TEST_USER_B_ID")"
-SESSION_A_ID="$(jq -er '.id' <<<"$SESSION_A_JSON")"
-SESSION_B_ID="$(jq -er '.id' <<<"$SESSION_B_JSON")"
+SESSION_B_ID="$(jq -er '.response.created_session_id' <<<"$SESSION_B_JSON")"
+echo "→ Minting fresh Clerk session JWTs"
 TOKEN_A="$(create_clerk_token "$SESSION_A_ID")"
 TOKEN_B="$(create_clerk_token "$SESSION_B_ID")"
 
@@ -134,11 +162,11 @@ SEED_RESULT="$(
     on conflict (clerk_user_id) where clerk_user_id is not null
     do nothing;
 
-    insert into public.workouts (user_id, notes)
-    select id, '$RUN_MARKER-a' from public.profiles
+    insert into public.workouts (user_id, clerk_user_id, notes)
+    select id, clerk_user_id, '$RUN_MARKER-a' from public.profiles
       where clerk_user_id = '$CLERK_TEST_USER_A_ID';
-    insert into public.workouts (user_id, notes)
-    select id, '$RUN_MARKER-b' from public.profiles
+    insert into public.workouts (user_id, clerk_user_id, notes)
+    select id, clerk_user_id, '$RUN_MARKER-b' from public.profiles
       where clerk_user_id = '$CLERK_TEST_USER_B_ID';
 
     select clerk_user_id, id

@@ -100,13 +100,13 @@
     {
       "id": "auto-post-worker",
       "kind": "worker",
-      "flyApp": "sindustries-auto-post-worker",
+      "flyApp": "sindustries-platform-production",
       "staging": null,
       "production": null,
       "providerFallback": null,
       "cnameTargets": null,
       "publicUrl": false,
-      "rationale": "BullMQ consumer; no HTTP surface. Health is observed via GET /api/v1/content-scheduler/auto-post/health on the content-scheduler-api hostname, not via a separate worker hostname. The row exists in the matrix to make the explicit non-public nature auditable."
+      "rationale": "BullMQ consumer; no HTTP surface. Health is observed via GET /api/v1/content-scheduler/auto-post/health on the content-scheduler-api hostname, not via a separate worker hostname. The row exists in the matrix to make the explicit non-public nature auditable. The worker has no Fly app of its own: it runs as a supervisor child of the consolidated platform app (sindustries-platform-staging in staging, sindustries-platform-production in production), and the per-service worker app this row used to name (sindustries-auto-post-worker) was destroyed at the 2026-11-07 staging consolidation. `flyApp` is the production app name, so it names the same app as the content-scheduler-api row."
     }
   ]
 }
