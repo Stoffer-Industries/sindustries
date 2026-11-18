@@ -452,6 +452,17 @@ those workflows against the production GitHub environment.
 
 The cutover's readiness is machine-checked rather than asserted: `tests/cloud/scripts/check-production-cutover-readiness.mjs` decides, from the redacted production state capture, whether the `production` Environment refuses an unapproved dispatch, whether every cutover DSN secret is registered on it, and whether the production Neon environment serves the three distinct databases the cutover needs (source, empty destination, recovery) — counted as databases, not as endpoint hosts, because a read replica is another address for the same database — and names the owner of each unmet gate. The procedure is in [`docs/runbooks/production-data-migration-restore.md`](../runbooks/production-data-migration-restore.md) §3.
 
+**Verified live state (2026-11-19T18:26Z capture, re-confirmed directly against the GitHub API):** the cutover is **NOT dispatchable**. The capture is schema 13 and the checker exits 1, naming three unmet gates, all owned by Quinn (operator):
+
+| Gate | Live state | What closes it |
+| --- | --- | --- |
+| `github.production-environment-captured` | **MET** — the `production` Environment was readable | — |
+| `github.cutover-dsn-secrets` | **UNMET** — the Environment carries 7 secrets and **none** of the six cutover DSNs | register `TASKS_API_SOURCE_DSN`, `BUDGET_API_SOURCE_DSN`, `TASKS_API_DEST_DSN`, `BUDGET_API_DEST_DSN`, `RECOVERY_TASKS_API_DSN`, `RECOVERY_BUDGET_API_DSN` on the Environment |
+| `github.production-approval-gate` | **UNMET** — `protection_rules: []`, `requiredReviewerCount: 0`, `canAdminsBypass: true`, so a dispatch starts unapproved | give the `production` Environment at least one required reviewer and turn off admin bypass |
+| `neon.cutover-database-capacity` | **UNMET** — the production Neon environment serves **1** distinct database (`neondb`, the only database on the `production` branch) where the cutover needs 3 | create the destination and recovery databases on a branch named `production-*`, behind an endpoint other than the source's (the dispatch refuses a destination behind the source's host — exit 10) |
+
+The DSN secrets cannot be registered against databases that do not exist, so the third row gates the second: the database capacity has to close before the DSNs can point at real destinations. The `staging` branch still serves its three databases (`neondb`, `sindustries_staging_neondb`, `sindustries_staging_neondb_recovery`) because the drill drops the service SCHEMAS, not the databases — but all three share one endpoint host, so that topology does not transplant to production.
+
 ### 8. Cross-environment safety net (AC6 requirement)
 
 AC6 requires: "Production hostname configuration is verified without
