@@ -210,6 +210,7 @@ specimen mount.
   `event.origin` against the shell's `VITE_SHELL_ORIGIN` env var
   (default `http://localhost:5174`) before applying the value.
 - Optional override via `VITE_TASKS_API_BASE_URL`.
+- The embedded Tasks application URL is configurable via `VITE_TASKS_APP_URL`; local development defaults to `http://localhost:5173`, while production defaults to `https://tasks.sindustries.co.nz` so a missing production variable cannot point the iframe at localhost.
 - The Flow metrics dashboard issues a single GET against the Tasks API with
   `?includeArchived=true&sort=priority&limit=10000` so the dashboard covers
   the full archive (including done/closed tasks) without per-page pagination.
