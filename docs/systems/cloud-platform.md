@@ -736,6 +736,24 @@ The static checks above are the cross-environment safety net: a staging URL acci
 
 The production projects `sindustries-mission-control` and `sindustries-tasks` were provisioned on 2026-11-18 with their production custom domains and VITE_* values. `infra/cloud/vercel-env-matrix.json` records that observed state with `provisioned: true`; the blockers register remains the evidence surface for first-deployment TLS and live-bundle verification.
 
+## Production cutover readiness (task `f2c23e26`)
+
+The production data cutover has three independent keys: the `production` GitHub Environment's required reviewers, the typed `MIGRATE PRODUCTION` confirmation, and the declared source/destination endpoints. Two of them are enforced in code — the workflow refuses a mistyped confirmation (exit 10) and the harness refuses any endpoint outside the declared allowlist. The THIRD was, until this slice, enforced in prose only.
+
+The Environment's approval gate is the only key the ENVIRONMENT can enforce, so it is also the only one that can be silently inert: an Environment with no protection rules has no reviewer, no approval, and a dispatch that starts unattended. The six cutover DSN secrets were in the same position — the workflow fails closed on them (exit 11), but only at dispatch time, on the operator's machine, naming no owner.
+
+`tests/cloud/scripts/check-production-cutover-readiness.mjs` decides both, BEFORE the dispatch, and names the owner of each unmet gate. It reads the redacted artifact that `infra/cloud/scripts/capture-production-provisioning-state.mjs` writes (schema version 11, which now also records the Environment's protection rule types, the required-reviewer count, the wait timer and whether admins may bypass — rule types and a count only; a reviewer's login is a person's identity and no gate needs it). The checker fails closed: an Environment that could not be read is an OPEN gate, not a silent pass, because "not captured" is not "fine".
+
+| Gate | Met when | Owner of an unmet gate |
+|---|---|---|
+| `github.production-environment-captured` | the `production` Environment could be read at all | Quinn (operator) |
+| `github.cutover-dsn-secrets` | all six cutover DSN secrets are registered on the Environment | Quinn (operator) |
+| `github.production-approval-gate` | the Environment has at least one required reviewer and admins cannot bypass the gate | Quinn (operator) |
+
+The gate names are bound to the workflow: `tests/cloud/tests/check-production-cutover-readiness.test.mjs` asserts the checker's secret list and the workflow's `secrets.*` reads are the same set, so the checker cannot drift away from the workflow it gates. The sentinel cases prove each gate can go red — a gate that cannot fail asserts nothing.
+
+The operator procedure is in [`docs/runbooks/production-data-migration-restore.md`](../runbooks/production-data-migration-restore.md) §3.
+
 ---
 
 ## Credential boundary

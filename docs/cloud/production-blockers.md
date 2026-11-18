@@ -450,6 +450,8 @@ those workflows against the production GitHub environment.
 | Production cutover with rollback verification | Quinn + Tom | Not started | Task `020f423e` (Execute production cloud cutover) |
 | Production data migration with verified backup + restore | Quinn + Tom | Not started | Task `f2c23e26` |
 
+The cutover's readiness is machine-checked rather than asserted: `tests/cloud/scripts/check-production-cutover-readiness.mjs` decides, from the redacted production state capture, whether the `production` Environment refuses an unapproved dispatch and whether every cutover DSN secret is registered on it — and names the owner of each unmet gate. The procedure is in [`docs/runbooks/production-data-migration-restore.md`](../runbooks/production-data-migration-restore.md) §3.
+
 ### 8. Cross-environment safety net (AC6 requirement)
 
 AC6 requires: "Production hostname configuration is verified without

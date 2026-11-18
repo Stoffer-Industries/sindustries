@@ -56,6 +56,12 @@ can start a move:
 
 1. **The `production` GitHub Environment.** Its reviewers are the
    approval gate. A dispatch that has not been approved never starts.
+   This key is the only one the ENVIRONMENT enforces, so it is also the
+   only one that can be silently inert — and it can be: an Environment
+   with no protection rules has no reviewer, no approval, and a dispatch
+   that starts unattended. The readiness check in §3 reads the
+   Environment's protection rules and refuses to call the cutover ready
+   while the gate is missing, empty, or admin-bypassable.
 2. **The typed confirmation `MIGRATE PRODUCTION`.** This is what sets
    `CLOUD_DB_PRODUCTION_ACK=1`. The scripts require that variable; the
    workflow sets it only when the confirmation string matches exactly.
@@ -78,6 +84,45 @@ All of the following must hold before the workflow is dispatched:
 - the source is quiesced — writes stopped or drained — for the
   duration of the run;
 - the operator has the runbook open next to the Actions tab.
+
+### The readiness check (run it before dispatching)
+
+Two of the prerequisites above are facts about the `production`
+Environment that no operator can see from the Actions tab: whether its
+**approval gate** is actually configured, and whether the six DSN
+secrets are actually registered. The workflow fails closed on the
+secrets (exit 11), but it fails at DISPATCH — on the operator's
+machine, mid-procedure, naming no owner.
+
+The readiness check moves both facts out of the dispatch moment:
+
+```bash
+# 1. capture the live production state (read-only; names, flags and
+#    counts only — never a credential value)
+node infra/cloud/scripts/capture-production-provisioning-state.mjs \
+  --out /tmp/production-state.json
+
+# 2. decide whether the cutover may be dispatched
+node tests/cloud/scripts/check-production-cutover-readiness.mjs \
+  /tmp/production-state.json
+```
+
+The checker exits 0 when the cutover may be dispatched and 1 when any
+gate is unmet, naming the owner of each unmet gate. Its gates are:
+
+| Gate | Met when |
+|---|---|
+| `github.production-environment-captured` | the `production` Environment could be read at all — an unreadable provider is an OPEN gate, not a pass |
+| `github.cutover-dsn-secrets` | all six DSN secrets below are registered on the Environment |
+| `github.production-approval-gate` | the Environment has at least one required reviewer and admins cannot bypass the gate |
+
+Note that step 1 reads the Neon, Fly, GitHub and Cloudflare control
+planes, so it needs those credentials in the operator's environment
+(`NEON_API_KEY`, `FLY_API_TOKEN`, `GITHUB_TOKEN` or an authenticated
+`gh`, `CLOUDFLARE_API_TOKEN`). A capture that cannot read a provider
+records that provider as unreadable rather than skipping it, and the
+checker turns the unreadable provider into an open gate — so a partial
+capture can never read as "ready".
 
 ### Required secrets on the `production` GitHub Environment
 
@@ -162,7 +207,7 @@ run them against a live destination outside a deliberate drill window.
 
 | Phase | Go | No-go |
 |---|---|---|
-| Pre-flight | every prerequisite in §3 met; `production` Environment approved; confirmation string exact; source and destination hosts declared and different; PostgreSQL client major = 18 | any missing secret, wrong confirmation, undeclared endpoint, wrong client major |
+| Pre-flight | every prerequisite in §3 met; the readiness check in §3 exits 0; `production` Environment approved; confirmation string exact; source and destination hosts declared and different; PostgreSQL client major = 18 | any missing secret, a readiness gate unmet, wrong confirmation, undeclared endpoint, wrong client major |
 | Inventory | source reachable, both schemas present, `_prisma_migrations` present | source unreachable, schema missing, no migration table |
 | Dump | `pg_dump` exits 0, `pg_restore --list` parses the archive, sha256 computed | any of the three post-dump checks fails |
 | Restore | destination was empty pre-restore, both schemas present post-restore, `pg_restore --exit-on-error` exits 0 | destination non-empty pre-restore, missing schema post-restore, restore non-zero |

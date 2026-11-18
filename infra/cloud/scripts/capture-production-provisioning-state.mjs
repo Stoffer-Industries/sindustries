@@ -1216,6 +1216,53 @@ async function captureFly({ platformApp, healthProbeApp, healthProbeBaseUrl, red
   };
 }
 
+/**
+ * Read the `production` Environment's APPROVAL GATE.
+ *
+ * WHY THIS EXISTS
+ *
+ * The production data cutover (task f2c23e26) has three independent keys,
+ * and the FIRST of them is the `production` GitHub Environment's required
+ * reviewers — the runbook states that "a dispatch that has not been
+ * approved never starts"
+ * (docs/runbooks/production-data-migration-restore.md §2). Nothing in the
+ * repository read that setting, so the key could be INERT while the
+ * runbook still claimed it was live: a protection-rule list of zero means
+ * no reviewer, no approval, and a dispatch that starts unattended.
+ *
+ * Only the rule TYPES and a reviewer COUNT are recorded. A reviewer's
+ * login is a person's identity and no gate needs it, so it never reaches
+ * the artifact.
+ *
+ * A read that fails is reported as a failed capture, not as an absent
+ * gate: "not captured" is not "fine", and the checker turns an unreadable
+ * environment into an OPEN gate rather than a silent pass.
+ */
+export async function readEnvironmentApprovalGate({ repo, environment, headers }) {
+  try {
+    const payload = await fetchJson(
+      `${GITHUB_API_BASE}/repos/${repo}/environments/${environment}`,
+      { headers },
+    );
+    const rules = Array.isArray(payload?.protection_rules) ? payload.protection_rules : [];
+    const reviewerRules = rules.filter((rule) => rule?.type === 'required_reviewers');
+    const waitTimerRule = rules.find((rule) => rule?.type === 'wait_timer');
+    return {
+      captured: true,
+      protectionRuleTypes: rules.map((rule) => rule?.type).filter(Boolean),
+      requiredReviewerCount: reviewerRules.reduce(
+        (total, rule) => total + (Array.isArray(rule?.reviewers) ? rule.reviewers.length : 0),
+        0,
+      ),
+      waitTimerMinutes: Number.isFinite(waitTimerRule?.wait_timer) ? waitTimerRule.wait_timer : null,
+      canAdminsBypass:
+        typeof payload?.can_admins_bypass === 'boolean' ? payload.can_admins_bypass : null,
+    };
+  } catch (error) {
+    return { captured: false, error: error.message };
+  }
+}
+
 async function captureGitHub({ repo, environment }) {
   let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
   if (!token) {
@@ -1248,12 +1295,18 @@ async function captureGitHub({ repo, environment }) {
       // The variables endpoint is absent on some environments; the secret
       // inventory is the part AC4 binds.
     }
+    // The approval gate is read alongside the secret inventory: both are
+    // properties of the SAME `production` Environment, and the cutover
+    // needs both before it may be dispatched.
+    const approvalGate = await readEnvironmentApprovalGate({ repo, environment, headers });
+
     return {
       captured: true,
       repository: repo,
       environment,
       secretNames: (secrets?.secrets ?? []).map((secret) => secret?.name).filter(Boolean),
       variableNames: (variables?.variables ?? []).map((variable) => variable?.name).filter(Boolean),
+      approvalGate,
     };
   } catch (error) {
     return failure(error.message);
@@ -1422,7 +1475,14 @@ async function main(argv) {
     // place. The operator evidence carries the acceptance itself, the
     // role-scope read-back that backs it, and the spend-ordering deviation
     // that closes the Fly spend-bound ordering gate.
-    schemaVersion: 10,
+    // Version 11: the `production` Environment's APPROVAL GATE is read —
+    // its protection rule types, the required-reviewer count, the wait
+    // timer and whether admins may bypass. The cutover's first key is that
+    // gate, and nothing read it: the key could be inert while the runbook
+    // still claimed a dispatch cannot start unapproved. Rule types and a
+    // count only — a reviewer's login is a person's identity and no gate
+    // needs it.
+    schemaVersion: 11,
     environment: 'production',
     capturedAt,
     providers: { neon, fly, github, cloudflare },
