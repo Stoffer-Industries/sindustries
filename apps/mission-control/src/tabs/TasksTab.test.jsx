@@ -7,8 +7,10 @@ describe('tasksAppUrl', () => {
       .toBe('https://tasks.example.test');
   });
 
-  it('uses the production Tasks hostname when the build variable is missing', () => {
-    expect(tasksAppUrl({ PROD: true })).toBe('https://tasks.sindustries.co.nz');
+  it('fails closed when a deployed build is missing the build variable', () => {
+    expect(() => tasksAppUrl({ PROD: true })).toThrow(
+      'VITE_TASKS_APP_URL is required for production builds',
+    );
   });
 
   it('keeps localhost as the local development default', () => {
