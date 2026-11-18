@@ -42,8 +42,8 @@ production hostname resolution. The findings are recorded in §5 below.
 | Surface | Production hostname | Required DNS record | CNAME target (matrix contract) | Owner | Status |
 | --- | --- | --- | --- | --- | --- |
 | Apex | `sindustries.co.nz` | apex A/ALIAS to Vercel (frontends) or Fly (apis) | — | Quinn | Pending |
-| Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | `cname.vercel-dns.com` | Quinn | Pending |
-| Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | `cname.vercel-dns.com` | Quinn | Pending |
+| Mission Control | `mission-control.sindustries.co.nz` | CNAME → Vercel project `sindustries-mission-control` | `cname.vercel-dns.com` | Quinn | Closed 2026-11-18 — CNAME added, resolves to the matrix CNAME target |
+| Tasks app | `tasks.sindustries.co.nz` | CNAME → Vercel project `sindustries-tasks` | `cname.vercel-dns.com` | Quinn | Closed 2026-11-18 — CNAME added, resolves to the matrix CNAME target |
 | Tasks API | `tasks-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
 | Budget API | `budget-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
 | Content Scheduler API | `content-scheduler-api.sindustries.co.nz` | CNAME → consolidated Fly app `sindustries-platform-production` | `sindustries-platform-production.fly.dev` | Quinn | Pending |
@@ -82,7 +82,7 @@ production hostname resolution. The findings are recorded in §5 below.
 
 | Surface | Production hostname | TLS strategy | Owner | Status |
 | --- | --- | --- | --- | --- |
-| Frontends (Vercel) | mission-control, tasks | Vercel auto-provisions via Let's Encrypt once the custom domain is added to the project | Quinn (trigger) | Pending |
+| Frontends (Vercel) | mission-control, tasks | Vercel issues the certificate via Let's Encrypt once a deployment carries the custom-domain alias | Quinn (trigger) | Pending — production custom domains bound and verified 2026-11-18; the certificate is issued by the first production deployment |
 | APIs (Fly) | tasks-api, budget-api, content-scheduler-api, health-probe | `fly certs add <hostname>` per Fly app (Let's Encrypt via Fly) | Quinn | Pending |
 
 **Staging TLS state (live, verified 2026-11-13):** the four Fly staging
@@ -102,9 +102,13 @@ Vercel provisioned a certificate for it. No DNS change was needed. See
 [§9](#9-observed-state-live-verification-2026-11-13).
 
 **Notes:**
-- Vercel auto-provisions TLS when the custom domain is added. The 1-minute
-  propagation delay is the same as staging; deploy workflows already
-  20-attempt smoke loop accommodates the latency (slice 3, AC4 enforcement).
+- Vercel issues the certificate for a custom domain when a deployment carries
+  that domain's alias — adding the domain alone is not enough. Observed on
+  2026-11-18: both production custom domains were added and reported
+  verified, and neither production project had a deployment yet, so neither
+  had a certificate. The 1-minute propagation delay after the alias lands is
+  the same as staging; deploy workflows already have a 20-attempt smoke loop
+  that accommodates the latency (slice 3, AC4 enforcement).
 - Fly `fly certs add` issues a Let's Encrypt cert for the hostname. The
   staging smoke loop is the same shape; production uses the same loop in
   the live staging deploy workflows — `deploy-staging-platform.yml` (the
@@ -123,13 +127,13 @@ the static check enforces the customDomain value matches the matrix.
 
 | Matrix contract project | Custom domain (production) | Custom domain (staging) | Actually bound in Vercel (verified 2026-11-13) | Owner | Status |
 | --- | --- | --- | --- | --- | --- |
-| `sindustries-mission-control` | `mission-control.sindustries.co.nz` | `mission-control.staging.sindustries.co.nz` | `sindustries-mission-control-staging` (bound 2026-10-23, deployment + certificate verified 2026-11-13) | Quinn | Staging live; production project not created |
-| `sindustries-tasks` | `tasks.sindustries.co.nz` | `tasks.staging.sindustries.co.nz` | `sindustries-tasks-app-staging` (bound 2026-10-23, deployment + certificate verified 2026-11-13) | Quinn | Staging live; production project not created |
+| `sindustries-mission-control` | `mission-control.sindustries.co.nz` | `mission-control.staging.sindustries.co.nz` | `sindustries-mission-control-staging` (bound 2026-10-23, deployment + certificate verified 2026-11-13) | Quinn | Closed 2026-11-18 — production project created (Vercel project id `prj_ENmOURHrIHcj9YGaHfrS20HXDM1P`) and its production custom domain bound and verified; staging live |
+| `sindustries-tasks` | `tasks.sindustries.co.nz` | `tasks.staging.sindustries.co.nz` | `sindustries-tasks-app-staging` (bound 2026-10-23, deployment + certificate verified 2026-11-13) | Quinn | Closed 2026-11-18 — production project created (Vercel project id `prj_yt715KyS0dbricuHwma7lR4Qv8vQ`) and its production custom domain bound and verified; staging live |
 
 **Notes:**
 - **Project model (Quinn, 2026-11-13):** the contract names FOUR Vercel
   projects, not two. `sindustries-mission-control` /
-  `sindustries-tasks` are the **production** projects (not yet created);
+  `sindustries-tasks` are the **production** projects (created 2026-11-18);
   `sindustries-mission-control-staging` / `sindustries-tasks-app-staging`
   are the **staging** projects that exist today and already hold the
   verified staging custom-domain bindings. The matrix records them as
@@ -166,11 +170,11 @@ matrix; Quinn sets the actual values in the Vercel dashboard.
 
 | Vercel project | Env | Env var | Value | Owner | Status |
 | --- | --- | --- | --- | --- | --- |
-| `sindustries-mission-control` | production (serves production) | `VITE_TASKS_API_BASE_URL` | `https://tasks-api.sindustries.co.nz/api/v1` | Quinn | Pending |
-| `sindustries-mission-control` | production (serves production) | `VITE_CONTENT_SCHEDULER_API_BASE_URL` | `https://content-scheduler-api.sindustries.co.nz/api/v1` | Quinn | Pending |
+| `sindustries-mission-control` | production (serves production) | `VITE_TASKS_API_BASE_URL` | `https://tasks-api.sindustries.co.nz/api/v1` | Quinn | Closed 2026-11-18 — set in the Vercel project; live-bundle readback pending the first production deployment (AC4) |
+| `sindustries-mission-control` | production (serves production) | `VITE_CONTENT_SCHEDULER_API_BASE_URL` | `https://content-scheduler-api.sindustries.co.nz/api/v1` | Quinn | Closed 2026-11-18 — set in the Vercel project; live-bundle readback pending the first production deployment (AC4) |
 | `sindustries-mission-control-staging` | production (serves staging) | `VITE_TASKS_API_BASE_URL` | `https://tasks-api.staging.sindustries.co.nz/api/v1` | Quinn | Set (verified in the live bundle 2026-11-13) |
 | `sindustries-mission-control-staging` | production (serves staging) | `VITE_CONTENT_SCHEDULER_API_BASE_URL` | `https://content-scheduler-api.staging.sindustries.co.nz/api/v1` | Quinn | Set (verified in the live bundle 2026-11-13) |
-| `sindustries-tasks` | production (serves production) | `VITE_TASKS_API_BASE_URL` | `https://tasks-api.sindustries.co.nz/api/v1` | Quinn | Pending |
+| `sindustries-tasks` | production (serves production) | `VITE_TASKS_API_BASE_URL` | `https://tasks-api.sindustries.co.nz/api/v1` | Quinn | Closed 2026-11-18 — set in the Vercel project; live-bundle readback pending the first production deployment (AC4) |
 | `sindustries-tasks-app-staging` | production (serves staging) | `VITE_TASKS_API_BASE_URL` | `https://tasks-api.staging.sindustries.co.nz/api/v1` | Quinn | Set (verified in the live bundle 2026-11-13) |
 
 **Notes:**
@@ -478,20 +482,20 @@ acting on the contract alone would hit a wall.
 | --- | --- | --- | --- |
 | Mission Control | Vercel project `sindustries-mission-control` (production), staging project `sindustries-mission-control-staging` | Project `sindustries-mission-control-staging` exists, holds the verified binding for `mission-control.staging.sindustries.co.nz` (bound + verified 2026-10-23T16:44Z), and now serves a deployment that carries the custom-domain alias — built from `main`, commit 7ba14896. The staging hostname presents a valid Let's Encrypt certificate (`CN=mission-control.staging.sindustries.co.nz`, issuer `Let's Encrypt CN=YR1`, valid 2026-11-13 → 2027-02-11) | **Closed.** The staging hostname resolves, serves a valid certificate and serves the rebuilt bundle. The 2026-11-11 gap — no deployment carrying the alias, no certificate — no longer holds |
 | Tasks app | Vercel project `sindustries-tasks` (production), staging project `sindustries-tasks-app-staging` | Project `sindustries-tasks-app-staging` exists, holds the verified binding for `tasks.staging.sindustries.co.nz` (bound + verified 2026-10-23T16:44Z), and now serves a deployment that carries the custom-domain alias — built from `main`, commit 7ba14896. The staging hostname presents a valid Let's Encrypt certificate (`CN=tasks.staging.sindustries.co.nz`, issuer `Let's Encrypt CN=YR2`, valid 2026-11-13 → 2027-02-11) | **Closed.** Same shape as Mission Control |
-| Mission Control / Tasks app (production) | Vercel projects `sindustries-mission-control` / `sindustries-tasks` | **Neither project exists** in the Vercel team, and there is no production Vercel project for either frontend | The production frontend hostnames have nothing to bind to yet |
+| Mission Control / Tasks app (production) | Vercel projects `sindustries-mission-control` / `sindustries-tasks` | **Both projects exist** as of 2026-11-18 — `prj_ENmOURHrIHcj9YGaHfrS20HXDM1P` and `prj_yt715KyS0dbricuHwma7lR4Qv8vQ`, read back from the Vercel API — and each production custom domain is bound and verified. Neither project has a deployment yet, so neither has a certificate | The production frontend hostnames now have projects to bind to; the TLS certificate and the live-bundle readback wait on the first production deployment |
 | Tasks API / Budget API / Content Scheduler API / Health probe | Fly apps `sindustries-tasks-api` / `sindustries-budget-api` / `sindustries-content-scheduler-api` / `sindustries-health-probe` | All four staging hostnames resolve, present valid Let's Encrypt certificates whose CN/SAN is the stable hostname (valid 2026-11-10 → 2027-02-08), and answer HTTP 200 on their health endpoints — including `content-scheduler-api/api/v1/content-scheduler/auto-post/health` | The API half of AC2's certificate clause and AC5's API clauses are satisfied on the staging hostnames |
-| Mission Control / Tasks app (build inputs) | Vercel env matrix supplies `VITE_*` base URLs per environment | The staging `VITE_*` values are set on both live staging projects, and the redeployed bundles carry them: `mission-control.staging.sindustries.co.nz` ships `/assets/index-C22LF23z.js` containing `https://tasks-api.staging.sindustries.co.nz/api/v1` and `https://content-scheduler-api.staging.sindustries.co.nz/api/v1`; `tasks.staging.sindustries.co.nz` ships `/assets/index-Cq7sZnj1.js` containing `https://tasks-api.staging.sindustries.co.nz/api/v1` | **Closed on the staging side.** The frontends call the stable staging API hostnames, not the provider-fallback siblings. The production projects still carry no values because they do not exist yet |
+| Mission Control / Tasks app (build inputs) | Vercel env matrix supplies `VITE_*` base URLs per environment | The staging `VITE_*` values are set on both live staging projects, and the redeployed bundles carry them: `mission-control.staging.sindustries.co.nz` ships `/assets/index-C22LF23z.js` containing `https://tasks-api.staging.sindustries.co.nz/api/v1` and `https://content-scheduler-api.staging.sindustries.co.nz/api/v1`; `tasks.staging.sindustries.co.nz` ships `/assets/index-Cq7sZnj1.js` containing `https://tasks-api.staging.sindustries.co.nz/api/v1` | **Closed on the staging side.** The frontends call the stable staging API hostnames, not the provider-fallback siblings. The production projects carry the production `VITE_*` values as of 2026-11-18 (task 5044e708); the live-bundle readback still waits on the first production deployment |
 
 **Resolved decision — project model (Quinn, 2026-11-13).** The matrix and this
-register named two Vercel projects that do not exist; the live staging
+register named two Vercel projects that did not exist; the live staging
 deployments sit under different project names. Quinn chose **(b) make the
 contract match Vercel**:
 
 - `infra/cloud/hostname-matrix.json` now names the staging projects —
   `sindustries-mission-control-staging` / `sindustries-tasks-app-staging` —
   as `vercelStagingProject`, and keeps `sindustries-mission-control` /
-  `sindustries-tasks` as the production-side contract (unclaimed; to be
-  provisioned by task `fb1240c0`).
+  `sindustries-tasks` as the production-side contract (provisioned
+  2026-11-18 under task `5044e708`).
 - `infra/cloud/vercel-env-matrix.json` carries all four projects, each
   with exactly ONE environment — its own production deployment target —
   plus a `servesEnvironment` field that records whether that target
@@ -505,6 +509,19 @@ Rationale: `sindustries-mission-control-staging` /
 bindings since 2026-10-23T16:44Z. Migrating to the contract's old names
 (both 404) would mean creating two new projects and re-binding two
 working domains for no safety or clarity gain.
+
+#### Production frontend provisioning (observed 2026-11-18)
+
+Task `5044e708` provisioned the two production Vercel projects and their
+custom domains. The operator evidence is the `[quinn-operator-evidence]`
+comment on that task (2026-11-17T21:43:57Z); the readback below is
+independent of it and was taken from the Vercel API and public DNS on
+2026-11-18.
+
+| Surface | Contract | Observed 2026-11-18 | Consequence |
+| --- | --- | --- | --- |
+| Mission Control | Vercel project `sindustries-mission-control` | Project `prj_ENmOURHrIHcj9YGaHfrS20HXDM1P` exists (Vercel API readback), serving root directory apps/mission-control; production custom domain `mission-control.sindustries.co.nz` bound and verified; its CNAME resolves to `cname.vercel-dns.com` | Project, domain and DNS closed; the certificate and the live-bundle readback wait on the first production deployment |
+| Tasks app | Vercel project `sindustries-tasks` | Project `prj_yt715KyS0dbricuHwma7lR4Qv8vQ` exists (Vercel API readback), serving root directory apps/tasks; production custom domain `tasks.sindustries.co.nz` bound and verified; its CNAME resolves to `cname.vercel-dns.com` | Same shape as Mission Control |
 
 **Operator action — closed on the staging side (2026-11-13).** The
 deployments that attach the custom-domain alias and provision the
