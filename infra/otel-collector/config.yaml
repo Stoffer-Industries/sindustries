@@ -50,6 +50,32 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 1024
+  # Gateway agent attribution (task a7938522, AC4).
+  #
+  # The OpenClaw gateway exports the agent that owns a run as the span
+  # attribute `openclaw.agent` — documented in OpenClaw's own reference
+  # (docs/gateway/opentelemetry/spans-and-events.md: `openclaw.model.call`
+  # carries "optional `openclaw.agent` (the agent that owns the run when
+  # known)"). It never exports `agent_id`, which is the name this repo's
+  # spanmetrics connector uses as its agent dimension. Live tenant evidence
+  # (2026-11-17) showed the gateway's model-call series landing in Grafana
+  # Cloud with `agent_id=null`: the spans arrived, the dimension did not.
+  #
+  # This mapping fills the missing dimension from the attribute the gateway
+  # already sends, so the spanmetrics series and the exported spans carry the
+  # same agent label the dashboards query.
+  #
+  # Fill-if-absent on purpose: repo-owned emitters (the bookmarks workflow,
+  # the health-probe relay) stamp `agent_id` themselves, and their value must
+  # win. `error_mode: ignore` keeps a malformed statement from dropping
+  # telemetry — a missing `agent_id` dimension is a reporting gap, not a
+  # reason to lose the span.
+  transform/gateway_agent_id:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["agent_id"], attributes["openclaw.agent"]) where attributes["openclaw.agent"] != nil and attributes["agent_id"] == nil
   # Cardinality trim (2026-11-16): the OpenClaw gateway's own RPC-pipeline
   # histograms (admission/handler/first-response/queue-wait timing, each
   # broken down per agent/session) are internal plumbing detail that no
@@ -100,7 +126,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [transform/gateway_agent_id, batch]
       exporters: [otlphttp/grafana_cloud, spanmetrics]
     metrics:
       receivers: [otlp]
