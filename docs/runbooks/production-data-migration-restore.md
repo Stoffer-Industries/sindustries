@@ -115,7 +115,7 @@ gate is unmet, naming the owner of each unmet gate. Its gates are:
 | `github.production-environment-captured` | the `production` Environment could be read at all — an unreadable provider is an OPEN gate, not a pass |
 | `github.cutover-dsn-secrets` | all six DSN secrets below are registered on the Environment |
 | `github.production-approval-gate` | the Environment has at least one required reviewer and admins cannot bypass the gate |
-| `neon.cutover-database-capacity` | the production Neon environment serves at least three distinct databases — the source, a destination that is empty before the restore, and a recovery database to reconcile against |
+| `neon.cutover-database-capacity` | the production Neon environment serves at least three distinct databases — the source, a destination that is empty before the restore, and a recovery database to reconcile against. The count is over DATABASES (a branch and a database name), not over endpoint hosts: a read replica is another address for the same database, so scaling out replicas does not create a database to restore into |
 
 The last gate exists because a secret can be REGISTERED against a
 database that does not exist. The workflow's secret check only asks
@@ -124,6 +124,16 @@ never created passes that check and fails at the RESTORE — after the
 dump, with the source already quiesced. The destination and recovery
 databases must also be PRODUCTION databases: the endpoint allowlist is
 operator-declared, so a staging host that is declared passes it.
+
+Two things about that gate decide how the operator closes it. The count
+is over DATABASES, not over endpoint hosts: a Neon branch can carry a
+read-write endpoint plus read-only replicas, and those replicas share
+the branch's storage, so they are several addresses for ONE database.
+Adding a read replica does not add a database to restore into. And the
+destination and the recovery database must sit behind an endpoint OTHER
+than the source's, because the dispatch refuses a destination behind the
+source's host (exit 10) — so create a branch named `production-*` and
+put the destination and recovery databases there.
 
 Note that step 1 reads the Neon, Fly, GitHub and Cloudflare control
 planes, so it needs those credentials in the operator's environment

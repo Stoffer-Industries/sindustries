@@ -450,7 +450,7 @@ those workflows against the production GitHub environment.
 | Production cutover with rollback verification | Quinn + Tom | Not started | Task `020f423e` (Execute production cloud cutover) |
 | Production data migration with verified backup + restore | Quinn + Tom | Not started | Task `f2c23e26` |
 
-The cutover's readiness is machine-checked rather than asserted: `tests/cloud/scripts/check-production-cutover-readiness.mjs` decides, from the redacted production state capture, whether the `production` Environment refuses an unapproved dispatch, whether every cutover DSN secret is registered on it, and whether the production Neon environment serves the three distinct databases the cutover needs (source, empty destination, recovery) — and names the owner of each unmet gate. The procedure is in [`docs/runbooks/production-data-migration-restore.md`](../runbooks/production-data-migration-restore.md) §3.
+The cutover's readiness is machine-checked rather than asserted: `tests/cloud/scripts/check-production-cutover-readiness.mjs` decides, from the redacted production state capture, whether the `production` Environment refuses an unapproved dispatch, whether every cutover DSN secret is registered on it, and whether the production Neon environment serves the three distinct databases the cutover needs (source, empty destination, recovery) — counted as databases, not as endpoint hosts, because a read replica is another address for the same database — and names the owner of each unmet gate. The procedure is in [`docs/runbooks/production-data-migration-restore.md`](../runbooks/production-data-migration-restore.md) §3.
 
 ### 8. Cross-environment safety net (AC6 requirement)
 

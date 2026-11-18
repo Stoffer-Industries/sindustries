@@ -182,8 +182,12 @@ test('a Neon project with too few databases fails and names the shortfall', () =
   assert.equal(ok, false);
   const gate = gateFor(rows, 'neon.cutover-database-capacity');
   assert.equal(gate.status, 'unmet');
-  assert.match(gate.reason, /1 database\(s\)/);
-  assert.match(gate.reason, /2 database\(s\) must be created/);
+  assert.match(gate.reason, /1 distinct database\(s\)/);
+  assert.match(gate.reason, /2 more database\(s\) must be created/);
+  // The reason names what does NOT count as a database, because the
+  // operator's obvious move — scaling out read replicas of the branch
+  // that is already there — would add addresses, not databases.
+  assert.match(gate.reason, /read replica/i);
 });
 
 test('an unreadable Neon provider fails rather than passing vacuously', () => {
@@ -203,13 +207,31 @@ test('an incomplete Neon inventory fails rather than counting a lower bound', ()
   const state = loadFixture();
   state.providers.neon.project.databaseCount = 3;
   state.providers.neon.project.databaseCountReadError =
-    'the endpoints of branch staging could not be read: HTTP 500';
+    'the databases of branch staging could not be read: HTTP 500';
 
   const { ok, rows } = evaluateCutoverReadiness(state);
   assert.equal(ok, false);
   const gate = gateFor(rows, 'neon.cutover-database-capacity');
   assert.equal(gate.status, 'unmet');
   assert.match(gate.reason, /LOWER BOUND/);
+});
+
+test('an artifact captured under the endpoint-host schema cannot answer the gate', () => {
+  // Schema 12 counted Neon ENDPOINT HOSTS. A branch can serve one
+  // database behind several read-replica endpoints, so that count can
+  // read as three capacity slots when one database exists. An artifact
+  // captured under it must not be read as capacity — the gate has to
+  // refuse it and ask for a re-capture.
+  const state = loadFixture();
+  state.schemaVersion = 12;
+  state.providers.neon.project.databaseCount = 3;
+
+  const { ok, rows } = evaluateCutoverReadiness(state);
+  assert.equal(ok, false);
+  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  assert.equal(gate.status, 'unmet');
+  assert.match(gate.reason, /schema version 12/);
+  assert.match(gate.reason, /ENDPOINT HOSTS/);
 });
 
 test("the checker's secret list matches the workflow's secret reads", () => {
