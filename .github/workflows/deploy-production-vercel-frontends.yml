@@ -35,7 +35,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      # The Vercel CLI treats VERCEL_ORG_ID and VERCEL_PROJECT_ID as a paired
+      # contract: `getLinkedProject` refuses to resolve a project when either
+      # one is exported alone ("You specified `VERCEL_ORG_ID` but you forgot to
+      # specify `VERCEL_PROJECT_ID`"), and it never reads the project link the
+      # previous step wrote. This workflow binds by the matrix-owned project
+      # name, so it carries the team scope under a name the CLI does not
+      # reserve and lets `vercel link` write the resolved org and project ids
+      # into .vercel/project.json for pull, build, deploy and promote.
+      VERCEL_TEAM_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - name: Checkout
@@ -82,8 +90,8 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         run: |
           set -euo pipefail
-          if [ -z "${VERCEL_TOKEN:-}" ] || [ -z "${VERCEL_ORG_ID:-}" ]; then
-            echo "::error::VERCEL_TOKEN and VERCEL_ORG_ID must be configured in the production GitHub environment."
+          if [ -z "${VERCEL_TOKEN:-}" ] || [ -z "${VERCEL_TEAM_SCOPE:-}" ]; then
+            echo "::error::VERCEL_TOKEN and VERCEL_TEAM_SCOPE must be configured in the production GitHub environment."
             exit 1
           fi
 
@@ -108,13 +116,13 @@ jobs:
         working-directory: ${{ steps.facts.outputs.app_path }}
         run: |
           set -euo pipefail
-          vercel link --yes --project "${{ steps.facts.outputs.project }}" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
-          vercel pull --yes --environment="$VERCEL_TARGET" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          vercel link --yes --project "${{ steps.facts.outputs.project }}" --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment="$VERCEL_TARGET" --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
 
       - name: Build production candidate
         if: steps.gate.outputs.enabled == 'true'
         working-directory: ${{ steps.facts.outputs.app_path }}
-        run: vercel build --target="$VERCEL_TARGET" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+        run: vercel build --target="$VERCEL_TARGET" --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
 
       - name: Deploy production candidate
         if: steps.gate.outputs.enabled == 'true'
@@ -122,7 +130,7 @@ jobs:
         working-directory: ${{ steps.facts.outputs.app_path }}
         run: |
           set -euo pipefail
-          candidate_url="$(vercel deploy --prebuilt --target="$VERCEL_TARGET" --skip-domain --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN")"
+          candidate_url="$(vercel deploy --prebuilt --target="$VERCEL_TARGET" --skip-domain --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN")"
           echo "url=$candidate_url" >> "$GITHUB_OUTPUT"
 
       - name: Smoke candidate
@@ -140,7 +148,7 @@ jobs:
 
       - name: Promote candidate
         if: steps.gate.outputs.enabled == 'true'
-        run: vercel promote "${{ steps.candidate.outputs.url }}" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+        run: vercel promote "${{ steps.candidate.outputs.url }}" --yes --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
 
       - name: Verify stable hostname, TLS, and live bundle
         if: steps.gate.outputs.enabled == 'true'

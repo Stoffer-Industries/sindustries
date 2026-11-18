@@ -22,11 +22,26 @@ test('contract check rejects cancellation and an unscoped Vercel command', async
     mkdirSync(join(fixture, '.github/workflows'), { recursive: true });
     const source = readFileSync(join(root, workflowPath), 'utf8')
       .replace('cancel-in-progress: false', 'cancel-in-progress: true')
-      .replace('vercel promote "${{ steps.candidate.outputs.url }}" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"', 'vercel promote "${{ steps.candidate.outputs.url }}" --yes');
+      .replace('vercel promote "${{ steps.candidate.outputs.url }}" --yes --scope "$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"', 'vercel promote "${{ steps.candidate.outputs.url }}" --yes');
     writeFileSync(join(fixture, workflowPath), source);
     let failure;
     try { await exec('node', [script, fixture]); } catch (error) { failure = error; }
     assert.ok(failure);
     assert.match(`${failure.stdout}${failure.stderr}`, /must not cancel|not explicitly scoped/);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('contract check rejects a lone Vercel scope export and a hardcoded team scope', async () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'vercel-deploy-contract-scope-'));
+  try {
+    mkdirSync(join(fixture, '.github/workflows'), { recursive: true });
+    const source = readFileSync(join(root, workflowPath), 'utf8')
+      .replace('VERCEL_TEAM_SCOPE: ${{ secrets.VERCEL_ORG_ID }}', 'VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}')
+      .replace('--scope "$VERCEL_TEAM_SCOPE"', '--scope "toms-projects-7a48f06e"');
+    writeFileSync(join(fixture, workflowPath), source);
+    let failure;
+    try { await exec('node', [script, fixture]); } catch (error) { failure = error; }
+    assert.ok(failure);
+    assert.match(`${failure.stdout}${failure.stderr}`, /must be exported together|must not hardcode/);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
