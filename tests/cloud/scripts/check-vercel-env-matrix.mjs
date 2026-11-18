@@ -44,9 +44,22 @@ const VERCEL_ENV_MATRIX_PATH = 'infra/cloud/vercel-env-matrix.json';
 // enforces the host is the matrix value for the relevant environment.
 const ENV_VAR_TO_SURFACE = Object.freeze({
   VITE_TASKS_API_BASE_URL: 'tasks-api',
+  VITE_TASKS_APP_URL: 'tasks-app',
   VITE_CONTENT_SCHEDULER_API_BASE_URL: 'content-scheduler-api',
   VITE_BUDGET_API_BASE_URL: 'budget-api',
   VITE_HEALTH_PROBE_BASE_URL: 'health-probe',
+});
+
+// A value can only be validated when it exists. Keep the required build-time
+// values explicit so a missing Vite variable cannot silently compile a local
+// development fallback into a deployed frontend.
+const REQUIRED_ENV_VARS_BY_SURFACE = Object.freeze({
+  'mission-control': [
+    'VITE_TASKS_API_BASE_URL',
+    'VITE_CONTENT_SCHEDULER_API_BASE_URL',
+    'VITE_TASKS_APP_URL',
+  ],
+  'tasks-app': ['VITE_TASKS_API_BASE_URL'],
 });
 
 function loadMatrix(repoRoot) {
@@ -210,6 +223,15 @@ function main() {
         );
         continue;
       }
+      const projectEnv = envDef.env ?? {};
+      for (const requiredEnvVar of REQUIRED_ENV_VARS_BY_SURFACE[binding.surfaceId] ?? []) {
+        if (typeof projectEnv[requiredEnvVar] !== 'string' || projectEnv[requiredEnvVar].trim() === '') {
+          errors.push(
+            `${pid}/${envName}: missing required ${requiredEnvVar} for ${binding.surfaceId} — ` +
+              `without it the Vite production build can compile a localhost fallback`,
+          );
+        }
+      }
       // The branch the project builds from, recorded as an OBSERVED fact
       // (the branch the live deployment was built from). It must be
       // present and non-empty: an absent branch is how the recorded
@@ -223,7 +245,7 @@ function main() {
         continue;
       }
       const isProduction = servesEnvironment === 'production';
-      for (const [envVarName, envVarValue] of Object.entries(envDef.env ?? {})) {
+      for (const [envVarName, envVarValue] of Object.entries(projectEnv)) {
         envVarCount += 1;
         const actualHost = hostOf(envVarValue);
         if (!actualHost) {
