@@ -74,11 +74,12 @@ one comes back — a resurrected worker app would be a SECOND consumer on the
 same BullMQ queue, and every scheduled post would be processed twice,
 silently.
 
-The stable hostnames still do not resolve: the cutover's remaining leg is
-the Cloudflare CNAME move, which is blocked on a `Zone:DNS:Edit` token that
-only Tom holds (task `5cb4a8fe`). Until it lands, the services answer on the
-platform's provider hostname via path-prefix routes
-<!-- stable-fallback: provider URL pending the stable-hostname CNAME move (task 5cb4a8fe) -->
+The stable staging hostnames are live: each
+`<service>.staging.sindustries.co.nz` CNAME points at the consolidated
+platform app (task `5cb4a8fe`), and each surface answers at the root of its
+own hostname. The platform's provider hostname remains the documented
+fallback, reached on the router's path-prefix routes
+<!-- stable-fallback: provider URL — the stable staging CNAME and cert are live (verified 2026-11-18); the provider-host path-prefix route stays the documented fallback -->
 (`https://sindustries-platform-staging.fly.dev/tasks-api/health`). The
 cutover and backout procedures are in
 `docs/runbooks/platform-consolidation-rollback.md`; the shared-fate
