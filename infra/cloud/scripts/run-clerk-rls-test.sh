@@ -122,8 +122,8 @@ create_clerk_token() {
 
 echo "→ Minting production Clerk sign-in tickets and redeeming sessions"
 SESSION_A_JSON="$(create_clerk_session "$CLERK_TEST_USER_A_ID")"
-SESSION_B_JSON="$(create_clerk_session "$CLERK_TEST_USER_B_ID")"
 SESSION_A_ID="$(jq -er '.response.created_session_id' <<<"$SESSION_A_JSON")"
+SESSION_B_JSON="$(create_clerk_session "$CLERK_TEST_USER_B_ID")"
 SESSION_B_ID="$(jq -er '.response.created_session_id' <<<"$SESSION_B_JSON")"
 echo "→ Minting fresh Clerk session JWTs"
 TOKEN_A="$(create_clerk_token "$SESSION_A_ID")"
