@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-11-19 (default backlog view, task 05cc9c02)
+**Last updated:** 2026-11-20 (board rejection e2e coverage, task fb5c4e40)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 
@@ -234,6 +234,7 @@ new planes is scoped separately.
 | Flow | Spec file |
 |---|---|
 | Create task, move to doing, archive | `test/e2e/happy-path.spec.js` |
+| Rejected status transition (the board surfaces the API's error message and the card stays in its original column) | `test/e2e/board-rejection.spec.js` |
 | Assignee dropdown (reserved values) | `test/e2e/assignee-dropdown.spec.js` |
 | Filter by assignee | `test/e2e/assignee-filter.spec.js` |
 | Task dependencies UI | `test/e2e/dependency-ui.spec.js` |
