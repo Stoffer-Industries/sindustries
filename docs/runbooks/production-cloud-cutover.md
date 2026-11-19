@@ -29,6 +29,55 @@ It moves the **route** for the Mission Control production runtime and its in-sco
 
 ---
 
+## 0.1 The in-scope callers — AC2's inventory
+
+AC2 requires that after the switch **no active in-scope caller still targets prodlike** except the explicitly documented rollback surfaces. That is only checkable if every caller is named. This is the inventory, as of 2026-11-19.
+
+**The production URLs**
+
+| Caller class | Production base URL |
+|---|---|
+| Tasks API | `https://tasks-api.sindustries.co.nz/api/v1` |
+| Content Scheduler API | `https://content-scheduler-api.sindustries.co.nz/api/v1` |
+| Mission Control | `https://mission-control.sindustries.co.nz` |
+| Tasks app | `https://tasks.sindustries.co.nz` |
+
+**Repo-side callers — Rowan owns these.** They are flipped in the window, not before it: pointing them at production before the switch would move traffic ahead of the route change the window is making.
+
+| File | Current target | Post-cutover target |
+|---|---|---|
+| `agents/crons/prompts/task-lobsters.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` (4 references; one hardcodes the URL rather than defaulting to it) | Tasks API |
+| `agents/crons/prompts/morning-brief.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` (2 references) | Tasks API |
+| `agents/definitions/rowan/HEARTBEAT.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
+| `agents/definitions/quinn/HEARTBEAT.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
+| `agents/definitions/ivy/HEARTBEAT.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
+| `agents/skills/dev/pr-open/SKILL.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
+| `agents/skills/dev/pr-review/SKILL.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
+| `agents/skills/dev/tech-design/SKILL.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
+| `agents/workflows/bookmarks/scripts/lobster_resolve_spec_request.py` | defaults `TASKS_API_BASE_URL` to `http://localhost:4001/api/v1` | Tasks API |
+| `agents/cron/bookmark-triage-report.py` | requires `TASKS_API_BASE_URL`; no default | Tasks API |
+| `agents/skills/content/schedule-tweets/SKILL.md` | `CONTENT_SCHEDULER_API_BASE_URL` defaults to `http://localhost:4004/api/v1` | Content Scheduler API |
+| `agents/skills/content/schedule-tweet-thread/SKILL.md` | `CONTENT_SCHEDULER_API_BASE_URL` defaults to `http://localhost:4004/api/v1` | Content Scheduler API |
+| `agents/workflows/bookmarks/scripts/lobster_resolve_spec_request.py` | `CONTENT_SCHEDULER_API_BASE_URL` defaults to `http://localhost:4003/api/v1` | Content Scheduler API |
+| `agents/workflows/cto-craft-tweet-drafts/src/cto_craft_workflow/settings.py` | `DEFAULT_CONTENT_SCHEDULER_BASE_URL` is the prodlike `:4004` | Content Scheduler API |
+| `agents/crons/prompts/cto-craft-tweet-drafts.md` | `CONTENT_SCHEDULER_BASE_URL="<from secrets>"` | Content Scheduler API |
+
+**`.openclaw`-owned callers — Quinn owns these.** The tech design is explicit that Rowan must inventory these but must not change them. The handoff is an `[openclaw-needed]` comment naming the exact paths and keys, the stable-URL substitution (no token values), the validation command, the rollback to the local URL, and the timing relative to the route cutover. Quinn applies it and posts `[openclaw-done]`.
+
+| Caller | Current target |
+|---|---|
+| The cron/automation registrations that launch the prompts above, and the env injection they carry | `http://localhost:4001/api/v1` (Tasks API) and the prodlike Content Scheduler port |
+| The Tasks API and Content Scheduler base URLs configured under `~/.openclaw` | as above |
+
+**Two operational details that will bite if they are forgotten.**
+
+1. `agents/definitions/*/HEARTBEAT.md` and `agents/crons/prompts/*` are **synced copies**. The canonical sources are the repo files; `sync-agent-definitions.sh` copies them into each agent's workspace on the next sync. A repo edit does not change a live agent's workspace until the sync runs — so the sync must happen before the flipped cron jobs are expected to use the new URL.
+2. `agents/definitions/lox/HEARTBEAT.md` mentions `tasks-api-prodlike-down` as a **probe name**, not as a target. It is an alert label, not a caller, and it stays.
+
+**The read-back proves the surfaces, not the files.** `infra/cloud/bin/traffic-route readback` reports which in-scope *surfaces* are bound to prodlike. The caller inventory above is what proves the *callers*. Both are required: a surface on production with a caller still pointed at prodlike is a half-finished cutover.
+
+---
+
 ## 1. Roles and contact points
 
 | Role | Who | Decides |
