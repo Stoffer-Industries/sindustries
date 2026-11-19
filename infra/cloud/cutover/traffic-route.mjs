@@ -32,15 +32,32 @@
  * database harness uses for its production acknowledgement, expressed
  * on the route instead of the database.
  *
- * The adapter holds NO credentials and makes NO provider calls: the
- * route state is a repo-owned operator artifact, and the adapter's job
- * is to make a mistake impossible to make silently.
+ * THE ROUTE IS THE CALLERS, NOT THIS FILE
+ * ---------------------------------------
+ * This file is the JOURNAL of what was applied. It is not the source
+ * of truth: the source of truth is the set of caller files the
+ * manifest names, each of which carries the base URL its owner
+ * resolves. The adapter MOVES those callers (see route-callers.mjs),
+ * reads them back to confirm the move landed, and refuses to record a
+ * version whose live state does not match what the journal claims.
+ *
+ * A hand-edit of a caller file therefore MOVES THE ROUTE UNDERNEATH
+ * the operator: the journal's recorded snapshot no longer matches the
+ * live one, and the next compare-and-set is refused. That is the
+ * property a JSON file on its own could never have.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { baseUrlFor, inScopeSurfaces, loadManifest, rollbackSurfaces } from './manifest.mjs';
+import {
+  applyCallerBinding,
+  callerSnapshot,
+  readCallerBinding,
+  readSurfaceCallers,
+} from './route-callers.mjs';
 
 /** The route state version the adapter writes. */
 export const ROUTE_STATE_VERSION = 1;
@@ -54,6 +71,22 @@ export const ROUTE_BINDINGS = ['prodlike', 'production'];
  * names, and it is never committed.
  */
 export const DEFAULT_STATE_FILE = 'artifacts/cutover/production-route.json';
+
+/**
+ * The repository root, derived from this module's own location.
+ *
+ * The caller paths in the manifest are relative to the repository
+ * root, so the adapter needs to know where that root is without
+ * being told. Deriving it from the module's own path means the
+ * adapter cannot be pointed at a different tree by accident, and
+ * `--caller-root` remains available for the tests, which need a
+ * fixture tree rather than the real repository.
+ *
+ * @returns {string}
+ */
+export function defaultCallerRoot() {
+  return dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
+}
 
 /**
  * @param {string} stateFile
@@ -164,6 +197,109 @@ export function planBinding(manifest, live, binding) {
 }
 
 /**
+ * Find a caller descriptor by its id.
+ *
+ * @param {object} manifest
+ * @param {string} id
+ * @returns {object|null}
+ */
+export function findCaller(manifest, id) {
+  for (const surface of manifest.surfaces) {
+    for (const caller of surface.callers ?? []) {
+      if (caller.id === id) return caller;
+    }
+  }
+  return null;
+}
+
+/**
+ * MOVE the route: apply a binding to every in-scope caller's file.
+ *
+ * The documented rollback surfaces are skipped: they stay where they
+ * are, which is what makes the rollback honest.
+ *
+ * If a surface's switch FAILS part-way, the callers that already moved
+ * in that surface are REVERTED. A surface with some callers on
+ * prodlike and some on production is exactly the half-switched state
+ * the cutover exists to prevent, and it is the state that is hardest
+ * to notice and easiest to serve traffic from.
+ *
+ * @param {string} root
+ * @param {object} manifest
+ * @param {string} binding
+ * @returns {object} { applied, failures }
+ */
+export function applyRouteSwitch(root, manifest, binding) {
+  const applied = [];
+  const failures = [];
+  const opposite = binding === 'production' ? 'prodlike' : 'production';
+
+  // Refuse the whole switch before the first write if any managed
+  // caller is missing, ambiguous, or carries neither declared target.
+  // This avoids creating a half-switched route from a known-bad input.
+  for (const surface of manifest.surfaces) {
+    if (surface.rollbackSurface) continue;
+    for (const caller of surface.callers ?? []) {
+      if (caller.owner !== 'managed') continue;
+      const observation = readCallerBinding(root, caller);
+      if (![binding, opposite].includes(observation.binding)) {
+        failures.push({
+          id: caller.id,
+          path: caller.path,
+          surface: surface.id,
+          changed: false,
+          occurrences: observation.occurrences,
+          detail: observation.detail,
+        });
+      }
+    }
+  }
+  if (failures.length > 0) return { applied, failures };
+
+  switchLoop: for (const surface of manifest.surfaces) {
+    if (surface.rollbackSurface) continue;
+    for (const caller of surface.callers ?? []) {
+      if (caller.owner !== 'managed') continue;
+      try {
+        applied.push({
+          ...applyCallerBinding(root, caller, binding),
+          surface: surface.id,
+        });
+      } catch (error) {
+        failures.push({
+          id: caller.id,
+          path: caller.path,
+          surface: surface.id,
+          changed: false,
+          occurrences: 0,
+          detail: error.message,
+        });
+        break switchLoop;
+      }
+    }
+  }
+
+  if (failures.length > 0) {
+    const rollbackFailures = [];
+    for (const record of [...applied].reverse()) {
+      if (!record.changed) continue;
+      const caller = findCaller(manifest, record.id);
+      if (!caller) continue;
+      try {
+        applyCallerBinding(root, caller, opposite);
+      } catch (error) {
+        rollbackFailures.push(`${record.id}: ${error.message}`);
+      }
+    }
+    if (rollbackFailures.length > 0) {
+      failures[0].detail += `; automatic revert also failed for ${rollbackFailures.join(', ')}`;
+    }
+  }
+
+  return { applied, failures };
+}
+
+/**
  * `set` — apply a binding with compare-and-set.
  *
  * @param {object} manifest
@@ -173,9 +309,10 @@ export function planBinding(manifest, live, binding) {
  * @param {number} options.expectedVersion the version the operator believed was live
  * @param {string} options.runId the immutable run identifier
  * @param {string} options.confirm must equal the run id
+ * @param {object} [options.liveSnapshot] the caller bindings observed right now
  * @returns {object} the new route state
  */
-export function applyBinding(manifest, live, { binding, expectedVersion, runId, confirm }) {
+export function applyBinding(manifest, live, { binding, expectedVersion, runId, confirm, liveSnapshot = null }) {
   if (!ROUTE_BINDINGS.includes(binding)) {
     throw new Error(
       `traffic-route: unknown binding ${JSON.stringify(binding)} (expected one of ${ROUTE_BINDINGS.join(', ')})`,
@@ -204,12 +341,31 @@ export function applyBinding(manifest, live, { binding, expectedVersion, runId, 
     );
   }
 
+  // A hand-edit of a caller file MOVES the route underneath the
+  // operator: the journal's recorded snapshot no longer describes the
+  // live one. Refusing here is what makes the journal trustworthy —
+  // without this check a stale operator could overwrite somebody
+  // else's deliberate change.
+  if (liveSnapshot && live.callers && typeof live.callers === 'object') {
+    const drifted = Object.entries(liveSnapshot).filter(
+      ([id, observed]) => live.callers[id] !== undefined && live.callers[id] !== observed,
+    );
+    if (drifted.length > 0) {
+      throw new Error(
+        `traffic-route: the live route moved underneath this operator (${drifted
+          .map(([id, observed]) => `${id} is now ${observed}`)
+          .join(', ')}) — re-read the route with 'traffic-route get' before applying a change`,
+      );
+    }
+  }
+
   const now = new Date().toISOString();
   const next = {
     version: liveVersion + 1,
     environment: manifest.environment,
     binding,
     surfaces: targetBindings(manifest, binding),
+    callers: liveSnapshot ?? {},
     updatedAt: now,
     runId,
     history: [
@@ -264,15 +420,60 @@ export function waitForBinding(stateFile, { binding, expectedVersion, timeoutSec
  * The read-back the switch gate requires: which surfaces still resolve
  * to prodlike, and whether each one is a documented rollback surface.
  *
+ * The read-back reads the LIVE caller files, not the journal. That is
+ * the whole point of the change: a read-back that reads back the file
+ * the adapter just wrote proves only that the adapter wrote what it
+ * meant to write, not that any caller moved.
+ *
  * @param {object} manifest
- * @param {object} live
+ * @param {object} live the journal
+ * @param {object} [options]
+ * @param {string} [options.root] the directory the caller paths resolve against
  * @returns {object} a read-back document
  */
-export function prodlikeReadBack(manifest, live) {
+export function prodlikeReadBack(manifest, live, options = {}) {
+  const root = options.root ?? null;
   const stillProdlike = [];
-  for (const surface of inScopeSurfaces(manifest)) {
-    const binding = live.surfaces?.[surface.id] ?? null;
-    if (binding === 'prodlike') {
+  const callerObservations = [];
+  const surfaceBindings = [];
+
+  for (const surface of manifest.surfaces) {
+    const observations = root ? readSurfaceCallers(root, surface) : [];
+    for (const observation of observations) {
+      callerObservations.push({ ...observation, surface: surface.id });
+    }
+    const owned = observations.filter((observation) => observation.owner === 'managed');
+    const bindings = [...new Set(owned.map((observation) => observation.binding))];
+
+    // The LIVE binding of a surface is the binding its managed
+    // callers actually resolve. The journal is only the fallback for
+    // a surface with no managed caller to read.
+    let binding = live.surfaces?.[surface.id] ?? null;
+    let source = 'journal';
+    if (bindings.length === 1) {
+      binding = bindings[0];
+      source = 'live';
+    } else if (bindings.length > 1) {
+      binding = 'mixed';
+      source = 'live';
+    }
+
+    surfaceBindings.push({
+      surface: surface.id,
+      binding,
+      source,
+      repoCallers: owned.length,
+      externalCallers: observations.length - owned.length,
+    });
+
+    // The documented rollback surfaces are the EXPLICIT exception to
+    // "no in-scope caller still targets prodlike": they are supposed
+    // to stay on prodlike until Tom accepts the observation period.
+    // They are reported in surfaceBindings and in
+    // documentedRollbackSurfaces, but they never make the read-back
+    // unclean — otherwise the fallback the cutover relies on would
+    // read as the drift it exists to prevent.
+    if (binding === 'prodlike' && !surface.rollbackSurface) {
       stillProdlike.push({
         surface: surface.id,
         callerClass: surface.callerClass,
@@ -280,18 +481,62 @@ export function prodlikeReadBack(manifest, live) {
       });
     }
   }
+
+  const managedCallersNotOnProduction = callerObservations.filter(
+    (observation) =>
+      observation.owner === 'managed' && observation.binding !== 'production',
+  );
+  const externalOutstanding = callerObservations.filter(
+    (observation) => observation.owner === 'external',
+  );
+
   return {
     environment: manifest.environment,
     binding: live.binding ?? null,
     version: live.version ?? 0,
+    // EVERY declared surface, rollback surfaces included. A caller of
+    // the route inventory needs the whole declared set to compare
+    // against; `inScopeSurfaces` deliberately excludes the documented
+    // rollback surfaces.
+    declaredSurfaces: manifest.surfaces.map((s) => s.id),
+    // The surfaces the LIVE ROUTE knows about. This is the other
+    // half of the inventory check: the declared set is what the
+    // manifest requires, and this is what the route actually carries.
+    // A surface the manifest declares and the route does not know is
+    // route drift.
+    routeSurfaces: Object.keys(live.surfaces ?? {}).sort(),
     inScopeSurfaces: inScopeSurfaces(manifest).map((s) => s.id),
+    surfaceBindings,
     stillTargetingProdlike: stillProdlike,
     documentedRollbackSurfaces: rollbackSurfaces(manifest).map((s) => ({
       surface: s.id,
       url: s.prodlikeBaseUrl,
       reason: 'documented rollback surface — retained until Tom accepts the observation period',
     })),
-    clean: stillProdlike.length === 0,
+    managedCallersNotOnProduction: managedCallersNotOnProduction.map((observation) => ({
+      id: observation.id,
+      surface: observation.surface,
+      path: observation.path,
+      binding: observation.binding,
+      detail: observation.detail,
+    })),
+    externalCallersOutstanding: externalOutstanding.map((observation) => ({
+      id: observation.id,
+      surface: observation.surface,
+      path: observation.path,
+      detail: observation.detail,
+    })),
+    callerObservations,
+    clean:
+      stillProdlike.length === 0 &&
+      managedCallersNotOnProduction.length === 0 &&
+      externalOutstanding.length === 0,
+    // The window is only COMPLETE when every managed caller is
+    // observed on production and no external caller is outstanding.
+    complete:
+      stillProdlike.length === 0 &&
+      managedCallersNotOnProduction.length === 0 &&
+      externalOutstanding.length === 0,
   };
 }
 
@@ -306,6 +551,7 @@ export function parseArgs(argv) {
   const options = {
     command,
     stateFile: process.env.SINDUSTRIES_CUTOVER_STATE_FILE || DEFAULT_STATE_FILE,
+    callerRoot: process.env.SINDUSTRIES_CUTOVER_CALLER_ROOT || defaultCallerRoot(),
     manifest: null,
     binding: null,
     expectedVersion: null,
@@ -325,6 +571,9 @@ export function parseArgs(argv) {
     switch (arg) {
       case '--state-file':
         options.stateFile = next();
+        break;
+      case '--caller-root':
+        options.callerRoot = next();
         break;
       case '--manifest':
         options.manifest = next();
@@ -357,17 +606,24 @@ export function parseArgs(argv) {
 
 const USAGE = `traffic-route — guarded route adapter for the production cutover
 
-  traffic-route get    [--state-file <path>]
-  traffic-route plan   --manifest <path> --binding <prodlike|production> [--state-file <path>]
+  traffic-route get    [--state-file <path>] [--caller-root <dir>]
+  traffic-route plan   --manifest <path> --binding <prodlike|production>
+                       [--state-file <path>] [--caller-root <dir>]
   traffic-route set    --manifest <path> --binding <prodlike|production>
-                       --expected-version <n> --run-id <id> --confirm <id> [--state-file <path>]
-  traffic-route wait   --binding <prodlike|production> --expected-version <n> --timeout <s>
-                       [--state-file <path>]
-  traffic-route readback --manifest <path> [--state-file <path>]
+                       --expected-version <n> --run-id <id> --confirm <id>
+                       [--state-file <path>] [--caller-root <dir>]
+  traffic-route wait   --binding <prodlike|production> --expected-version <n>
+                       --timeout <s> [--state-file <path>]
+  traffic-route readback --manifest <path> [--state-file <path>] [--caller-root <dir>]
 
 Every command prints one JSON document on stdout. Errors print a message
 on stderr and exit non-zero; nothing is written unless the command says
 it writes.
+
+'set' MOVES the route: it rewrites the caller files the manifest names,
+reads them back to confirm the move landed, and only then records the
+new version. '--caller-root' is the directory the caller paths resolve
+against; it defaults to this repository's root.
 `;
 
 /**
@@ -412,14 +668,55 @@ export function main(argv) {
         }
         const manifest = loadManifest(options.manifest);
         const live = readRouteState(options.stateFile);
+        const root = options.callerRoot;
+
+        // What the callers resolve RIGHT NOW. This is the state the
+        // compare-and-set is taken against, and the state the drift
+        // check compares with the journal's recorded snapshot.
+        const before = callerSnapshot(root, manifest);
+
         const next = applyBinding(manifest, live, {
           binding: options.binding,
           expectedVersion: options.expectedVersion,
           runId: options.runId,
           confirm: options.confirm,
+          liveSnapshot: before,
         });
+
+        // MOVE THE CALLERS. This is the switch: the caller files the
+        // manifest names are rewritten to the requested origin.
+        const switched = applyRouteSwitch(root, manifest, options.binding);
+        if (switched.failures.length > 0) {
+          const first = switched.failures[0];
+          throw new Error(
+            `traffic-route: the caller switch failed for ${switched.failures
+              .map((failure) => failure.id)
+              .join(', ')} — ${first.detail}`,
+          );
+        }
+
+        // READ IT BACK. A switch that did not land is not a switch, so
+        // the caller files are re-read and every managed caller must
+        // now resolve the requested origin.
+        const after = callerSnapshot(root, manifest);
+        const notMoved = Object.entries(after).filter(([id, binding]) => {
+          const caller = findCaller(manifest, id);
+          if (!caller || caller.owner !== 'managed') return false;
+          return binding !== options.binding;
+        });
+        if (notMoved.length > 0) {
+          throw new Error(
+            `traffic-route: the caller switch did not land for ${notMoved
+              .map(([id]) => id)
+              .join(', ')} — the route was NOT moved`,
+          );
+        }
+
+        next.callers = after;
         writeRouteState(options.stateFile, next);
-        process.stdout.write(`${JSON.stringify(next, null, 2)}\n`);
+        process.stdout.write(
+          `${JSON.stringify({ ...next, callerSwitch: { root, applied: switched.applied } }, null, 2)}\n`,
+        );
         return 0;
       }
       case 'wait': {
@@ -440,7 +737,9 @@ export function main(argv) {
         }
         const manifest = loadManifest(options.manifest);
         const live = readRouteState(options.stateFile);
-        process.stdout.write(`${JSON.stringify(prodlikeReadBack(manifest, live), null, 2)}\n`);
+        process.stdout.write(
+          `${JSON.stringify(prodlikeReadBack(manifest, live, { root: options.callerRoot }), null, 2)}\n`,
+        );
         return 0;
       }
       default: {

@@ -33,10 +33,14 @@ Any agent can use this. No theme picking, no arc drafting, no decision logic —
 ## Base URL
 
 ```bash
-export CONTENT_SCHEDULER_API_BASE_URL=http://localhost:4004/api/v1
+set -a
+[ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"
+set +a
+: "${CONTENT_SCHEDULER_BASE_URL:?load CONTENT_SCHEDULER_BASE_URL from ~/.openclaw/.env}"
+export CONTENT_SCHEDULER_API_BASE_URL="${CONTENT_SCHEDULER_BASE_URL%/}/api/v1"
 ```
 
-The default port is **4004** (prodlike content-scheduler-api, per `services/content-scheduler-api/.env.prodlike`). For local dev, set `CONTENT_SCHEDULER_API_BASE_URL=http://localhost:4003/api/v1` (per `.env.example`). The previous `:4001` was a documentation drift — that port is tasks-api and does not serve this route.
+`CONTENT_SCHEDULER_BASE_URL` is the live route owned by `~/.openclaw/.env`; the skill derives the API prefix from it. Prodlike uses `http://localhost:4004` and production uses the stable Content Scheduler origin. For standalone local dev, set `CONTENT_SCHEDULER_BASE_URL=http://localhost:4003` (per `.env.example`). The previous `:4001` was documentation drift — that port is tasks-api and does not serve this route.
 
 ## Authentication
 

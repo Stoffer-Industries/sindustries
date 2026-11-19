@@ -56,6 +56,26 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 # nothing behind in the repository.
 export SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$WORK_DIR/artifacts"
 
+# Every route change runs against a fixture tree. The adapter's real
+# switch rewrites caller files, so a harness test that uses the default
+# repository root would mutate the checkout it is supposed to verify.
+CALLER_ROOT="$WORK_DIR/caller-root"
+export SINDUSTRIES_CUTOVER_CALLER_ROOT="$CALLER_ROOT"
+node --input-type=module -e "
+  import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+  import { dirname, join } from 'node:path';
+  const [manifestPath, sourceRoot, targetRoot] = process.argv.slice(1);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  for (const surface of manifest.surfaces) {
+    for (const caller of surface.callers ?? []) {
+      if (caller.owner !== 'managed') continue;
+      const target = join(targetRoot, caller.path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, caller.id + '=' + caller.prodlikeTarget + '\n', { flag: 'a' });
+    }
+  }
+" "$EXAMPLE" "$REPO_ROOT" "$CALLER_ROOT"
+
 failures=0
 checks=0
 
@@ -317,6 +337,177 @@ if printf '%s' "$plan_output" | grep -q '"failureCount"'; then
 else
   checks=$((checks + 1))
   printf 'FAIL the preflight plan counts the outstanding gates\n'
+  failures=$((failures + 1))
+fi
+
+if printf '%s' "$plan_output" | grep -q 'gate pass: route-inventory'; then
+  checks=$((checks + 1))
+  printf 'ok   the route inventory allows the documented rollback surface\n'
+else
+  checks=$((checks + 1))
+  printf 'FAIL the route inventory allows the documented rollback surface\n'
+  failures=$((failures + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# Durable state and resume gates fail closed
+# ---------------------------------------------------------------------------
+expect_fail "an unreadable state file is not treated as a fresh window" 2 "cannot be read as a state document" \
+  env SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$WORK_DIR/unreadable-state" \
+  bash -c '
+    source "$1"
+    mkdir -p "$CUTOVER_ARTIFACT_DIR"
+    printf "%s\n" "{not-json" > "$CUTOVER_STATE_FILE"
+    cutover_read_state
+  ' _ "$CUTOVER_DIR/common.sh"
+
+expect_pass "the state writer records the numeric route version" \
+  env SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$WORK_DIR/numeric-state" CUTOVER_RUN_ID="state-test" \
+  bash -c '
+    source "$1"
+    cutover_write_state baseline manifest-hash 7
+    node -e "
+      const state = JSON.parse(require(\"node:fs\").readFileSync(process.argv[1], \"utf8\"));
+      if (state.routeVersion !== 7) process.exit(1);
+    " "$CUTOVER_STATE_FILE"
+  ' _ "$CUTOVER_DIR/common.sh"
+
+expect_fail "the state writer refuses a non-numeric route version" 1 "routeVersion must be a non-negative integer" \
+  env SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$WORK_DIR/invalid-route-version" CUTOVER_RUN_ID="state-test" \
+  bash -c 'source "$1"; cutover_write_state baseline manifest-hash not-a-version' _ "$CUTOVER_DIR/common.sh"
+
+expect_fail "resume refuses a different manifest hash" 1 "different manifest" \
+  bash -c 'source "$1"; cutover_assert_resumable old-hash 7 new-hash 7' _ "$CUTOVER_DIR/common.sh"
+
+expect_fail "resume refuses a different live route version" 1 "route moved underneath the window" \
+  bash -c 'source "$1"; cutover_assert_resumable same-hash 7 same-hash 8' _ "$CUTOVER_DIR/common.sh"
+
+# ---------------------------------------------------------------------------
+# Phase timing requires both the hold and minimum samples
+# ---------------------------------------------------------------------------
+CLOCK_FILE="$WORK_DIR/clock"
+printf '%s\n' 100 > "$CLOCK_FILE"
+expect_pass "a phase cannot finish before its declared hold" \
+  env CUTOVER_CLOCK_FILE="$CLOCK_FILE" \
+  bash -c '
+    source "$1"
+    cutover_phase_should_continue 110 2 2
+    printf "%s\n" 110 > "$CUTOVER_CLOCK_FILE"
+    if cutover_phase_should_continue 110 2 2; then
+      exit 1
+    fi
+  ' _ "$CUTOVER_DIR/common.sh"
+
+# ---------------------------------------------------------------------------
+# Rehearsal gates: every observed outcome controls the result
+# ---------------------------------------------------------------------------
+expect_pass "a local-recovery result carries the shell state into its JSON evidence" \
+  bash -c '
+    source "$1"
+    result="$(cutover_local_recovery_result run-recovery backup-ref PASS 1)"
+    node -e "
+      const result = JSON.parse(process.argv[1]);
+      if (result.runId !== \"run-recovery\") process.exit(1);
+      if (result.reference !== \"backup-ref\") process.exit(1);
+      if (result.fallbackHealthVerdict !== \"PASS\") process.exit(1);
+      if (!result.isolatedRestorePerformed) process.exit(1);
+    " "$result"
+  ' _ "$CUTOVER_DIR/common.sh"
+
+expect_pass "a rollback result carries the shell state into its JSON evidence" \
+  bash -c '
+    source "$1"
+    result="$(cutover_rollback_result run-rollback "operator reason" runtime "{\"binding\":\"production\"}" "{\"binding\":\"prodlike\"}")"
+    node -e "
+      const result = JSON.parse(process.argv[1]);
+      if (result.runId !== \"run-rollback\") process.exit(1);
+      if (result.reason !== \"operator reason\") process.exit(1);
+      if (result.before.binding !== \"production\") process.exit(1);
+      if (result.after.binding !== \"prodlike\") process.exit(1);
+    " "$result"
+  ' _ "$CUTOVER_DIR/common.sh"
+
+expect_pass "a rehearsal result passes only when every hard gate passed" \
+  bash -c '
+    source "$1"
+    result="$(cutover_rehearsal_result run-success PASS 1 0 1 0 1 1)"
+    node -e "
+      const result = JSON.parse(process.argv[1]);
+      if (result.verdict !== \"PASS\") process.exit(1);
+      if (!result.failureInjected || !result.failureRecovered) process.exit(1);
+      if (!result.rollbackExecuted || !result.rollbackIdempotent) process.exit(1);
+    " "$result"
+  ' _ "$CUTOVER_DIR/common.sh"
+
+STAGING_MANIFEST="$WORK_DIR/staging-manifest.json"
+node -e "
+  const fs = require('node:fs');
+  const manifest = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  manifest.environment = 'staging';
+  manifest.taskId = '11111111-1111-4111-8111-111111111111';
+  for (const surface of manifest.surfaces) {
+    const url = new URL(surface.productionBaseUrl);
+    surface.productionBaseUrl = 'http://127.0.0.1:9' + (url.pathname === '/' ? '' : url.pathname);
+  }
+  fs.writeFileSync(process.argv[2], JSON.stringify(manifest, null, 2));
+" "$EXAMPLE" "$STAGING_MANIFEST"
+
+expect_fail "the rehearsal refuses when failure injection is unavailable" 2 "failure injection tool is not available" \
+  env CUTOVER_ENVIRONMENT=staging CUTOVER_FAILURE_INJECT_TOOL="$WORK_DIR/missing-injector" \
+  bash "$CUTOVER_DIR/rehearse.sh" --manifest "$STAGING_MANIFEST" --run-id rehearsal-no-injector
+
+node "$ADAPTER" set \
+  --manifest "$EXAMPLE" \
+  --binding prodlike \
+  --expected-version 1 \
+  --run-id reset-fixture \
+  --confirm reset-fixture \
+  --state-file "$STATE_FILE" >/dev/null
+
+REHEARSAL_CALLER_ROOT="$WORK_DIR/rehearsal-caller-root"
+cp -R "$CALLER_ROOT" "$REHEARSAL_CALLER_ROOT"
+FAKE_INJECTOR="$WORK_DIR/fake-injector.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$FAKE_INJECTOR"
+chmod +x "$FAKE_INJECTOR"
+
+expect_fail "the rehearsal refuses when the probes do not pass" 1 "probes did not pass" \
+  env CUTOVER_ENVIRONMENT=staging \
+      CUTOVER_FAILURE_INJECT_TOOL="$FAKE_INJECTOR" \
+      SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$WORK_DIR/rehearsal-artifacts" \
+      SINDUSTRIES_CUTOVER_CALLER_ROOT="$REHEARSAL_CALLER_ROOT" \
+  bash "$CUTOVER_DIR/rehearse.sh" --manifest "$STAGING_MANIFEST" --run-id rehearsal-probe-fail
+
+CLEANUP_CALLER_ROOT="$WORK_DIR/cleanup-caller-root"
+cp -R "$CALLER_ROOT" "$CLEANUP_CALLER_ROOT"
+FAKE_PROBES="$WORK_DIR/fake-probes.mjs"
+printf '%s\n' 'process.stdout.write(JSON.stringify({verdict: "PASS"}));' > "$FAKE_PROBES"
+FAKE_SCRIPTS="$WORK_DIR/fake-cutover-scripts"
+mkdir -p "$FAKE_SCRIPTS"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 1' > "$FAKE_SCRIPTS/rollback.sh"
+chmod +x "$FAKE_SCRIPTS/rollback.sh"
+INJECTION_LOG="$WORK_DIR/injection-scenarios.log"
+LOGGING_INJECTOR="$WORK_DIR/logging-injector.sh"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "%s\\n" "$1" >> "$FAKE_INJECTION_LOG"' \
+  'exit 0' > "$LOGGING_INJECTOR"
+chmod +x "$LOGGING_INJECTOR"
+
+expect_fail "a failed rehearsal rollback still recovers the injected failure" 1 "rehearsal rollback failed" \
+  env CUTOVER_ENVIRONMENT=staging \
+      CUTOVER_FAILURE_INJECT_TOOL="$LOGGING_INJECTOR" \
+      CUTOVER_PROBES_OVERRIDE="$FAKE_PROBES" \
+      CUTOVER_SCRIPTS_DIR_OVERRIDE="$FAKE_SCRIPTS" \
+      FAKE_INJECTION_LOG="$INJECTION_LOG" \
+      SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$WORK_DIR/cleanup-artifacts" \
+      SINDUSTRIES_CUTOVER_CALLER_ROOT="$CLEANUP_CALLER_ROOT" \
+  bash "$CUTOVER_DIR/rehearse.sh" --manifest "$STAGING_MANIFEST" --run-id rehearsal-cleanup
+
+checks=$((checks + 1))
+if grep -qFx 'redis-down' "$INJECTION_LOG" && grep -qFx 'redis-up' "$INJECTION_LOG"; then
+  printf 'ok   the rehearsal exit cleanup invoked the recovery scenario\n'
+else
+  printf 'FAIL the rehearsal exit cleanup invoked the recovery scenario\n'
   failures=$((failures + 1))
 fi
 

@@ -116,14 +116,17 @@ For feature-task PRs, post `[implementer-prs] <url>` as a task comment when the 
 Then PATCH the task description to fill in the workstream `Branch:` and `PR:` lines. The task ID prefix is the first 8 chars of the branch name (`task-{8chars}-...`):
 
 ```bash
+set -a
+[ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"
+set +a
 TASK_ID_PREFIX="<first-8-chars>"
-TASK=$(TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+TASK=$(TASKS_API_BASE_URL="${TASKS_API_BASE_URL:?load TASKS_API_BASE_URL from ~/.openclaw/.env}" \
   python3 agents/skills/ops/tasks-api/tasks_api_client.py list | \
   python3 -c "import json,sys; tasks=json.load(sys.stdin)['data']; \
     t=next((t for t in tasks if t['id'].startswith('$TASK_ID_PREFIX')), None); \
     print(t['id'], t['description']) if t else print('NOT FOUND')")
 
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+TASKS_API_BASE_URL="${TASKS_API_BASE_URL:?load TASKS_API_BASE_URL from ~/.openclaw/.env}" \
   python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
     --id <full-task-id> \
     --description '<updated description with Branch and PR filled in>'

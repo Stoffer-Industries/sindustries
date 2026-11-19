@@ -17,7 +17,7 @@ It moves the **route** for the Mission Control production runtime and its in-sco
 
 | | |
 |---|---|
-| **It does** | Change which origin the stable production endpoints resolve to, under a continuous external probe, with a rehearsed, executable rollback. |
+| **It does** | Change the live OpenClaw callers from the prodlike origins to the already-provisioned stable production endpoints, under continuous probes, with a rehearsed executable rollback. |
 | **It does not** | Move data. The data migration is task `f2c23e26-9d26-451d-bf62-e1a357fa24ab`, and it runs **immediately before** this task in the same window. This task is not a second database migration. |
 | **It does not** | Decommission prodlike. Prodlike is retained as a tested rollback surface until Tom explicitly accepts the observation period. AC5's decommissioning is a later, explicit operation. |
 | **It does not** | Accept on Tom's behalf. The harness's final phase is `acceptance_pending`; it stops there. |
@@ -42,39 +42,29 @@ AC2 requires that after the switch **no active in-scope caller still targets pro
 | Mission Control | `https://mission-control.sindustries.co.nz` |
 | Tasks app | `https://tasks.sindustries.co.nz` |
 
-**Repo-side callers — Rowan owns these.** They are flipped in the window, not before it: pointing them at production before the switch would move traffic ahead of the route change the window is making.
+**The live route is the OpenClaw runtime configuration, not the GitHub checkout.** Repository-owned prompts, heartbeats, and skills consume these variables; they no longer pin a local URL over the runtime value.
 
-| File | Current target | Post-cutover target |
-|---|---|---|
-| `agents/crons/prompts/task-lobsters.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` (4 references; one hardcodes the URL rather than defaulting to it) | Tasks API |
-| `agents/crons/prompts/morning-brief.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` (2 references) | Tasks API |
-| `agents/definitions/rowan/HEARTBEAT.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
-| `agents/definitions/quinn/HEARTBEAT.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
-| `agents/definitions/ivy/HEARTBEAT.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
-| `agents/skills/dev/pr-open/SKILL.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
-| `agents/skills/dev/pr-review/SKILL.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
-| `agents/skills/dev/tech-design/SKILL.md` | `TASKS_API_BASE_URL=http://localhost:4001/api/v1` | Tasks API |
-| `agents/workflows/bookmarks/scripts/lobster_resolve_spec_request.py` | defaults `TASKS_API_BASE_URL` to `http://localhost:4001/api/v1` | Tasks API |
-| `agents/cron/bookmark-triage-report.py` | requires `TASKS_API_BASE_URL`; no default | Tasks API |
-| `agents/skills/content/schedule-tweets/SKILL.md` | `CONTENT_SCHEDULER_API_BASE_URL` defaults to `http://localhost:4004/api/v1` | Content Scheduler API |
-| `agents/skills/content/schedule-tweet-thread/SKILL.md` | `CONTENT_SCHEDULER_API_BASE_URL` defaults to `http://localhost:4004/api/v1` | Content Scheduler API |
-| `agents/workflows/bookmarks/scripts/lobster_resolve_spec_request.py` | `CONTENT_SCHEDULER_API_BASE_URL` defaults to `http://localhost:4003/api/v1` | Content Scheduler API |
-| `agents/workflows/cto-craft-tweet-drafts/src/cto_craft_workflow/settings.py` | `DEFAULT_CONTENT_SCHEDULER_BASE_URL` is the prodlike `:4004` | Content Scheduler API |
-| `agents/crons/prompts/cto-craft-tweet-drafts.md` | `CONTENT_SCHEDULER_BASE_URL="<from secrets>"` | Content Scheduler API |
+| Managed caller file (relative to `SINDUSTRIES_CUTOVER_CALLER_ROOT`) | Key | Prodlike | Production |
+|---|---|---|---|
+| `.env` | `TASKS_API_BASE_URL` | `http://localhost:4001/api/v1` | Tasks API stable URL |
+| `workspace/.env` | `TASKS_API_BASE_URL` | `http://localhost:4001/api/v1` | Tasks API stable URL |
+| `.env` | `CONTENT_SCHEDULER_BASE_URL` | `http://localhost:4004` | Content Scheduler stable origin |
 
-**`.openclaw`-owned callers — Quinn owns these.** The tech design is explicit that Rowan must inventory these but must not change them. The handoff is an `[openclaw-needed]` comment naming the exact paths and keys, the stable-URL substitution (no token values), the validation command, the rollback to the local URL, and the timing relative to the route cutover. Quinn applies it and posts `[openclaw-done]`.
+The adapter atomically replaces only those URL literals, preserves the existing file mode, reads the files back, and refuses to record a route version unless every managed caller resolves the requested binding. The files may contain credentials; the adapter never prints their contents.
 
-| Caller | Current target |
-|---|---|
-| The cron/automation registrations that launch the prompts above, and the env injection they carry | `http://localhost:4001/api/v1` (Tasks API) and the prodlike Content Scheduler port |
-| The Tasks API and Content Scheduler base URLs configured under `~/.openclaw` | as above |
+Before any mutating command on the operator host:
 
-**Two operational details that will bite if they are forgotten.**
+```bash
+export SINDUSTRIES_CUTOVER_CALLER_ROOT="$HOME/.openclaw"
+```
 
-1. `agents/definitions/*/HEARTBEAT.md` and `agents/crons/prompts/*` are **synced copies**. The canonical sources are the repo files; `sync-agent-definitions.sh` copies them into each agent's workspace on the next sync. A repo edit does not change a live agent's workspace until the sync runs — so the sync must happen before the flipped cron jobs are expected to use the new URL.
-2. `agents/definitions/lox/HEARTBEAT.md` mentions `tasks-api-prodlike-down` as a **probe name**, not as a target. It is an alert label, not a caller, and it stays.
+The variable is mandatory for `execute` and `rollback`. A GitHub-hosted runner has only a disposable checkout, so the workflow deliberately refuses those two modes; run them on the OpenClaw operator host. Plan and observation remain safe on the hosted runner.
 
-**The read-back proves the surfaces, not the files.** `infra/cloud/bin/traffic-route readback` reports which in-scope *surfaces* are bound to prodlike. The caller inventory above is what proves the *callers*. Both are required: a surface on production with a caller still pointed at prodlike is a half-finished cutover.
+**Repository consumers are prepared before the window.** The merged prompts, heartbeat definitions, and skills read the runtime variables above instead of overriding them with localhost. Edge syncs those definitions from `origin/main`; that sync must be complete before preflight. The window then changes only the live runtime configuration and can reverse it without editing source.
+
+`agents/definitions/lox/HEARTBEAT.md` mentions `tasks-api-prodlike-down` as a **probe name**, not as a target. It is an alert label and stays.
+
+**The read-back proves the live callers and the surfaces.** `infra/cloud/bin/traffic-route readback` reads the managed runtime files and reports each observed binding. A surface recorded as production while one of its managed callers still carries the prodlike URL is not clean and cannot complete the cutover.
 
 ---
 
@@ -192,7 +182,10 @@ The read-back names every in-scope surface that still targets prodlike. Save it 
 
 ### 4.4 T-0 — execute
 
+Run this on the OpenClaw operator host, not in GitHub Actions:
+
 ```bash
+export SINDUSTRIES_CUTOVER_CALLER_ROOT="$HOME/.openclaw"
 scripts/cloud/cutover/execute.sh --manifest "$CUTOVER_MANIFEST_PATH"
 ```
 
@@ -270,6 +263,7 @@ Abort **immediately** and invoke the runtime rollback for any of the following. 
 **Planned** canary errors caused by the explicit staging rehearsal do not apply to production. Any production probe outage is an AC failure **even if the rollback succeeds**.
 
 ```bash
+export SINDUSTRIES_CUTOVER_CALLER_ROOT="$HOME/.openclaw"
 scripts/cloud/cutover/rollback.sh \
   --manifest "$CUTOVER_MANIFEST_PATH" \
   --reason "<what triggered the abort>"

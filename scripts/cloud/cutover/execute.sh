@@ -128,18 +128,35 @@ abort_and_rollback() {
 
 # Collect the phase's samples and evaluate the thresholds. Returns 0
 # when the phase passed, 1 when it must abort.
+#
+# A phase runs for AT LEAST the declared hold AND collects AT LEAST the
+# declared minimum samples — whichever takes longer. Enforcing only the
+# sample count let a 300-second phase finish after about 60 seconds
+# and the 3600-second observation finish after about 5, so the
+# observation period the manifest declares was never the observation
+# period that happened.
 collect_phase_samples() {
   local phase="$1" binding="$2" hold_seconds="$3" min_samples="$4"
   local interval
   interval="$(probe_interval)"
-  local deadline=$(( $(date +%s) + hold_seconds ))
+  local deadline=$(( $(cutover_now) + hold_seconds ))
   local samples=0
   local failure_count=0
   local evidence_lines=""
   local sample_index=0
+  # The guard against a clock that never advances. A frozen clock with
+  # an instant sleep would otherwise spin forever, so the loop is
+  # bounded by what the declared hold and sample count can possibly
+  # require, and a breach is an abort with a named reason rather than a
+  # hang nobody notices.
+  local max_iterations=$(( min_samples + (hold_seconds / (interval > 0 ? interval : 1)) + 2 ))
 
-  while (( samples < min_samples )); do
+  while cutover_phase_should_continue "$deadline" "$samples" "$min_samples"; do
     sample_index=$((sample_index + 1))
+    if (( sample_index > max_iterations )); then
+      EVIDENCE_PATH="$(cutover_write_evidence "$RUN_ID" "phase-${phase}-clock-stall.json" "$evidence_lines")"
+      cutover_fail "phase $phase stalled: the clock did not advance past the declared ${hold_seconds}s hold after ${sample_index} sample(s) (evidence $EVIDENCE_PATH)" 1
+    fi
     sample_output="$(node "$CUTOVER_PROBES" \
       --manifest "$MANIFEST" \
       --binding "$binding" \
@@ -163,13 +180,13 @@ collect_phase_samples() {
       return 1
     fi
 
-    if (( samples < min_samples )) && (( $(date +%s) < deadline )); then
-      sleep "$interval"
+    if cutover_phase_should_continue "$deadline" "$samples" "$min_samples"; then
+      cutover_sleep "$interval"
     fi
   done
 
   PHASE_EVIDENCE="$(cutover_write_evidence "$RUN_ID" "phase-${phase}.json" "$evidence_lines")"
-  cutover_info "phase $phase passed — $samples sample(s), evidence $PHASE_EVIDENCE"
+  cutover_info "phase $phase passed — $samples sample(s) over at least ${hold_seconds}s hold, evidence $PHASE_EVIDENCE"
   return 0
 }
 
@@ -179,11 +196,20 @@ collect_phase_samples() {
 
 START_INDEX=0
 CURRENT_PHASE="$(cutover_current_phase)"
+MANIFEST_HASH="$(cutover_manifest_hash "$MANIFEST")"
 if [[ "$RESUME" -eq 1 && "$CURRENT_PHASE" != "start" ]]; then
+  # A resume is only a resume if it is the SAME window: the same
+  # manifest, and the same live route. Resuming on a changed manifest
+  # is running a different window; resuming on a moved route means the
+  # route changed while nobody was watching. Both are refusals.
+  RECORDED_MANIFEST_HASH="$(cutover_state_value manifestHash)"
+  RECORDED_ROUTE_VERSION="$(cutover_state_value routeVersion)"
+  RESUME_ROUTE_VERSION="$(cutover_route_version)"
+  cutover_assert_resumable "$RECORDED_MANIFEST_HASH" "$RECORDED_ROUTE_VERSION" "$MANIFEST_HASH" "$RESUME_ROUTE_VERSION"
   for index in "${!PHASES[@]}"; do
     if [[ "${PHASES[$index]}" == "$CURRENT_PHASE" ]]; then
       START_INDEX=$((index + 1))
-      cutover_info "resuming after phase $CURRENT_PHASE"
+      cutover_info "resuming after phase $CURRENT_PHASE (manifest $MANIFEST_HASH, route version $RESUME_ROUTE_VERSION)"
       break
     fi
   done
@@ -206,7 +232,6 @@ if [[ -n "$ONLY_PHASE" ]]; then
   fi
 fi
 
-MANIFEST_HASH="$(cutover_manifest_hash "$MANIFEST")"
 LAST_APPLIED_VERSION=""
 LAST_BINDING=""
 

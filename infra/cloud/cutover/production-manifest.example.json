@@ -14,7 +14,6 @@
   "taskId": "020f423e-a18d-4435-98cb-664b655f675b",
   "environment": "production",
   "description": "Production cloud cutover: Mission Control runtime and its in-scope callers move from the prodlike origin to the verified cloud deployment, with prodlike retained as a tested rollback surface until Tom accepts the observation period.",
-
   "run": {
     "observationMinutes": 60,
     "windowOpensNzdt": "2026-11-22T19:00:00+13:00",
@@ -30,7 +29,6 @@
       "activeAlertCount": 1
     }
   },
-
   "origins": {
     "prodlike": {
       "kind": "local",
@@ -45,7 +43,6 @@
       "note": "The verified cloud deployment. One consolidated platform app hosts the Tasks API, the Content Scheduler and the Budget API as supervisor children."
     }
   },
-
   "surfaces": [
     {
       "id": "tasks-api",
@@ -54,7 +51,23 @@
       "prodlikeBaseUrl": "http://localhost:4001/api/v1",
       "healthPath": "/health",
       "rollbackSurface": false,
-      "callerClass": "tasks-api-and-agent-automation"
+      "callerClass": "tasks-api-and-agent-automation",
+      "callers": [
+        {
+          "id": "openclaw-runtime-tasks-api",
+          "path": ".env",
+          "owner": "managed",
+          "prodlikeTarget": "http://localhost:4001/api/v1",
+          "productionTarget": "https://tasks-api.sindustries.co.nz/api/v1"
+        },
+        {
+          "id": "workspace-runtime-tasks-api",
+          "path": "workspace/.env",
+          "owner": "managed",
+          "prodlikeTarget": "http://localhost:4001/api/v1",
+          "productionTarget": "https://tasks-api.sindustries.co.nz/api/v1"
+        }
+      ]
     },
     {
       "id": "content-scheduler-api",
@@ -63,7 +76,16 @@
       "prodlikeBaseUrl": "http://localhost:4004/api/v1",
       "healthPath": "/health",
       "rollbackSurface": false,
-      "callerClass": "content-scheduler-and-cron-callers"
+      "callerClass": "content-scheduler-and-cron-callers",
+      "callers": [
+        {
+          "id": "openclaw-runtime-content-scheduler",
+          "path": ".env",
+          "owner": "managed",
+          "prodlikeTarget": "http://localhost:4004",
+          "productionTarget": "https://content-scheduler-api.sindustries.co.nz"
+        }
+      ]
     },
     {
       "id": "budget-api",
@@ -72,7 +94,8 @@
       "prodlikeBaseUrl": "http://localhost:4002/api/v1",
       "healthPath": "/health",
       "rollbackSurface": false,
-      "callerClass": "mission-control"
+      "callerClass": "mission-control",
+      "callers": []
     },
     {
       "id": "mission-control",
@@ -81,7 +104,8 @@
       "prodlikeBaseUrl": "http://localhost:5175",
       "healthPath": "/",
       "rollbackSurface": false,
-      "callerClass": "operator-facing-ui"
+      "callerClass": "operator-facing-ui",
+      "callers": []
     },
     {
       "id": "tasks-app",
@@ -90,7 +114,8 @@
       "prodlikeBaseUrl": "http://localhost:5176",
       "healthPath": "/",
       "rollbackSurface": false,
-      "callerClass": "operator-facing-ui"
+      "callerClass": "operator-facing-ui",
+      "callers": []
     },
     {
       "id": "prodlike-fallback",
@@ -100,20 +125,54 @@
       "healthPath": "/health",
       "rollbackSurface": true,
       "callerClass": "documented-rollback-surface",
-      "note": "The prodlike origin is NOT decommissioned by this task. It is the retained rollback surface and is the one documented exception to 'no in-scope caller targets prodlike'."
+      "note": "The prodlike origin is NOT decommissioned by this task. It is the retained rollback surface and is the one documented exception to 'no in-scope caller targets prodlike'.",
+      "callers": []
     }
   ],
-
   "phases": [
-    { "phase": "baseline", "binding": "prodlike", "holdSeconds": 300, "minSamples": 2 },
-    { "phase": "canary", "binding": "production", "holdSeconds": 300, "minSamples": 2 },
-    { "phase": "partial", "binding": "production", "holdSeconds": 300, "minSamples": 2 },
-    { "phase": "majority", "binding": "production", "holdSeconds": 300, "minSamples": 2 },
-    { "phase": "cloud_active", "binding": "production", "holdSeconds": 600, "minSamples": 3 },
-    { "phase": "observing", "binding": "production", "holdSeconds": 3600, "minSamples": 6 },
-    { "phase": "acceptance_pending", "binding": "production", "holdSeconds": 0, "minSamples": 1 }
+    {
+      "phase": "baseline",
+      "binding": "prodlike",
+      "holdSeconds": 300,
+      "minSamples": 2
+    },
+    {
+      "phase": "canary",
+      "binding": "production",
+      "holdSeconds": 300,
+      "minSamples": 2
+    },
+    {
+      "phase": "partial",
+      "binding": "production",
+      "holdSeconds": 300,
+      "minSamples": 2
+    },
+    {
+      "phase": "majority",
+      "binding": "production",
+      "holdSeconds": 300,
+      "minSamples": 2
+    },
+    {
+      "phase": "cloud_active",
+      "binding": "production",
+      "holdSeconds": 600,
+      "minSamples": 3
+    },
+    {
+      "phase": "observing",
+      "binding": "production",
+      "holdSeconds": 3600,
+      "minSamples": 6
+    },
+    {
+      "phase": "acceptance_pending",
+      "binding": "production",
+      "holdSeconds": 0,
+      "minSamples": 1
+    }
   ],
-
   "probes": {
     "intervalSeconds": 60,
     "minSamplesPerStep": 2,
@@ -121,7 +180,6 @@
     "syntheticIdentity": "cutover-probe@cutover.invalid",
     "cleanupRequired": true
   },
-
   "gates": {
     "requiredDependencyTaskIds": [
       "2850c5ac-252e-404a-863b-b83755b2f618",
@@ -137,9 +195,12 @@
       "credential-and-callback-preflight",
       "staging-rollback-rehearsal"
     ],
-    "requiredOperatorFields": ["observationMinutes", "operatorRoles.goNoGo", "operatorRoles.execution"]
+    "requiredOperatorFields": [
+      "observationMinutes",
+      "operatorRoles.goNoGo",
+      "operatorRoles.execution"
+    ]
   },
-
   "evidence": {
     "artifactDir": "artifacts/cutover",
     "recordTemplate": "docs/infra/production-cloud-cutover-record-template.md"

@@ -170,23 +170,7 @@ fi
 # 6. Record the outcome
 # ---------------------------------------------------------------------------
 STATE_AFTER="$(cutover_route_readback "$MANIFEST" 2>/dev/null || printf '{}')"
-OUTCOME="$(node --input-type=module -e "
-  const [runId, reason, mode, before, after] = process.argv.slice(1);
-  process.stdout.write(JSON.stringify({
-    version: 1,
-    kind: 'rollback-result',
-    runId,
-    reason,
-    mode,
-    runtimeRollbackComplete: true,
-    dataLayerRecoveryRequired: mode === 'data-layer',
-    before: JSON.parse(before),
-    after: JSON.parse(after),
-    cloudDeploymentRetained: true,
-    prodlikeRetained: true,
-    at: new Date().toISOString(),
-  }, null, 2));
-")"
+OUTCOME="$(cutover_rollback_result "$RUN_ID" "$REASON" "$ROLLBACK_MODE" "$STATE_BEFORE" "$STATE_AFTER")"
 OUTCOME_PATH="$(cutover_write_evidence "$RUN_ID" "rollback-result.json" "$OUTCOME")"
 cutover_info "rollback complete — evidence $OUTCOME_PATH"
 cutover_write_state "rolled_back" "$(cutover_manifest_hash "$MANIFEST")" "$(cutover_route_version)"
