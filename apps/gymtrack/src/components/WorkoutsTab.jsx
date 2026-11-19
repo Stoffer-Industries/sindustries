@@ -13,8 +13,14 @@ import WorkoutCard from './WorkoutCard.jsx';
  * workout's date pre-selected via `?date=`. Users without an active OAuth
  * consent also get provider-specific links into Claude or ChatGPT's real MCP
  * connector setup, where the agent initiates the PKCE authorization flow.
+ *
+ * `todayYyyyMmDd` is an injection seam for the "today" the cards classify
+ * against. When it is omitted (the production path), each card derives
+ * "today" from the local clock at render time, exactly as before. Tests pass
+ * the date under test explicitly so the fixture's notion of "today" and the
+ * component's notion of "today" cannot disagree.
  */
-export default function WorkoutsTab() {
+export default function WorkoutsTab({ todayYyyyMmDd }) {
   const { signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -130,7 +136,7 @@ export default function WorkoutsTab() {
         <ul className="workout-cards" data-testid="workout-cards">
           {workouts.map((w) => (
             <li key={w.id} className="workout-card-item">
-              <WorkoutCard workout={w} />
+              <WorkoutCard workout={w} todayYyyyMmDd={todayYyyyMmDd} />
             </li>
           ))}
         </ul>

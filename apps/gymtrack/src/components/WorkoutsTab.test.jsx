@@ -36,28 +36,42 @@ import WorkoutsTab from './WorkoutsTab.jsx';
 // fixture dates classify the same way at runtime (CI is UTC; local is NZST).
 // Hard-coding '2026-08-01' here caused PR #333's CI to flip a "today"
 // workout into "upcoming" when the runner's local date was 2026-07-31.
+// Deriving "today" from the wall clock at module-import time caused the
+// 2026-11-19 CI run (merge commit 4cca6be) to flip that same card into
+// "overdue" when the run crossed midnight between import and render. The
+// date under test is therefore a fixed value, and the same value is injected
+// into `WorkoutsTab`, so the fixture and the component cannot disagree.
 import { dateBadgeStatus, todayLocalDate } from './WorkoutCard.jsx';
 
-function renderWorkoutsTab() {
-  return render(
-    <MemoryRouter initialEntries={['/workouts']}>
-      <Routes>
-        <Route path="/workouts" element={<WorkoutsTab />} />
-        <Route path="/login" element={<div data-testid="login-page">Login</div>} />
-      </Routes>
-    </MemoryRouter>
-  );
-}
-
-const TODAY = todayLocalDate();
+// The date under test. Fixed, so the suite never reads the wall clock for
+// its fixture dates, and injected into `WorkoutsTab`, so the fixture's
+// "today" and the component's "today" are the same value by construction.
+const TODAY = '2026-11-19';
+// Local noon on the date under test: unambiguous in every timezone and never
+// on a DST transition, so the relative-date fixtures stay stable.
+const TODAY_NOON = new Date(2026, 10, 19, 12, 0, 0);
 
 function dateOffset(days) {
-  const d = new Date();
+  const d = new Date(TODAY_NOON);
   d.setDate(d.getDate() + days);
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+// `tab` defaults to the tab under test with the date under test injected.
+// Tests that need a different element (e.g. the no-injection fallback) pass
+// their own `tab`.
+function renderWorkoutsTab({ tab = <WorkoutsTab todayYyyyMmDd={TODAY} /> } = {}) {
+  return render(
+    <MemoryRouter initialEntries={['/workouts']}>
+      <Routes>
+        <Route path="/workouts" element={tab} />
+        <Route path="/login" element={<div data-testid="login-page">Login</div>} />
+      </Routes>
+    </MemoryRouter>
+  );
 }
 
 const NEXT_WEEK_DATE = dateOffset(7);
@@ -289,5 +303,66 @@ describe('dateBadgeStatus (AC2 visual-distinction helper)', () => {
     expect(dateBadgeStatus(OVERDUE_DATE, TODAY)).toBe('overdue');
     expect(dateBadgeStatus(TODAY, TODAY)).toBe('today');
     expect(dateBadgeStatus(TOMORROW_DATE, TODAY)).toBe('upcoming');
+  });
+});
+
+describe('date under test - no wall-clock dependency', () => {
+  it('keeps the today card as "today" when the wall clock crosses midnight between fixture capture and render', async () => {
+    // The CI run that turned main's merge gate red captured the fixture's
+    // "today" at 23:59:56 and rendered at 00:00:12, so the card the fixture
+    // called "today" was classified as "overdue". Both instants are built in
+    // local time so the crossing happens in every timezone, not just UTC.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 10, 19, 23, 59, 56));
+      const fixtureToday = todayLocalDate();
+      expect(fixtureToday).toBe(TODAY);
+
+      vi.setSystemTime(new Date(2026, 10, 20, 0, 0, 12));
+      // The wall clock really did roll over to the next day.
+      expect(todayLocalDate()).toBe('2026-11-20');
+
+      mockListPendingPlannedWorkouts.mockResolvedValueOnce({
+        data: [
+          makeWorkout({
+            id: 'w-midnight',
+            scheduled_for: fixtureToday,
+            title: "Today's push day",
+            sets: [{ id: 's-m', exercise_name: 'Bench Press', set_index: 1, target_reps: 5, target_weight: 80, unit: 'kg' }]
+          })
+        ],
+        error: null
+      });
+      renderWorkoutsTab({ tab: <WorkoutsTab todayYyyyMmDd={fixtureToday} /> });
+
+      expect(await screen.findByTestId('workout-card-w-midnight')).toHaveAttribute('data-status', 'today');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to the wall-clock date when no date is injected', async () => {
+    // The production path: without an injected date the card derives "today"
+    // from the local clock at render time, exactly as it did before.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 10, 19, 9, 0, 0));
+      mockListPendingPlannedWorkouts.mockResolvedValueOnce({
+        data: [
+          makeWorkout({
+            id: 'w-default',
+            scheduled_for: TODAY,
+            title: "Today's push day",
+            sets: [{ id: 's-d', exercise_name: 'Bench Press', set_index: 1, target_reps: 5, target_weight: 80, unit: 'kg' }]
+          })
+        ],
+        error: null
+      });
+      renderWorkoutsTab({ tab: <WorkoutsTab /> });
+
+      expect(await screen.findByTestId('workout-card-w-default')).toHaveAttribute('data-status', 'today');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
