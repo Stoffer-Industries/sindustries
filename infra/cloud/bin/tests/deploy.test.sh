@@ -227,11 +227,11 @@ for alias in tasks-api budget-api content-scheduler-api auto-post-worker platfor
   FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
     "$SCRIPT" "$alias" --image registry/repo:aaaabbbbccccdddd 2>&1
   assert_eq "deploy $alias exit code" "0" "$?"
-  # stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+  # stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
   assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
-  # stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+  # stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
   assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
-  # stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+  # stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
   assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
   assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 done
@@ -263,11 +263,11 @@ assert_log_contains "INVOKED: releases --app sindustries-platform-staging --json
 assert_log_contains "INVOKED: machines list --app sindustries-platform-staging --json"
 # All three service health routes are checked through the router's
 # path-prefix routes on the provider hostname.
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 # And the auto-post worker, which has no HTTP route, is checked via its
 # startup log line inside the consolidated Machine.
