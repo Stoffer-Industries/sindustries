@@ -112,8 +112,8 @@ function fixture({ now = '2026-07-18T15:00:00.000Z' } = {}) {
   ];
 }
 
-const TODAY_OK = { date: '2026-07-19', publishedCount: 0, publishedItemId: null, cap: 1 };
-const TODAY_FULL = { date: '2026-07-19', publishedCount: 1, publishedItemId: PUBLISHED_ID, cap: 1 };
+const TODAY_OK = { date: '2026-07-19', publishedCount: 0, publishedItemId: null, cap: 3 };
+const TODAY_FULL = { date: '2026-07-19', publishedCount: 3, publishedItemId: PUBLISHED_ID, cap: 3 };
 
 function dispatchDragStart(cardEl) {
   const dt = {
@@ -158,7 +158,7 @@ describe('ContentSchedulerTab', () => {
     // Unscheduled overflow is present.
     expect(screen.getByTestId('pulse-content-scheduler-unscheduled')).toBeTruthy();
     // Day-strip footer still shows today-status.
-    expect(screen.getByTestId('pulse-content-scheduler-day-strip').textContent).toContain('0 / 1');
+    expect(screen.getByTestId('pulse-content-scheduler-day-strip').textContent).toContain('0 / 3');
   });
 
   it('shows an error state when fetch fails and recovers on retry', async () => {
@@ -186,7 +186,7 @@ describe('ContentSchedulerTab', () => {
     await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler')).toBeTruthy());
     const approvedPublish = screen.getByTestId(`content-scheduler-publish-${APPROVED_ID}`);
     expect(approvedPublish.hasAttribute('disabled')).toBe(true);
-    expect(approvedPublish.getAttribute('title')).toMatch(/max one/i);
+    expect(approvedPublish.getAttribute('title')).toMatch(/max 3/i);
   });
 
   it('approve button calls the approve endpoint and refreshes', async () => {
@@ -388,9 +388,16 @@ describe('ContentSchedulerTab', () => {
   // AC6 — drag-drop onto a day with a published item is refused and shows an
   // inline error.
   it('refuses to drop onto a day with an existing published item and shows an inline error', async () => {
+    const items = fixture();
+    const published = items.find((item) => item.id === PUBLISHED_ID);
+    listItems.mockResolvedValueOnce([
+      ...items,
+      { ...published, id: '66666666-6666-6666-6666-666666666666' },
+      { ...published, id: '77777777-7777-7777-7777-777777777777' }
+    ]);
     render(<ContentSchedulerTab />);
     await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler')).toBeTruthy());
-    // The published item sits in 2026-07-21 (today+2 in NZ). Drag the queued
+    // Three published items sit in 2026-07-21 (today+2 in NZ). Drag the queued
     // card onto that day.
     const queuedCard = screen.getByTestId(`content-scheduler-row-${QUEUED_ID}`);
     const publishedDay = screen.getByTestId('pulse-content-scheduler-day-2026-07-21');
@@ -398,7 +405,7 @@ describe('ContentSchedulerTab', () => {
     fireEvent.dragOver(publishedDay, { dataTransfer: dt });
     fireEvent.drop(publishedDay, { dataTransfer: dt });
     await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler-day-drop-error-2026-07-21')).toBeTruthy());
-    expect(screen.getByTestId('pulse-content-scheduler-day-drop-error-2026-07-21').textContent).toMatch(/already has a published/i);
+    expect(screen.getByTestId('pulse-content-scheduler-day-drop-error-2026-07-21').textContent).toMatch(/daily cap reached/i);
     expect(updateItem).not.toHaveBeenCalled();
   });
 });

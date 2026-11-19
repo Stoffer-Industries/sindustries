@@ -33,6 +33,7 @@ import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
 import { config } from '../config/index.ts';
 import {
+  DAILY_PUBLISH_CAP,
   getAucklandTodayParts,
   TERMINAL_STATUSES
 } from './contentSchedulerPublish.ts';
@@ -788,7 +789,7 @@ contentSchedulerRouter.get('/content-scheduler/today-status', async (_req, res, 
         publishedItemId: todays[0]?.id ?? null,
         publishedAt: todays[0]?.publishedAt ?? null,
         publishedUrl: todays[0]?.publishedUrl ?? null,
-        cap: 1
+        cap: DAILY_PUBLISH_CAP
       }
     });
   } catch (err) {

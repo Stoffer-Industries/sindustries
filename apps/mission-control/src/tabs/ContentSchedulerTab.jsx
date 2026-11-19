@@ -1,7 +1,7 @@
 import React from 'react';
 import { Badge, Button, Card, CardContainer, Field, Select, Textarea } from '@sindustries/ui/react';
 import { SchedulerItemCard } from './SchedulerItemCard.jsx';
-import { SOURCES, dayStatusLabel } from './contentSchedulerConstants.js';
+import { DAILY_PUBLISH_CAP, SOURCES, dayStatusLabel } from './contentSchedulerConstants.js';
 import { useContentScheduler } from './useContentScheduler.js';
 
 // Slim container: composer + 10-day calendar grid + unscheduled strip + day-strip.
@@ -213,11 +213,11 @@ export function ContentSchedulerTab() {
       >
         {days.map((day) => {
           const dayItems = grouped.byDayKey[day.key] ?? [];
-          const publishedItem = grouped.publishedByDayKey[day.key] ?? null;
+          const publishedItems = grouped.publishedByDayKey[day.key] ?? [];
           const isOver = dragOverZone === `day:${day.key}`;
           const dayError = dropError?.dayKey === day.key ? dropError.message : null;
           const headerClasses = ['content-scheduler-day-column__header'];
-          if (publishedItem) headerClasses.push('content-scheduler-day-column__header--published');
+          if (publishedItems.length > 0) headerClasses.push('content-scheduler-day-column__header--published');
           const columnClasses = ['content-scheduler-day-column'];
           if (isOver) columnClasses.push('content-scheduler-day-column--drag-over');
           if (dayError) columnClasses.push('content-scheduler-day-column--drop-error');
@@ -232,9 +232,9 @@ export function ContentSchedulerTab() {
             >
               <header className={headerClasses.join(' ')} data-testid={`pulse-content-scheduler-day-header-${day.key}`}>
                 <span className="content-scheduler-day-column__label">{day.label}</span>
-                {publishedItem && (
+                {publishedItems.length > 0 && (
                   <Badge variant="success" data-testid={`pulse-content-scheduler-day-published-${day.key}`}>
-                    Published
+                    Published {publishedItems.length}/{DAILY_PUBLISH_CAP}
                   </Badge>
                 )}
                 <span className="content-scheduler-day-column__count" data-testid={`pulse-content-scheduler-day-count-${day.key}`}>
@@ -266,7 +266,7 @@ export function ContentSchedulerTab() {
                       onSave={handleSave}
                       onSaveThread={handleSaveThread}
                       onDragStart={handleDragStart}
-                      isPublishedInCalendar={Boolean(publishedItem) && item.id !== publishedItem.id}
+                      isPublishedInCalendar={publishedItems.length >= DAILY_PUBLISH_CAP}
                     />
                   ))
                 )}

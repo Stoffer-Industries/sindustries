@@ -140,10 +140,19 @@ describe('guardPublish', () => {
   it('refuses DAY_CAP_REACHED when a different item already published today', () => {
     const result = guardPublish(
       itemFixture({ id: 'aaaa', status: 'approved', approvedAt: now }),
-      { publishedCount: 1, publishedItemId: 'bbbb' },
+      { publishedCount: 3, publishedItemId: 'bbbb' },
       now
     );
     expect(result).toEqual({ ok: false, code: 'DAY_CAP_REACHED' });
+  });
+
+  it('allows publishing while fewer than three items have published today', () => {
+    const result = guardPublish(
+      itemFixture({ id: 'aaaa', status: 'approved', approvedAt: now }),
+      { publishedCount: 2, publishedItemId: 'bbbb' },
+      now
+    );
+    expect(result).toEqual({ ok: true });
   });
 
   it('refuses SCHEDULED_IN_FUTURE when scheduledFor > now + 60s', () => {
@@ -598,7 +607,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(
       itemFixture({ status: 'approved', approvedAt: new Date(), id: itemId })
     );
-    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([{ id: otherId }]);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([{ id: otherId }, { id: 'cccc1111-1111-1111-1111-111111111111' }, { id: 'dddd1111-1111-1111-1111-111111111111' }]);
     const app = createApp();
     const res = await authedRequest(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
     expect(res.status).toBe(409);
@@ -782,7 +791,7 @@ describe('contentScheduler routes', () => {
     const res = await authedRequest(app).get('/api/v1/content-scheduler/today-status');
     expect(res.status).toBe(200);
     expect(res.body.data.publishedCount).toBe(0);
-    expect(res.body.data.cap).toBe(1);
+    expect(res.body.data.cap).toBe(3);
     expect(typeof res.body.data.date).toBe('string');
   });
 });
@@ -830,7 +839,7 @@ describe('public GET routes stay reachable without auth (methodGate scope guard)
     const app = createApp();
     const res = await request(app).get('/api/v1/content-scheduler/today-status');
     expect(res.status).toBe(200);
-    expect(res.body.data.cap).toBe(1);
+    expect(res.body.data.cap).toBe(3);
   });
 });
 

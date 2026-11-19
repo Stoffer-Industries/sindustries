@@ -29,7 +29,7 @@ shipped_date: null
 
 ## Product intent (from approved product spec + idea)
 
-- Outcome: a Content Scheduler tab inside Mission Control lets Tom queue approved content for posting to X, schedule one tweet per day, reorder/edit/remove queued items, and see published timestamps + URLs. Nothing posts without Tom's explicit per-item approval.
+- Outcome: a Content Scheduler tab inside Mission Control lets Tom queue approved content for posting to X, schedule up to three tweets per day, reorder/edit/remove queued items, and see published timestamps + URLs. Nothing posts without Tom's explicit per-item approval.
 - Source material today: ops notes pipeline output (already generated but not surfaced) and CTO Craft mailing list content Quinn reads. Both feed into the queue.
 - Why now: closes the loop from "Tom ships something" → "Tom shares something." Without the scheduler, the ops-notes signals have nowhere to go.
 - Approved by Tom (per task description, 2026-07-07).
@@ -45,8 +45,8 @@ shipped_date: null
 
 - **AC1 — Tab registered.** New tab `Content Scheduler` at `/content-scheduler`, visible in the sidebar tab bar (vertical sidebar from PR #194), rendering a `ContentSchedulerTab` component.
 - **AC2 — Add to queue.** Tom can paste or compose tweet text, optionally tag a source (`ops-notes`, `cto-craft`, `manual`), and add it to the queue. Items enter the queue in `draft` status; transitioning to `queued` happens on add in v1 (no separate "save draft" affordance) — `draft` is the field used to hold items removed from `queued`.
-- **AC3 — Max one per day.** The backend enforces: across all `published` items, no two can share the same calendar date (Tom's local time, `Pacific/Auckland`). The publish endpoint returns `409 Conflict` with a structured error if Tom tries to publish a second item on a day that already has a `published` item.
-- **AC4 — Queue UI.** A single page lists all non-`removed` items grouped by `status` (queued, approved, published). Within each group items are sortable by `position` (ascending). Each item exposes: edit body, change scheduled date, approve, publish (if approved + scheduledFor ≤ now + max-one/day OK), remove (soft-delete to `removed` status).
+- **AC3 — Max three per day.** The backend enforces: across all `published` items, no more than three can share the same calendar date (Tom's local time, `Pacific/Auckland`). The publish endpoint returns `409 Conflict` with a structured error if Tom tries to publish a second item on a day that already has a `published` item.
+- **AC4 — Queue UI.** A single page lists all non-`removed` items grouped by `status` (queued, approved, published). Within each group items are sortable by `position` (ascending). Each item exposes: edit body, change scheduled date, approve, publish (if approved + scheduledFor ≤ now + max-three/day OK), remove (soft-delete to `removed` status).
 - **AC5 — Published metadata.** On successful publish, the row updates with `publishedAt` (ISO timestamp from server) and `publishedUrl` (the X post URL returned by the publish integration). UI shows these in the published group.
 - **AC6 — Approval gate.** `publish` endpoint refuses items where `approvedAt IS NULL`. UI disables the publish button until approval is recorded. There is no implicit approval (e.g. typing "y" in a comment); the explicit `approve` endpoint must be hit.
 
@@ -82,10 +82,10 @@ shipped_date: null
   - Adding an item posts to `/api/v1/content-scheduler/items` and clears the composer.
   - Approve button calls `approve` endpoint and updates local state.
   - Publish button is disabled until `approvedAt` is set; clicking it calls `publish`.
-  - When `todayStatus.publishedCount === 1`, publish button is disabled on other items with a tooltip explaining the max-one-per-day rule.
+  - When `todayStatus.publishedCount === 1`, publish button is disabled on other items with a tooltip explaining the max-three-per-day rule.
   - Drag-and-drop reorder calls `reorder` with new position ordering.
   - Removing an item soft-deletes (sets `status: 'removed'`) and removes from view.
-- **`apps/mission-control/SPEC.md`** *(modified)* — Add "Content Scheduler tab" to the Screens table with the three sub-sections; add the new Vitest cases to the E2e coverage table; note the approval gate + max-one-per-day rule under Data Sources / business rules.
+- **`apps/mission-control/SPEC.md`** *(modified)* — Add "Content Scheduler tab" to the Screens table with the three sub-sections; add the new Vitest cases to the E2e coverage table; note the approval gate + max-three-per-day rule under Data Sources / business rules.
 - **`apps/mission-control/README.md`** *(modified)* — Mention the new tab in the "Adding a new tab" / "Shell features" intro paragraph.
 
 #### Tasks API (backend) — `services/tasks-api/`
@@ -230,7 +230,7 @@ One new table `ContentSchedulerItem` with two new enums. Three indexes support t
 
 ## Companion doc updates
 
-- `apps/mission-control/SPEC.md` — new "Content Scheduler tab" row in the Screens table; new Vitest cases in the E2e coverage table; new "Approval gate" and "Max one X post per day" entries under Data Sources / business rules.
+- `apps/mission-control/SPEC.md` — new "Content Scheduler tab" row in the Screens table; new Vitest cases in the E2e coverage table; new "Approval gate" and "Max three X posts per day" entries under Data Sources / business rules.
 - `apps/mission-control/README.md` — one paragraph on the new tab in the "Shell features" intro.
 - `services/tasks-api/README.md` — list the new endpoints, the two X-client env vars, and the timezone convention.
 - `docs/systems/tasks.md` — **no change.** This task is not a feature-task workflow change.

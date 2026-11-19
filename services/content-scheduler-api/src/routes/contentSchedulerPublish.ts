@@ -17,6 +17,8 @@ import type { ContentSchedulerItem } from '@prisma/client';
  */
 export const TERMINAL_STATUSES = ['published', 'removed'] as const;
 
+export const DAILY_PUBLISH_CAP = 3;
+
 /**
  * Items the publish endpoint refuses with a structured error code.
  * Each branch has a paired test in contentScheduler.test.ts.
@@ -42,7 +44,7 @@ export type PublishGuardResult =
  *    Tom manually with the URL captured via PATCH /items/:id/posted-url)
  *  - status !== 'approved' → NOT_APPROVED (also covers already-published / removed)
  *  - scheduledFor > now + 60s → SCHEDULED_IN_FUTURE
- *  - today.publishedCount >= 1 (and the item isn't the existing one) → DAY_CAP_REACHED
+ *  - today.publishedCount >= DAILY_PUBLISH_CAP (and the item isn't the existing one) → DAY_CAP_REACHED
  * The MISSING_CREDENTIALS / NO_X_CLIENT checks happen in the route, not here,
  * because they depend on process.env which is not safe to thread into a pure
  * function from a unit-test perspective.
@@ -72,7 +74,7 @@ export function guardPublish(
     }
   }
   if (
-    today.publishedCount >= 1 &&
+    today.publishedCount >= DAILY_PUBLISH_CAP &&
     today.publishedItemId !== undefined &&
     today.publishedItemId !== null
   ) {

@@ -23,7 +23,7 @@ shipped_date: 2026-07-18
 
 ## Product intent summary
 
-Mission Control's Content Scheduler should make the upcoming publishing plan visible as a 10-day forward calendar from today through today + 9 in `Pacific/Auckland`. Approved, queued, and published scheduler items appear as cards on their scheduled day; items without an in-window `scheduledFor` appear in an Unscheduled overflow area. Tom can drag non-published cards between day columns to reschedule them while preserving the time-of-day. Published cards are read-only, visually distinct, and each day with a published item blocks dropping a second item into that day with an inline error.
+Mission Control's Content Scheduler should make the upcoming publishing plan visible as a 10-day forward calendar from today through today + 9 in `Pacific/Auckland`. Approved, queued, and published scheduler items appear as cards on their scheduled day; items without an in-window `scheduledFor` appear in an Unscheduled overflow area. Tom can drag non-published cards between day columns to reschedule them while preserving the time-of-day. Published cards are read-only, visually distinct, and a day with three published items blocks dropping a fourth item into that day with an inline error.
 
 ## Service boundary and data ownership
 
@@ -31,7 +31,7 @@ Mission Control's Content Scheduler should make the upcoming publishing plan vis
 - This task is UI-first and does not introduce a new service boundary.
 - The existing item contract is enough for the calendar: `id`, `body`, `source`, `status`, `scheduledFor`, `approvedAt`, `approvedBy`, `publishedAt`, `publishedUrl`, `publishError`, `position`, `createdAt`, `updatedAt`.
 - Rescheduling uses the existing `PATCH /content-scheduler/items/:id` client helper (`updateItem`) with `{ scheduledFor }`. The backend already refuses updates to `published`/`removed` items; the UI will additionally prevent dragging published cards before a request is made.
-- The max-one-published-per-day rule is already enforced for publishing. This task adds the calendar-side drop guard so Tom cannot move another card onto a day that already contains a published item.
+- The max-three-published-per-day rule is already enforced for publishing. This task adds the calendar-side drop guard so Tom cannot move another card onto a day that contains three published items.
 
 ## `.openclaw` boundary notes
 
@@ -121,7 +121,7 @@ Timezone handling is the main correctness risk. The UI should not rely on the br
 - Preserve HH:MM from `scheduledFor` if valid; default to `09:00` when missing/invalid.
 - Add unit coverage for at least one standard-time and one DST date so rescheduling does not silently drift by a day/hour.
 
-### 5. Max-one-published-per-day guard
+### 5. Max-three-published-per-day guard
 
 - Build a `publishedByDayKey` map from loaded `items` where `status === 'published'` and the grouping day is in Pacific/Auckland.
 - Header indicator appears when a day has any published item.
