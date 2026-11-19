@@ -3,6 +3,7 @@
 // (audit finding 2-A: extract `useContentScheduler` hook + sub-components).
 
 export const ACTOR = 'Tom';
+export const DAILY_PUBLISH_CAP = 3;
 
 export const SOURCES = [
   { value: 'ops_notes', label: 'Ops notes' },
@@ -25,7 +26,7 @@ export const STATUS_BADGE_VARIANT = {
   published: 'success'
 };
 
-export const DROP_REFUSED_MESSAGE = 'Already has a published post — choose another day.';
+export const DROP_REFUSED_MESSAGE = 'Daily cap reached — choose another day.';
 
 export function defaultScheduledFor() {
   const d = new Date(Date.now() + 60_000);
@@ -70,7 +71,7 @@ export function isPublishDisabled(item, today) {
 export function publishTooltip(item, today) {
   if (!item.approvedAt) return 'Approve before publishing (AC6).';
   if (today?.publishedCount >= today?.cap && today?.publishedItemId !== item.id) {
-    return 'Max one X post per day — already published today.';
+    return 'Max ' + today.cap + ' X posts per day — daily cap reached.';
   }
   return '';
 }

@@ -21,7 +21,7 @@
 
 ## What this is
 
-The Content Scheduler is the Mission Control tab that lets Tom queue tweet copy, schedule it to specific days, and publish to X without leaving the shell. The primary view is a 10-day forward calendar (today through today + 9) in `Pacific/Auckland`. Each day is a column; approved, queued, and published items appear as cards on their scheduled day. Items without a `scheduledFor` in the window land in an Unscheduled overflow area. Tom drags cards between day columns to reschedule; published cards are read-only and each day column enforces a hard "max one published per day" rule with an inline error if violated.
+The Content Scheduler is the Mission Control tab that lets Tom queue tweet copy, schedule it to specific days, and publish to X without leaving the shell. The primary view is a 10-day forward calendar (today through today + 9) in `Pacific/Auckland`. Each day is a column; approved, queued, and published items appear as cards on their scheduled day. Items without a `scheduledFor` in the window land in an Unscheduled overflow area. Tom drags cards between day columns to reschedule; published cards are read-only and each day column enforces a hard "max three published posts per day" rule with an inline error if violated.
 
 Manual publish is still available. Auto-publish of approved items whose `scheduledFor` has arrived is an **event-driven** delayed-job trigger with no polling loop — see [§ Auto-post](#auto-post-event-driven-delayed-jobs) below.
 
@@ -386,7 +386,7 @@ When `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq`, both the API process and the worker
 | Layer | Coverage |
 |---|---|
 | Pure helpers (`contentSchedulerCalendar.js`) | `contentSchedulerCalendar.test.js` covers timezone, NZST/NZDT offset, DST start edge, scheduling defaults, day-key grouping, drop-guard logic |
-| UI (`ContentSchedulerTab.jsx`) | `ContentSchedulerTab.test.jsx` covers mount/loading/error/retry, calendar grid layout, drag-and-drop reschedule, Unscheduled overflow, published read-only badge, max-one-per-day inline error, today-status banner |
+| UI (`ContentSchedulerTab.jsx`) | `ContentSchedulerTab.test.jsx` covers mount/loading/error/retry, calendar grid layout, drag-and-drop reschedule, Unscheduled overflow, published read-only badge, max-three-per-day inline error, today-status banner |
 | API (`services/content-scheduler-api`) | `contentScheduler.test.ts` covers CRUD, approve/unapprove, publish guard outcomes (incl. `not_approved`, `already_published_today`, `missing_credentials`), reorder, today-status |
 | Auto-post (`services/content-scheduler-api`) | `contentSchedulerAutoPost.test.ts` covers the job queue adapter, BullMQ placeholder, in-process timer, end-to-end publish-via-auto-post. `contentSchedulerAutoPostDurable.test.ts` covers the BullMQ adapter (deterministic jobId, delay/attempts, cancel/hasJob/ping/queueStats/close), `reconcileAutoPostItems` (re-enqueue / scheduled-active / overdue / limit), `describeItemForReconcile`, and the `resolveRedisUrl` env precedence. |
 

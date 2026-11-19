@@ -81,7 +81,7 @@ surface.
    - On mount, fetches the queue from the Content Scheduler API
      (`/api/v1/content-scheduler/items`) and today's publish status
      (`/api/v1/content-scheduler/today-status`).
-   - Renders the **day-status banner** ("✓ 0/1 posts published today" etc.)
+   - Renders the **day-status banner** ("✓ 0/3 posts published today" etc.)
      at the bottom so the operator can see at-a-glance whether the daily
      X-post cap is reached.
    - **Composer (top).** The composer has a `Single tweet` / `Thread`
@@ -128,7 +128,7 @@ surface.
      `Intl.DateTimeFormat` (handles NZST/NZDT and the DST start edge),
      preserving the existing HH:MM or defaulting to 09:00, and PATCHes
      `/api/v1/content-scheduler/items/:id`. **No reorder API call is
-     made when the drop is refused at the UI layer** — see the max-one
+     made when the drop is refused at the UI layer** — see the max-three
      guard below.
    - **Published cards.** `draggable={false}`, greyed style, with a
      "Published" badge and the X post URL link when present. The day
@@ -141,9 +141,9 @@ surface.
      publish is still available in the composer flow for on-demand posting;
      event-driven auto-publish on `scheduledFor` arrival is documented in the
      [auto-post system spec](../systems/content-scheduler-auto-post.md).
-   - **Max-one-published-per-day guard.** When Tom drags a card onto a
-     day column that already has a published item, the drop is refused
-     at the UI layer with the inline error `"Already has a published
+   - **Max-three-published-per-day guard.** When Tom drags a card onto a
+     day column that already has three published items, the drop is refused
+     at the UI layer with the inline error `"Daily cap reached
      post — choose another day."`. No API call is made. The same rule is
      enforced server-side by `guardPublish` (`code:
      already_published_today`, `409 Conflict`) for manual and auto-post
@@ -161,7 +161,7 @@ surface.
 | Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (Compounding % (7d) KPI tile, state-count KPIs, curations, Sankey of the curation pipeline, funnel, per-topic counts, state counts over time, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
 | Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand); follows the shell's `data-si-theme` (the Mission Control tab bar is the canonical navigation — no in-page back link, no in-page theme toggle) |
-| Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler 10-day calendar: composer + 10-column day grid (Pacific/Auckland) + Unscheduled overflow + drag-and-drop reschedule; max-one-published-per-day drop guard at the UI layer |
+| Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler 10-day calendar: composer + 10-column day grid (Pacific/Auckland) + Unscheduled overflow + drag-and-drop reschedule; max-three-published-per-day drop guard at the UI layer |
 | SIndustries | `/sindustries` | `Tabs/SIndustriesTab.jsx` | Embedded `sindustries.co.nz` via iframe; falls back to an external-link card if the upstream `X-Frame-Options`/`CSP` blocks embedding (timeout-based detection, ~8s) |
 | 404 / unknown path | `/<anything>` | falls back to Tasks tab | The default tab renders; no error surface |
 
@@ -194,7 +194,7 @@ specimen mount.
 | BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
 | Compounding % (7d) KPI tile | Vitest: `compoundingSignal.test.js` covers schema validation, classify, stale, bands (24.9/25.0/49.9/50.0 boundaries), subtitle, headline formatting; `tabs/BookmarksKpiRow.test.jsx` covers the same bands at the component level plus missing/malformed placeholders, stale marker, subtitle, and independent-failure semantics |
 | SIndustries tab iframe + fallback | Vitest: `tabs/SIndustriesTab.test.jsx` covers initial iframe render, fallback after timeout, and success-path load event |
-| Content Scheduler 10-day calendar | Vitest: `tabs/ContentSchedulerTab.test.jsx` covers composer create/approve/publish/remove, calendar grid layout, Unscheduled overflow, drag-and-drop reschedule (HH:MM preservation + 09:00 default), max-one-per-day drop guard, published read-only badge, today-status banner; pure helpers in `tabs/contentSchedulerCalendar.test.js` cover NZST/NZDT offset + DST start edge + day-key grouping |
+| Content Scheduler 10-day calendar | Vitest: `tabs/ContentSchedulerTab.test.jsx` covers composer create/approve/publish/remove, calendar grid layout, Unscheduled overflow, drag-and-drop reschedule (HH:MM preservation + 09:00 default), max-three-per-day drop guard, published read-only badge, today-status banner; pure helpers in `tabs/contentSchedulerCalendar.test.js` cover NZST/NZDT offset + DST start edge + day-key grouping |
 | Content Scheduler open-edit draft ownership | Vitest: `tabs/ContentSchedulerEditDraft.test.jsx` covers the 10s refresh against an open edit form — single and thread drafts survive an unchanged poll and a changed poll, a non-edited row still refreshes while another row is mid-edit, **Save** sends the local draft rather than the polled server copy, and **Cancel** discards the draft back to the latest server copy |
 
 ## Data Sources
@@ -226,7 +226,7 @@ specimen mount.
   Its base URL is overridable via `VITE_CONTENT_SCHEDULER_API_BASE_URL`.
   The publish flow is server-side (Content Scheduler API posts to X with
   OAuth 1.0a); the Mission Control client never holds X credentials. The
-  "max one X post per day" rule is computed in `Pacific/Auckland` on both the
+  "max three X posts per day" rule is computed in `Pacific/Auckland` on both the
   client (UI drop guard) and the server (`guardPublish`). The calendar grid
   uses native HTML5 drag-and-drop; pure timezone helpers live in
   `apps/mission-control/src/tabs/contentSchedulerCalendar.js` and use

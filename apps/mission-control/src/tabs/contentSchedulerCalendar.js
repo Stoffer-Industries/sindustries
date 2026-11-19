@@ -8,6 +8,7 @@
 // and renders them.
 
 export const SCHEDULER_TIME_ZONE = 'Pacific/Auckland';
+export const DAILY_PUBLISH_CAP = 3;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -122,7 +123,7 @@ export function getAucklandDayKey(value, timeZone = SCHEDULER_TIME_ZONE) {
  * @param {Array} items                scheduler items (any status)
  * @param {Array<{key: string}>} days  output of `buildCalendarDays()`
  * @param {string} [timeZone]
- * @returns {{ byDayKey: Record<string, Array>, unscheduled: Array, publishedByDayKey: Record<string, object> }}
+ * @returns {{ byDayKey: Record<string, Array>, unscheduled: Array, publishedByDayKey: Record<string, Array> }}
  */
 export function groupItemsForCalendar(items, days, timeZone = SCHEDULER_TIME_ZONE) {
   const dayKeys = new Set(days.map((d) => d.key));
@@ -137,7 +138,7 @@ export function groupItemsForCalendar(items, days, timeZone = SCHEDULER_TIME_ZON
     if (dayKey && dayKeys.has(dayKey)) {
       byDayKey[dayKey].push(item);
       if (item.status === 'published') {
-        publishedByDayKey[dayKey] = item;
+        (publishedByDayKey[dayKey] ??= []).push(item);
       }
     } else {
       unscheduled.push(item);
@@ -255,23 +256,23 @@ export function rescheduleIsoForDay(item, targetDayKey, timeZone = SCHEDULER_TIM
 }
 
 /**
- * Is `targetDayKey` blocked by an existing published item other than `itemId`?
+ * Is the target day blocked by the daily published-post cap?
+ * A day accepts non-published cards until it reaches DAILY_PUBLISH_CAP
+ * published items.
  *
- * AC6: dragging a non-published card onto a day with a published item must
- * be refused. The published item itself is not draggable (see `ItemRow`
- * draggable prop), so the only "exception" we need to model is "the user
- * somehow got the published card to be the dragged source", which we still
- * allow to no-op cleanly by returning true (the caller should also refuse
- * the drag on the published card up front).
- *
- * @param {Record<string, object>} publishedByDayKey
+ * @param {Record<string, Array>} publishedByDayKey
  * @param {string} targetDayKey
- * @param {string|null} itemId    dragged item id (so we don't self-block)
+ * @param {string|null} itemId dragged item id
  * @returns {{ blocked: boolean, publishedItem: object|null }}
  */
 export function dayDropBlocked(publishedByDayKey, targetDayKey, itemId) {
-  const published = publishedByDayKey?.[targetDayKey] ?? null;
-  if (!published) return { blocked: false, publishedItem: null };
-  if (itemId && published.id === itemId) return { blocked: false, publishedItem: published };
-  return { blocked: true, publishedItem: published };
+  const publishedItems = publishedByDayKey?.[targetDayKey] ?? [];
+  const publishedItem = publishedItems.find((item) => item.id === itemId) ?? publishedItems[0] ?? null;
+  const otherPublishedCount = itemId && publishedItem?.id === itemId
+    ? publishedItems.length - 1
+    : publishedItems.length;
+  return {
+    blocked: otherPublishedCount >= DAILY_PUBLISH_CAP,
+    publishedItem
+  };
 }

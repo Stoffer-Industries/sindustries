@@ -186,7 +186,7 @@ describe('groupItemsForCalendar', () => {
     expect(byDayKey['2026-07-18']).toHaveLength(1);
     expect(byDayKey['2026-07-18'][0].id).toBe('published-sat');
     expect(unscheduled).toEqual([]);
-    expect(publishedByDayKey['2026-07-18'].id).toBe('published-sat');
+    expect(publishedByDayKey['2026-07-18'][0].id).toBe('published-sat');
   });
 
   it('routes items with no scheduledFor or out-of-window dates to Unscheduled', () => {
@@ -217,16 +217,26 @@ describe('groupItemsForCalendar', () => {
 describe('dayDropBlocked', () => {
   const published = { id: 'pub', status: 'published', scheduledFor: '2026-07-18T20:00:00.000Z' };
 
-  it('reports blocked when a different item is dragged onto a published day', () => {
-    const result = dayDropBlocked({ '2026-07-19': published }, '2026-07-19', 'other-id');
-    expect(result.blocked).toBe(true);
+  it('allows a different item onto a day with one published post', () => {
+    const result = dayDropBlocked({ '2026-07-19': [published] }, '2026-07-19', 'other-id');
+    expect(result.blocked).toBe(false);
     expect(result.publishedItem).toBe(published);
   });
 
   it('does not block when the dragged item is the published one (no-op case)', () => {
-    const result = dayDropBlocked({ '2026-07-19': published }, '2026-07-19', 'pub');
+    const result = dayDropBlocked({ '2026-07-19': [published] }, '2026-07-19', 'pub');
     expect(result.blocked).toBe(false);
     expect(result.publishedItem).toBe(published);
+  });
+
+  it('allows a day with fewer than three published items', () => {
+    const result = dayDropBlocked({ '2026-07-19': [published, { ...published, id: 'pub-2' }] }, '2026-07-19', 'other-id');
+    expect(result.blocked).toBe(false);
+  });
+
+  it('blocks a day with three published items', () => {
+    const result = dayDropBlocked({ '2026-07-19': [published, { ...published, id: 'pub-2' }, { ...published, id: 'pub-3' }] }, '2026-07-19', 'other-id');
+    expect(result.blocked).toBe(true);
   });
 
   it('does not block when the target day has no published item', () => {
