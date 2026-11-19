@@ -36,9 +36,11 @@ import {
 import {
   applyBinding,
   applyRouteSwitch,
+  main,
   planBinding,
   prodlikeReadBack,
   readRouteState,
+  routeSwitchNotMoved,
   targetBindings,
   waitForBinding,
   writeRouteState,
@@ -414,6 +416,111 @@ test('the route switch refuses all writes when any caller is unreadable', (t) =>
   assert.equal(switched.applied.length, 0);
   assert.equal(switched.failures[0].id, 'missing');
   assert.match(readFileSync(firstPath, 'utf8'), /localhost:4001/);
+});
+
+test('a retained rollback caller is not reported as a caller that did not move', () => {
+  const manifest = exampleManifest();
+  const rollback = manifest.surfaces.find((surface) => surface.rollbackSurface);
+  rollback.callers.push({
+    id: 'prodlike-rollback-caller',
+    path: 'rollback.env',
+    owner: 'managed',
+    prodlikeTarget: 'http://localhost:4001/api/v1',
+    productionTarget: 'https://tasks-api.sindustries.co.nz/api/v1',
+  });
+
+  const snapshot = {
+    'openclaw-runtime-tasks-api': 'production',
+    'workspace-runtime-tasks-api': 'production',
+    'openclaw-runtime-content-scheduler': 'production',
+    'prodlike-rollback-caller': 'prodlike',
+  };
+
+  // The rollback caller stayed on prodlike ON PURPOSE: the switch
+  // deliberately leaves the documented rollback surfaces alone.
+  assert.deepEqual(routeSwitchNotMoved(manifest, snapshot, 'production'), []);
+
+  // A caller that genuinely did not move is still reported.
+  assert.deepEqual(
+    routeSwitchNotMoved(
+      manifest,
+      { ...snapshot, 'openclaw-runtime-tasks-api': 'prodlike' },
+      'production',
+    ),
+    [['openclaw-runtime-tasks-api', 'prodlike']],
+  );
+});
+
+test('a production set with a retained rollback caller lands and records the route', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cutover-set-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'workspace'), { recursive: true });
+
+  // Every caller file still resolves prodlike.
+  writeFileSync(
+    join(root, '.env'),
+    'TASKS_API_BASE_URL=http://localhost:4001/api/v1\nCONTENT_SCHEDULER_BASE_URL=http://localhost:4004\n',
+  );
+  writeFileSync(
+    join(root, 'workspace/.env'),
+    'TASKS_API_BASE_URL=http://localhost:4001/api/v1\n',
+  );
+  writeFileSync(
+    join(root, 'rollback.env'),
+    'TASKS_API_BASE_URL=http://localhost:4001/api/v1\n',
+  );
+
+  // The example manifest with a MANAGED caller on the documented
+  // rollback surface. This is the case that used to fail the switch
+  // AFTER it had rewritten the in-scope callers, so the command exited
+  // non-zero and never wrote the route state.
+  const manifest = exampleManifest();
+  manifest.surfaces
+    .find((surface) => surface.rollbackSurface)
+    .callers.push({
+      id: 'prodlike-rollback-caller',
+      path: 'rollback.env',
+      owner: 'managed',
+      prodlikeTarget: 'http://localhost:4001/api/v1',
+      productionTarget: 'https://tasks-api.sindustries.co.nz/api/v1',
+    });
+  const manifestPath = join(root, 'manifest.json');
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const statePath = join(root, 'state/route.json');
+
+  const exitCode = main([
+    'set',
+    '--manifest',
+    manifestPath,
+    '--binding',
+    'production',
+    '--expected-version',
+    '0',
+    '--run-id',
+    'run-cutover-1',
+    '--confirm',
+    'run-cutover-1',
+    '--caller-root',
+    root,
+    '--state-file',
+    statePath,
+  ]);
+
+  assert.equal(exitCode, 0);
+
+  // The in-scope callers moved to production.
+  assert.match(readFileSync(join(root, '.env'), 'utf8'), /tasks-api\.sindustries/);
+  assert.match(readFileSync(join(root, 'workspace/.env'), 'utf8'), /tasks-api\.sindustries/);
+
+  // The documented rollback caller did NOT move: prodlike is retained
+  // until Tom accepts the observation period.
+  assert.match(readFileSync(join(root, 'rollback.env'), 'utf8'), /localhost:4001/);
+
+  // And the route state was recorded, so the journal matches the disk
+  // instead of the command failing with the route half-moved.
+  const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  assert.equal(state.binding, 'production');
+  assert.equal(state.version, 1);
 });
 
 test('baseUrlFor resolves a surface under each binding', () => {
