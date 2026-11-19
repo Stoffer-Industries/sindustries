@@ -73,6 +73,25 @@ Before any mutating command on the operator host:
 export SINDUSTRIES_CUTOVER_CALLER_ROOT="$HOME/.openclaw"
 ```
 
+**The hosted-observability credential is a separate read.** The probe that watches the active alert count reads the hosted Grafana stack, so the stack URL and a credential must be in the operator's environment:
+
+```bash
+export GRAFANA_CLOUD_INSTANCE_URL="https://sindustries.grafana.net"
+export GRAFANA_CLOUD_READER_AUTH="Bearer <read-scoped service-account token>"
+```
+
+Use the **read-scoped** credential, not the provisioning one. The provisioning token can write dashboards and delete alert rules; it must not be the credential the window is observed with. `GRAFANA_CLOUD_READER_AUTH` lives in `infra/cloud/observability/.env.local` — see `docs/runbooks/hosted-observability-ops.md` for how it is provisioned and rotated.
+
+This is a read-only check, and it can be run before the window:
+
+```bash
+curl -fsS -H "Authorization: ${GRAFANA_CLOUD_READER_AUTH}" \
+  "${GRAFANA_CLOUD_INSTANCE_URL%/}/api/alertmanager/grafana/api/v2/alerts" \
+  | jq 'length'
+```
+
+The number is how many alerts are firing right now. Zero is the state the window opens in.
+
 The variable is mandatory for `execute` and `rollback`. A GitHub-hosted runner has only a disposable checkout, so the workflow deliberately refuses those two modes; run them on the OpenClaw operator host. Plan and observation remain safe on the hosted runner.
 
 **Repository consumers are prepared before the window.** The merged prompts, heartbeat definitions, and skills read the runtime variables above instead of overriding them with localhost. Edge syncs those definitions from `origin/main`; that sync must be complete before preflight. The window then changes only the live runtime configuration and can reverse it without editing source.
@@ -118,6 +137,7 @@ The preflight is a **gate, not a report**. It fails closed: an environment it co
 | P10 | Synthetic authenticated probe credentials exist in the provider secret runner and are excluded from logs | The probes record correlation IDs and booleans, never tokens or domain payloads. |
 | P11 | Operators, communication channel, observation duration and abort thresholds are set | `gates.requiredOperatorFields` → `observationMinutes`, `operatorRoles.goNoGo`, `operatorRoles.execution` |
 | P12 | No deploy, migration, secret rotation or competing cutover is in progress | The operator lock (`artifacts/cutover/cutover.lock`) plus the operator's own check. |
+| P13 | The hosted stack answers and the read-scoped observability credential is present | The probe reads `GET <stack>/api/alertmanager/grafana/api/v2/alerts` and compares the count of firing alerts against `abortThresholds.activeAlertCount`. A missing credential, an unreadable endpoint or a payload that is not an alert list all **fail** the check — an unobserved signal is not a healthy signal. |
 | P13 | A **fresh passing rollback rehearsal** exists for this route mechanics | `gates.requiredEvidence` → `staging-rollback-rehearsal`. Documentation review cannot satisfy AC4. |
 
 ---
@@ -298,6 +318,20 @@ The thresholds are evaluated by one module — `infra/cloud/cutover/thresholds.m
 **The executor calls the evaluator through `infra/cloud/cutover/thresholds-cli.mjs`, never through the module.** The module decides whether to run its own command line by comparing the process entry point against its module URL, and that comparison is false whenever the path is not byte-identical to the URL — a symlinked checkout, a temporary directory, a path with a space in it. When it was false the module exited 0 **without evaluating anything**, and the executor read exit 0 as "no threshold breached": the abort thresholds were silently disabled. The wrapper imports the module and calls the evaluation unconditionally, so there is no entry-point detection on the path that matters and nothing to get wrong.
 
 **Planned** canary errors caused by the explicit staging rehearsal do not apply to production. Any production probe outage is an AC failure **even if the rollback succeeds**.
+
+### The active-alert threshold reads a real endpoint
+
+The fourth threshold, `activeAlertCount`, is measured against the hosted Grafana stack's **Alertmanager v2 alerts endpoint** — `GET <stack>/api/alertmanager/grafana/api/v2/alerts` — which returns the alerts that are **firing right now** as a bare JSON array. The database, Redis, worker and queue alerts all live there, so a firing alert on any of them is an active alert for this threshold.
+
+Three other Grafana endpoints look like candidates and are not:
+
+| Endpoint | What it returns | Why it is not the active-alert count |
+| --- | --- | --- |
+| `/api/v1/provisioning/alert-rules` | The rule **definitions** — ten of them, with no `state` field | A definition count is not a firing count. The stack carries ten rules, so this would breach a threshold of one on every run. |
+| `/api/prometheus/grafana/api/v1/rules` | Prometheus-shaped rules with a state | In this stack it answers `200` with **no groups at all**, so it would report zero active alerts forever. |
+| `/api/datasources`, `/api/dashboards/...` | Configuration | Configuration is not state. |
+
+**The probe fails closed on an unreadable signal.** A missing credential, an endpoint that does not answer, or a payload that is not an alert list all fail the check rather than counting as zero alerts. The earlier version of this probe read a `/api/v1/health` path that exists nowhere on the platform, and defaulted a missing `activeAlerts` field to zero — so an endpoint that answered with the wrong shape reported a **pass**. A count that cannot be read is not a count of zero.
 
 ```bash
 export SINDUSTRIES_CUTOVER_CALLER_ROOT="$HOME/.openclaw"

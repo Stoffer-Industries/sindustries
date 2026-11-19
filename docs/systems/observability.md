@@ -153,6 +153,24 @@ The hosted stack owns datasource URLs and UIDs. Bootstrap discovers the default 
 | `deploy-failed`                | warn     | Quinn  | **removed 2026-Q4 (task 2c782afb AC3)** — see [Deploy-failure telemetry](#deploy-failure-telemetry) |
 Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P2 informational). Quinn is the canonical owner for every alert in the v1 list; the runbook documents how to reassign individual alerts to Tom or another on-call. The two disabled/removed entries are documented below; both will return in a follow-up task with their durable producer, not by re-enabling the dead alert.
 
+**Reading the alerts that are firing right now.** "Grafana Cloud alerting (not Alertmanager)" above means there is no separately deployed Alertmanager — the stack's own built-in one serves the unified alerting rules. It is readable:
+
+```bash
+curl -fsS -H "Authorization: $GRAFANA_CLOUD_READER_AUTH" \
+  "$GRAFANA_CLOUD_INSTANCE_URL/api/alertmanager/grafana/api/v2/alerts" | jq 'length'
+```
+
+That endpoint returns the **firing** alerts as a bare JSON array. It is the only one of the four Grafana endpoints that answers "how many alerts are active right now":
+
+| Endpoint | Returns | Answers the active-alert count? |
+| --- | --- | --- |
+| `/api/alertmanager/grafana/api/v2/alerts` | The firing alerts, as a bare array | **Yes** |
+| `/api/v1/provisioning/alert-rules` | The rule **definitions** (ten, no `state` field) | No — a definition count is not a firing count |
+| `/api/prometheus/grafana/api/v1/rules` | Prometheus-shaped rules with a state | No — in this stack it answers `200` with no groups at all |
+| `/api/datasources`, `/api/dashboards/...` | Configuration | No — configuration is not state |
+
+The production cutover's `activeAlertCount` threshold reads the first one, and **fails closed** when the count cannot be read: a missing credential, an endpoint that does not answer, or a payload that is not an alert list all fail rather than counting as zero alerts (`docs/runbooks/production-cloud-cutover.md`).
+
 **The synthetic drill is gone; the `tasks-api-down` and `budget-api-down` alerts are not.** `sindustries-tasks-api-down` and `sindustries-budget-api-down` are still committed rules (`infra/cloud/observability/grafana/alerts/tasks-api-down.json`, `budget-api-down.json`) and must still fire on a real outage. What no longer exists is the *drill* that used to produce a service-scoped outage on demand: since staging is one app, `failure-inject.sh tasks-api-down` / `tasks-api-up` and `budget-api-down` / `budget-api-up` refuse (see the handover checklist below). An operator reading "the drill refuses" must not conclude the alert is dead.
 
 ### Agent dimension on gateway spans
