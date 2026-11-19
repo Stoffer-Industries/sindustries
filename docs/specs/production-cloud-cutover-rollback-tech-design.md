@@ -1,23 +1,24 @@
 ---
-status: draft
+status: shipped
 task_id: 020f423e-a18d-4435-98cb-664b655f675b
-product_spec: brain/tasks/specs/open/production-cloud-cutover-rollback.md
-shipped_pr: null
-shipped_date: null
+product_spec: brain/tasks/specs/in-progress/production-cloud-cutover-rollback.md
+shipped_pr: 1036
+shipped_date: 2026-11-19
 ---
 
 # Execute production cloud cutover with rollback verification
 
 ## Links and delivery metadata
 
-- Product spec: `brain/tasks/specs/open/production-cloud-cutover-rollback.md`
+- Product spec: `brain/tasks/specs/in-progress/production-cloud-cutover-rollback.md`
 - Parent migration index: `brain/tasks/specs/open/sindustries-cloud-migration.md` (workstream 7 of 7)
 - Task: `020f423e-a18d-4435-98cb-664b655f675b`
 - Task title: `🔧 Execute production cloud cutover with rollback verification`
 - Repository: `Stoffer-Industries/sindustries`
 - Branch: `task-020f423e-a18d-4435-98cb-664b655f675b-production-cloud-cutover-rollback`
-- Worktree: `/Users/quinnstoffer/.openclaw/workspace/worktrees/rowan-production-cloud-cutover`
+- Worktree: `/Volumes/WD1/worktrees/rowan/production-cloud-cutover`
 - Tech design: `docs/specs/production-cloud-cutover-rollback-tech-design.md`
+- Delivery PR: #1036
 
 ## Product intent
 
