@@ -250,8 +250,13 @@ export function App() {
       await patchTaskRequest(id, patch);
       showToast('Task updated', 'success');
       return true;
-    } catch {
-      showToast('Failed to update task', 'error');
+    } catch (error) {
+      // Surface the API's own message. The Tasks API rejects gated status
+      // transitions with a 409 whose body names the blocked gate and the
+      // owner who has to clear it (apps/tasks/SPEC.md flow 3.5), so the
+      // generic "Failed to update task" text hides the only actionable
+      // detail the server sent.
+      showToast(error?.message || 'Failed to update task', 'error');
       return false;
     }
   }
