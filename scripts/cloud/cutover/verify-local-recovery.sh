@@ -147,20 +147,7 @@ if [[ "$fallback_verdict" != "PASS" ]]; then
   cutover_warn "the live local fallback is not healthy ($fallback_verdict) — evidence $FALLBACK_PATH"
 fi
 
-RESULT="$(node --input-type=module -e "
-  const [runId, reference, fallbackVerdict, restorePerformed] = process.argv.slice(1);
-  process.stdout.write(JSON.stringify({
-    version: 1,
-    kind: 'local-recovery-result',
-    runId,
-    reference,
-    fallbackHealthVerdict: fallbackVerdict,
-    isolatedRestorePerformed: restorePerformed === '1',
-    liveFallbackOverwritten: false,
-    fallbackRetained: true,
-    at: new Date().toISOString(),
-  }, null, 2));
-")"
+RESULT="$(cutover_local_recovery_result "$RUN_ID" "$REFERENCE" "$fallback_verdict" "$RESTORE_PERFORMED")"
 RESULT_PATH="$(cutover_write_evidence "$RUN_ID" "local-recovery-result.json" "$RESULT")"
 cutover_info "local recovery verification recorded — $RESULT_PATH"
 printf '%s\n' "$RESULT"

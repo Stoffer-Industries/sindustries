@@ -13,8 +13,16 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -27,6 +35,7 @@ import {
 } from '../manifest.mjs';
 import {
   applyBinding,
+  applyRouteSwitch,
   planBinding,
   prodlikeReadBack,
   readRouteState,
@@ -314,6 +323,97 @@ test('the prodlike read-back is clean once every in-scope surface is on producti
   const readback = prodlikeReadBack(manifest, live);
   assert.equal(readback.clean, true);
   assert.equal(readback.stillTargetingProdlike.length, 0);
+});
+
+test('the route switch rewrites live callers and read-back observes the files', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cutover-callers-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'callers'), { recursive: true });
+  const callerPath = join(root, 'callers/tasks.txt');
+  writeFileSync(callerPath, 'base=http://localhost:4001/api/v1\n', { mode: 0o600 });
+
+  const manifest = {
+    environment: 'production',
+    surfaces: [
+      {
+        id: 'tasks-api',
+        callerClass: 'automation',
+        rollbackSurface: false,
+        prodlikeBaseUrl: 'http://localhost:4001/api/v1',
+        productionBaseUrl: 'https://tasks-api.sindustries.co.nz/api/v1',
+        callers: [
+          {
+            id: 'tasks-caller',
+            path: 'callers/tasks.txt',
+            owner: 'managed',
+            prodlikeTarget: 'http://localhost:4001/api/v1',
+            productionTarget: 'https://tasks-api.sindustries.co.nz/api/v1',
+          },
+        ],
+      },
+      {
+        id: 'prodlike-fallback',
+        callerClass: 'documented-rollback-surface',
+        rollbackSurface: true,
+        prodlikeBaseUrl: 'http://localhost:4001/api/v1',
+        productionBaseUrl: 'https://tasks-api.sindustries.co.nz/api/v1',
+        callers: [],
+      },
+    ],
+  };
+
+  const switched = applyRouteSwitch(root, manifest, 'production');
+  assert.deepEqual(switched.failures, []);
+  assert.match(readFileSync(callerPath, 'utf8'), /tasks-api\.sindustries/);
+  assert.equal(statSync(callerPath).mode & 0o777, 0o600);
+
+  const live = {
+    ...LIVE,
+    binding: 'production',
+    surfaces: targetBindings(manifest, 'production'),
+  };
+  const readback = prodlikeReadBack(manifest, live, { root });
+  assert.equal(readback.clean, true);
+  assert.equal(readback.surfaceBindings[0].source, 'live');
+  assert.equal(readback.surfaceBindings[0].binding, 'production');
+});
+
+test('the route switch refuses all writes when any caller is unreadable', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cutover-callers-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'callers'), { recursive: true });
+  const firstPath = join(root, 'callers/first.txt');
+  writeFileSync(firstPath, 'base=http://localhost:4001/api/v1\n');
+
+  const manifest = {
+    surfaces: [
+      {
+        id: 'tasks-api',
+        rollbackSurface: false,
+        callers: [
+          {
+            id: 'first',
+            path: 'callers/first.txt',
+            owner: 'managed',
+            prodlikeTarget: 'http://localhost:4001/api/v1',
+            productionTarget: 'https://tasks-api.sindustries.co.nz/api/v1',
+          },
+          {
+            id: 'missing',
+            path: 'callers/missing.txt',
+            owner: 'managed',
+            prodlikeTarget: 'http://localhost:4001/api/v1',
+            productionTarget: 'https://tasks-api.sindustries.co.nz/api/v1',
+          },
+        ],
+      },
+    ],
+  };
+
+  const switched = applyRouteSwitch(root, manifest, 'production');
+  assert.equal(switched.applied.length, 0);
+  assert.equal(switched.failures[0].id, 'missing');
+  assert.match(readFileSync(firstPath, 'utf8'), /localhost:4001/);
 });
 
 test('baseUrlFor resolves a surface under each binding', () => {

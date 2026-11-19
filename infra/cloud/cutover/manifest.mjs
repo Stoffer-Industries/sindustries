@@ -28,6 +28,8 @@
 
 import { readFileSync } from 'node:fs';
 
+import { CALLER_OWNERS } from './route-callers.mjs';
+
 /** The manifest version this code understands. */
 export const SUPPORTED_MANIFEST_VERSION = 1;
 
@@ -288,6 +290,7 @@ export function validateManifest(manifest) {
     throw new Error('manifest: surfaces must be a non-empty array');
   }
   const surfaceIds = new Set();
+  const callerIds = new Set();
   for (const surface of manifest.surfaces) {
     if (!isPlainObject(surface)) {
       throw new Error('manifest: every surface must be an object');
@@ -314,6 +317,65 @@ export function validateManifest(manifest) {
       throw new Error(
         `manifest: surface ${surface.id} must declare rollbackSurface as a boolean — the rollback exception is explicit, never implied`,
       );
+    }
+
+    // ---- the callers this surface binds -------------------------------
+    //
+    // The route is not the surface: it is the BASE URL each caller
+    // resolves. A surface with no declared caller has no route to
+    // move, so the manifest names them — every in-scope caller, and
+    // which side owns each one.
+    //
+    // A caller carries its own two targets rather than inheriting the
+    // surface's: the literal in the file is not always the surface's
+    // canonical base URL (one caller carries a bare origin, another
+    // carries a local-dev port), and the adapter replaces the literal
+    // it actually finds.
+    if (!Array.isArray(surface.callers)) {
+      throw new Error(
+        `manifest: surface ${surface.id} must declare a callers array — the route is the caller's base URL, so the callers must be named`,
+      );
+    }
+    for (const caller of surface.callers) {
+      if (!isPlainObject(caller)) {
+        throw new Error(`manifest: every caller of surface ${surface.id} must be an object`);
+      }
+      if (!isNonEmptyString(caller.id)) {
+        throw new Error(`manifest: every caller of surface ${surface.id} needs an id`);
+      }
+      if (callerIds.has(caller.id)) {
+        throw new Error(`manifest: duplicate caller id ${caller.id}`);
+      }
+      callerIds.add(caller.id);
+      if (!isNonEmptyString(caller.path)) {
+        throw new Error(`manifest: caller ${caller.id} needs a path`);
+      }
+      // A caller path is used to read and WRITE a file on the
+      // operator's disk, so it must be a plain relative path inside
+      // the repository. An absolute path or a `..` that climbs out of
+      // the root would let a tracked manifest write anywhere.
+      if (caller.path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(caller.path)) {
+        throw new Error(
+          `manifest: caller ${caller.id} path must be relative to the managed caller root, got ${JSON.stringify(caller.path)}`,
+        );
+      }
+      if (caller.path.split('/').includes('..')) {
+        throw new Error(
+          `manifest: caller ${caller.id} path must not climb out of the managed caller root, got ${JSON.stringify(caller.path)}`,
+        );
+      }
+      if (!CALLER_OWNERS.includes(caller.owner)) {
+        throw new Error(
+          `manifest: caller ${caller.id} must declare an owner of ${CALLER_OWNERS.join(' or ')}, got ${JSON.stringify(caller.owner)}`,
+        );
+      }
+      assertPlainUrl(caller.prodlikeTarget, `caller ${caller.id} prodlikeTarget`);
+      assertPlainUrl(caller.productionTarget, `caller ${caller.id} productionTarget`);
+      if (caller.prodlikeTarget === caller.productionTarget) {
+        throw new Error(
+          `manifest: caller ${caller.id} declares the same prodlike and production target — a caller that cannot move is not a caller`,
+        );
+      }
     }
   }
   const rollbackSurfaces = manifest.surfaces.filter((s) => s.rollbackSurface);

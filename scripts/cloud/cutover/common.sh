@@ -46,7 +46,8 @@ fi
 # ABSOLUTE path: a sibling script reached by a relative path only works
 # when the operator happens to be standing in the repository root, and a
 # cutover must not depend on the operator's working directory.
-CUTOVER_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC2034 # consumed by scripts that source this file
+CUTOVER_SCRIPTS_DIR="${CUTOVER_SCRIPTS_DIR_OVERRIDE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # The shared credential redactor. Every operator surface that shows
 # command output masks credentials with this ONE module, so two
@@ -59,7 +60,8 @@ CUTOVER_MANIFEST_MODULE="$CUTOVER_REPO_ROOT/infra/cloud/cutover/manifest.mjs"
 
 # The probe suite. The probes run against the ACTIVE binding, so they
 # are the only thing in the harness that talks to the services.
-CUTOVER_PROBES="$CUTOVER_REPO_ROOT/tests/cloud/production-cutover-probes.mjs"
+# shellcheck disable=SC2034 # consumed by scripts that source this file
+CUTOVER_PROBES="${CUTOVER_PROBES_OVERRIDE:-$CUTOVER_REPO_ROOT/tests/cloud/production-cutover-probes.mjs}"
 
 # Where the cutover's artifacts live. The manifest's evidence.artifactDir
 # overrides this; the environment variable overrides the manifest.
@@ -77,6 +79,17 @@ CUTOVER_STATE_FILE="$CUTOVER_ARTIFACT_DIR/cutover-state.json"
 
 # The route state file (owned by the route adapter).
 CUTOVER_ROUTE_STATE_FILE="${SINDUSTRIES_CUTOVER_STATE_FILE:-$CUTOVER_ARTIFACT_DIR/production-route.json}"
+
+# The root the caller's base URLs are resolved against.
+#
+# The route IS the caller's base URL, so a route change is a change to
+# the files the callers live in. The root defaults to the repository
+# the harness is running from, and the environment variable exists so
+# the test suite can point the adapter at a fixture tree instead of
+# rewriting the real callers. Mutating commands additionally require
+# the environment variable to be set explicitly: the default repository
+# root is read-only planning convenience, not a production route.
+CUTOVER_CALLER_ROOT="${SINDUSTRIES_CUTOVER_CALLER_ROOT:-$CUTOVER_REPO_ROOT}"
 
 # The immutable run id. Every mutating command is bound to it, and it
 # is what the operator types to confirm a change.
@@ -143,9 +156,7 @@ cutover_redact() {
 # required — the harness runs unchanged on macOS and on Linux.
 cutover_require_commands() {
   local missing=()
-  for command_name in node; do
-    command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
-  done
+  command -v node >/dev/null 2>&1 || missing+=("node")
   if [[ ${#missing[@]} -gt 0 ]]; then
     cutover_fail "required tools are missing from PATH: ${missing[*]}" 2
   fi
@@ -320,39 +331,173 @@ cutover_acquire_lock() {
 }
 
 # ---------------------------------------------------------------------------
+# Clock
+# ---------------------------------------------------------------------------
+
+# The current time, in epoch seconds.
+#
+# The hold and observation durations are the core of the cutover's
+# safety property, so the clock they are measured against has to be
+# CONTROLLABLE. A test that waits out a 300-second hold in real time is
+# a test nobody runs, and a test that stubs the duration away proves
+# nothing. CUTOVER_CLOCK_FILE lets a test pin a virtual clock and
+# advance it deliberately, so the rule is exercised for real without
+# costing the wall clock.
+cutover_now() {
+  if [[ -n "${CUTOVER_CLOCK_FILE:-}" && -f "${CUTOVER_CLOCK_FILE}" ]]; then
+    cat "${CUTOVER_CLOCK_FILE}"
+    return
+  fi
+  date -u +%s
+}
+
+# Sleep for a number of seconds, through the same controllable clock.
+#
+# CUTOVER_SLEEP_COMMAND lets a test substitute a command that advances
+# the virtual clock and returns immediately, so a 300-second hold can
+# be exercised in milliseconds without weakening the rule the hold
+# exists to enforce.
+cutover_sleep() {
+  local seconds="${1:-0}"
+  if [[ -n "${CUTOVER_SLEEP_COMMAND:-}" ]]; then
+    "${CUTOVER_SLEEP_COMMAND}" "${seconds}"
+    return
+  fi
+  sleep "${seconds}"
+}
+
+# ---------------------------------------------------------------------------
 # Durable state
 # ---------------------------------------------------------------------------
 
 # The cutover state file. It records the phase the window reached, the
 # manifest hash it was started with, the route version it observed, and
 # the evidence artifacts it produced.
+#
+# A MISSING state file is a fresh window — that is the normal first
+# run. A state file that EXISTS but cannot be parsed is NOT a fresh
+# window: it is a window whose state is unknown. Treating it as fresh
+# is how one window silently starts twice, and how a resume lands on a
+# phase the previous operator never reached. It fails closed.
 cutover_read_state() {
   if [[ ! -f "$CUTOVER_STATE_FILE" ]]; then
     printf '{"version":1,"phase":null,"manifestHash":null,"routeVersion":null,"runId":null,"artifacts":[]}'
-    return
+    return 0
   fi
-  node -e "
+  if ! node -e "
     const { readFileSync } = require('node:fs');
-    process.stdout.write(readFileSync(process.argv[1], 'utf8'));
-  " "$CUTOVER_STATE_FILE"
+    const raw = readFileSync(process.argv[1], 'utf8');
+    const state = JSON.parse(raw);
+    if (!state || typeof state !== 'object' || Array.isArray(state)) {
+      process.stderr.write('the state file is not a JSON object');
+      process.exit(1);
+    }
+    process.stdout.write(raw);
+  " "$CUTOVER_STATE_FILE" 2>/dev/null; then
+    cutover_fail "the cutover state at $CUTOVER_STATE_FILE cannot be read as a state document — refusing to treat an unreadable window as a fresh one" 2
+  fi
+}
+
+# One field of the durable state, read through the state document.
+#
+# A missing field reads as an EMPTY STRING, never as a default. The
+# resume gate distinguishes "the window recorded no route version"
+# (which must refuse) from "the route is at version 0", and a default
+# would erase that distinction.
+cutover_state_value() {
+  local key="$1"
+  cutover_read_state | node -e "
+    let raw = '';
+    process.stdin.on('data', (chunk) => { raw += chunk; });
+    process.stdin.on('end', () => {
+      let state = {};
+      try { state = JSON.parse(raw); } catch { state = {}; }
+      const value = state[process.argv[1]];
+      if (value === null || value === undefined) process.stdout.write('');
+      else process.stdout.write(String(value));
+    });
+  " "$key"
+}
+
+# ---------------------------------------------------------------------------
+# Resume gate
+# ---------------------------------------------------------------------------
+
+# A resume is only a resume if it is the SAME window: the same
+# manifest, and the same live route. Resuming on a changed manifest is
+# running a different window; resuming on a moved route means the
+# route changed while nobody was watching. Both are refusals.
+#
+# It is a helper rather than inline code in the executor so the rule
+# can be exercised on its own, without standing up a whole cutover
+# window to reach it.
+cutover_assert_resumable() {
+  local recorded_manifest_hash="$1" recorded_route_version="$2" manifest_hash="$3" live_route_version="$4"
+  if [[ -z "$recorded_manifest_hash" ]]; then
+    cutover_fail "cannot resume: the recorded state carries no manifest hash — the window it describes cannot be identified" 1
+  fi
+  if [[ "$recorded_manifest_hash" != "$manifest_hash" ]]; then
+    cutover_fail "cannot resume: the recorded window was started with a different manifest (recorded $recorded_manifest_hash, this manifest $manifest_hash) — that is a different window, not a resume" 1
+  fi
+  if [[ -z "$recorded_route_version" ]]; then
+    cutover_fail "cannot resume: the recorded state carries no route version — the live route cannot be checked against the one the window applied" 1
+  fi
+  if [[ "$live_route_version" != "$recorded_route_version" ]]; then
+    cutover_fail "cannot resume: the live route is at version $live_route_version but the window recorded version $recorded_route_version — the route moved underneath the window" 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Phase timing
+# ---------------------------------------------------------------------------
+
+# Whether a phase still owes work.
+#
+# A phase runs for AT LEAST the declared hold AND collects AT LEAST the
+# declared minimum samples — whichever takes longer. Enforcing only the
+# sample count let a 300-second phase finish after about 60 seconds and
+# the 3600-second observation finish after about 5, so the observation
+# period the manifest declares was never the observation period that
+# happened.
+#
+# The rule lives in one place so the executor and the test agree about
+# it.
+cutover_phase_should_continue() {
+  local deadline="$1" samples="$2" min_samples="$3"
+  if (( samples < min_samples )); then
+    return 0
+  fi
+  if (( $(cutover_now) < deadline )); then
+    return 0
+  fi
+  return 1
 }
 
 cutover_write_state() {
   local phase="$1" manifest_hash="$2" route_version="$3"
+  local existing_state
+  existing_state="$(cutover_read_state)"
   mkdir -p "$CUTOVER_ARTIFACT_DIR"
   node --input-type=module -e "
-    import { readFileSync, writeFileSync, renameSync } from 'node:fs';
-    const [stateFile, phase, manifestHash, routeVersion, runId, artifact] = process.argv.slice(1);
-    let state = { version: 1, phase: null, manifestHash: null, routeVersion: null, runId: null, artifacts: [] };
-    try {
-      state = JSON.parse(readFileSync(stateFile, 'utf8'));
-    } catch {
-      // A missing or unreadable state file starts a fresh window.
-    }
+    import { writeFileSync, renameSync } from 'node:fs';
+    const [stateFile, rawState, phase, manifestHash, routeVersion, runId, artifact] = process.argv.slice(1);
+    const state = JSON.parse(rawState);
     state.version = 1;
     state.phase = phase;
     state.manifestHash = manifestHash;
-    state.routeVersion = Number.isInteger(routeVersion) ? routeVersion : null;
+    // The route version arrives from bash as a STRING, so it is
+    // PARSED here rather than tested with Number.isInteger on the
+    // raw argument — which was always false, and so the route version
+    // was recorded as null on every single write. A state file that
+    // never records the route version cannot gate a resume on it.
+    if (!/^\\d+$/.test(routeVersion)) {
+      throw new Error('routeVersion must be a non-negative integer');
+    }
+    const parsedRouteVersion = Number(routeVersion);
+    if (!Number.isSafeInteger(parsedRouteVersion)) {
+      throw new Error('routeVersion is outside the safe integer range');
+    }
+    state.routeVersion = parsedRouteVersion;
     state.runId = runId;
     state.updatedAt = new Date().toISOString();
     const artifacts = new Set(state.artifacts ?? []);
@@ -361,7 +506,7 @@ cutover_write_state() {
     const temporary = stateFile + '.tmp';
     writeFileSync(temporary, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
     renameSync(temporary, stateFile);
-  " "$CUTOVER_STATE_FILE" "$phase" "$manifest_hash" "$route_version" "$(cutover_run_id)" "${CUTOVER_LAST_ARTIFACT:-}"
+  " "$CUTOVER_STATE_FILE" "$existing_state" "$phase" "$manifest_hash" "$route_version" "$(cutover_run_id)" "${CUTOVER_LAST_ARTIFACT:-}"
 }
 
 # The phase the window is in, or "start" when there is no state file.
@@ -434,13 +579,17 @@ cutover_next_phase() {
 # Apply a binding through the adapter with compare-and-set.
 cutover_route_set() {
   local manifest_path="$1" binding="$2" expected_version="$3" run_id="$4"
+  if [[ -z "${SINDUSTRIES_CUTOVER_CALLER_ROOT:-}" ]]; then
+    cutover_fail "SINDUSTRIES_CUTOVER_CALLER_ROOT must name the live OpenClaw runtime root before a route can change — a checkout-local edit is not a production cutover" 2
+  fi
   node "$CUTOVER_ADAPTER" set \
     --manifest "$manifest_path" \
     --binding "$binding" \
     --expected-version "$expected_version" \
     --run-id "$run_id" \
     --confirm "$run_id" \
-    --state-file "$CUTOVER_ROUTE_STATE_FILE"
+    --state-file "$CUTOVER_ROUTE_STATE_FILE" \
+    --caller-root "$CUTOVER_CALLER_ROOT"
 }
 
 # The plan for a binding — read-only.
@@ -457,7 +606,90 @@ cutover_route_readback() {
   local manifest_path="$1"
   node "$CUTOVER_ADAPTER" readback \
     --manifest "$manifest_path" \
-    --state-file "$CUTOVER_ROUTE_STATE_FILE"
+    --state-file "$CUTOVER_ROUTE_STATE_FILE" \
+    --caller-root "$CUTOVER_CALLER_ROOT"
+}
+
+# ---------------------------------------------------------------------------
+# Rehearsal result
+# ---------------------------------------------------------------------------
+
+# Build local-recovery evidence from the observed fallback check.
+cutover_local_recovery_result() {
+  local run_id="$1" reference="$2" fallback_verdict="$3" restore_performed="$4"
+  node --input-type=module -e "
+    const [runId, reference, fallbackVerdict, restorePerformed] = process.argv.slice(1);
+    process.stdout.write(JSON.stringify({
+      version: 1,
+      kind: 'local-recovery-result',
+      runId,
+      reference,
+      fallbackHealthVerdict: fallbackVerdict,
+      isolatedRestorePerformed: restorePerformed === '1',
+      liveFallbackOverwritten: false,
+      fallbackRetained: true,
+      at: new Date().toISOString(),
+    }, null, 2));
+  " "$run_id" "$reference" "$fallback_verdict" "$restore_performed"
+}
+
+# Build the rollback result from the state captured around the live
+# route change. Keeping this boundary in a tested helper prevents the
+# shell from silently omitting values consumed through process.argv.
+cutover_rollback_result() {
+  local run_id="$1" reason="$2" mode="$3" before="$4" after="$5"
+  node --input-type=module -e "
+    const [runId, reason, mode, before, after] = process.argv.slice(1);
+    process.stdout.write(JSON.stringify({
+      version: 1,
+      kind: 'rollback-result',
+      runId,
+      reason,
+      mode,
+      runtimeRollbackComplete: true,
+      dataLayerRecoveryRequired: mode === 'data-layer',
+      before: JSON.parse(before),
+      after: JSON.parse(after),
+      cloudDeploymentRetained: true,
+      prodlikeRetained: true,
+      at: new Date().toISOString(),
+    }, null, 2));
+  " "$run_id" "$reason" "$mode" "$before" "$after"
+}
+
+# Build the rehearsal result from observed gate outcomes. The caller
+# passes exit-derived values; this helper never asserts success itself.
+cutover_rehearsal_result() {
+  local run_id="$1" probes_verdict="$2" injection_performed="$3" injection_status="$4"
+  local recovery_performed="$5" recovery_status="$6" rollback_executed="$7" rollback_idempotent="$8"
+  node --input-type=module -e "
+    const [runId, probesVerdict, injectionPerformed, injectionStatus, recoveryPerformed, recoveryStatus, rollbackExecuted, rollbackIdempotent] = process.argv.slice(1);
+    const failureInjected = injectionPerformed === '1' && injectionStatus === '0';
+    const failureRecovered = recoveryPerformed === '1' && recoveryStatus === '0';
+    const rolledBack = rollbackExecuted === '1';
+    const idempotent = rollbackIdempotent === '1';
+    const complete =
+      failureInjected &&
+      failureRecovered &&
+      rolledBack &&
+      idempotent &&
+      probesVerdict === 'PASS';
+    process.stdout.write(JSON.stringify({
+      version: 1,
+      kind: 'rehearsal-result',
+      runId,
+      environment: 'staging',
+      probesVerdict,
+      failureInjected,
+      failureInjectionStatus: Number(injectionStatus),
+      failureRecovered,
+      failureRecoveryStatus: Number(recoveryStatus),
+      rollbackExecuted: rolledBack,
+      rollbackIdempotent: idempotent,
+      verdict: complete ? 'PASS' : 'INCOMPLETE',
+      at: new Date().toISOString(),
+    }, null, 2));
+  " "$run_id" "$probes_verdict" "$injection_performed" "$injection_status" "$recovery_performed" "$recovery_status" "$rollback_executed" "$rollback_idempotent"
 }
 
 # ---------------------------------------------------------------------------

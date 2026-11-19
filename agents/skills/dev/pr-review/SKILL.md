@@ -68,7 +68,10 @@ If the PR is linked to a task (look for `Task:` or `Linked task:` in the body, o
 3. When every AC is accounted for, mark the AC checkboxes in the task body as done (`- [ ]` → `- [x]`) using your role's check-off script:
    - **Quinn (content reviewer):** runs `check_off_quinn_acs.py`:
      ```bash
-     TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+     set -a
+     [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"
+     set +a
+     TASKS_API_BASE_URL="${TASKS_API_BASE_URL:?load TASKS_API_BASE_URL from ~/.openclaw/.env}" \
        python3 codebases/sindustries/agents/workflows/content-tasks/scripts/check_off_quinn_acs.py \
        --task-id <task-id>
      ```

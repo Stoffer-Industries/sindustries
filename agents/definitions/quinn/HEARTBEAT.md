@@ -8,7 +8,7 @@ ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
 
 Before any specialised section or silent-success decision, fetch the unified read-only queue once:
 
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
+`set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a; TASKS_API_BASE_URL="${TASKS_API_BASE_URL:?load TASKS_API_BASE_URL from ~/.openclaw/.env}" python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
 
 The queue combines assigned active tasks, Quinn's **global** tech-design approval scan across all feature/code tasks regardless of assignee, review requests, authored-PR feedback, and role-safe merge candidates. It returns one deterministic `topCandidate`. Action that candidate through the matching specialised section and existing workflow/PR skill; the queue itself never mutates tasks or GitHub.
 

@@ -27,13 +27,14 @@
 # Modes:
 #   plan     — read-only. Validates the manifest and prints the route
 #              plan and the prodlike read-back. Changes nothing.
-#   rehearse — the rollback rehearsal. STAGING ONLY: rehearse.sh
-#              refuses a production manifest.
-#   execute  — the phase walk. Requires both keys and the run-id
-#              confirmation.
+#   rehearse — refused on this hosted runner. The staging drill needs
+#              the live staging caller root and failure-injection control plane.
+#   execute  — refused on this hosted runner. The phase walk runs on
+#              the OpenClaw operator host, where the live caller files exist.
 #   observe  — continuous probes against the LIVE binding. Read-only
 #              with respect to the route; never moves it.
-#   rollback — the runtime rollback. Requires both keys.
+#   rollback — refused here for the same reason as execute; run it on
+#              the OpenClaw operator host.
 #
 # Runbook: docs/runbooks/production-cloud-cutover.md
 
@@ -157,6 +158,12 @@ jobs:
             echo "ENVIRONMENT must be production" >&2
             exit 10
           fi
+
+      - name: Refuse host-owned route changes on a hosted runner
+        if: inputs.mode == 'rehearse' || inputs.mode == 'execute' || inputs.mode == 'rollback'
+        run: |
+          echo "rehearse/execute/rollback must run on the operator host with SINDUSTRIES_CUTOVER_CALLER_ROOT pointing at its live runtime directory; a hosted-runner checkout is not a route" >&2
+          exit 12
 
       - name: Install the probe credentials
         if: inputs.mode == 'execute' || inputs.mode == 'observe' || inputs.mode == 'rollback'

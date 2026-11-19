@@ -80,23 +80,39 @@ function readSecret(name) {
 }
 
 /**
+ * Make one HTTP request.
+ *
+ * The body default is null, meaning NO BODY — not an empty string.
+ * An empty-string default would be serialised to the two-character
+ * JSON string `""` and sent as a body, and `fetch` refuses a GET or
+ * HEAD that carries one ("Request with GET/HEAD method cannot have
+ * body"). Every health probe and every authenticated read would then
+ * have failed with a status of 0, and no probe sample could ever have
+ * reported PASS.
+ *
  * @param {string} url
  * @param {object} options
  * @returns {Promise<object>}
  */
-async function request(url, { method = 'GET', token = '', body = '', timeoutMs = null } = {}) {
+export async function request(
+  url,
+  { method = 'GET', token = '', body = null, timeoutMs = null } = {},
+) {
   const controller = new AbortController();
   const effectiveTimeout = timeoutMs ?? Number(process.env.CUTOVER_PROBE_TIMEOUT_MS ?? 20000);
   const timer = setTimeout(() => controller.abort(), effectiveTimeout);
   const startedAt = Date.now();
+  // A body only goes on the wire when one was supplied AND the method
+  // is allowed to carry one.
+  const carriesBody = body !== null && body !== undefined && method !== 'GET' && method !== 'HEAD';
   try {
     const headers = { accept: 'application/json' };
     if (token) headers.authorization = `Bearer ${token}`;
-    if (body !== null) headers['content-type'] = 'application/json';
+    if (carriesBody) headers['content-type'] = 'application/json';
     const response = await fetch(url, {
       method,
       headers,
-      body: body === null ? undefined : JSON.stringify(body),
+      body: carriesBody ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
     const latencyMs = Date.now() - startedAt;
@@ -165,9 +181,10 @@ async function checkHealth(manifest, surface, binding) {
  * @param {object} manifest
  * @param {string} runId
  * @param {boolean} mutating
+ * @param {string} binding the origin the probe is exercising
  * @returns {Promise<object>} a check record
  */
-async function checkTasksApi(manifest, runId, mutating) {
+export async function checkTasksApi(manifest, runId, mutating, binding) {
   const token = readSecret('CUTOVER_PROBE_TASKS_TOKEN');
   if (!token) {
     return {
@@ -178,7 +195,7 @@ async function checkTasksApi(manifest, runId, mutating) {
         'no authenticated probe credential in the environment (CUTOVER_PROBE_TASKS_TOKEN) — an authenticated check that did not run is not a pass',
     };
   }
-  const base = baseUrlFor(manifest, 'tasks-api', 'production');
+  const base = baseUrlFor(manifest, 'tasks-api', binding);
   const marker = `cutover-probe-${runId}`;
 
   const list = await request(`${base}/tasks?limit=1`, { token });
@@ -269,9 +286,10 @@ async function checkTasksApi(manifest, runId, mutating) {
  * @param {object} manifest
  * @param {string} runId
  * @param {boolean} mutating
+ * @param {string} binding the origin the probe is exercising
  * @returns {Promise<object>} a check record
  */
-async function checkContentScheduler(manifest, runId, mutating) {
+export async function checkContentScheduler(manifest, runId, mutating, binding) {
   const token = readSecret('CUTOVER_PROBE_SCHEDULER_TOKEN');
   if (!token) {
     return {
@@ -282,7 +300,7 @@ async function checkContentScheduler(manifest, runId, mutating) {
         'no authenticated probe credential in the environment (CUTOVER_PROBE_SCHEDULER_TOKEN) — an authenticated check that did not run is not a pass',
     };
   }
-  const base = baseUrlFor(manifest, 'content-scheduler-api', 'production');
+  const base = baseUrlFor(manifest, 'content-scheduler-api', binding);
   const marker = `cutover-probe-${runId}`;
   const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -434,11 +452,13 @@ export async function runSample({ manifest, binding, phase, sample, mutating, ru
   }
 
   // The authenticated workflows are checked against the surface that
-  // serves them, whatever the binding is: the point is that the
+  // serves them, WHATEVER THE BINDING IS: the point is that the
   // WORKFLOW works through the active route, not that the probe knows
-  // which origin is behind it.
-  checks.push(await checkTasksApi(manifest, runId, mutating));
-  checks.push(await checkContentScheduler(manifest, runId, mutating));
+  // which origin is behind it. Hard-coding production here made the
+  // baseline phase and the rollback verification probe production
+  // while claiming to probe prodlike.
+  checks.push(await checkTasksApi(manifest, runId, mutating, binding));
+  checks.push(await checkContentScheduler(manifest, runId, mutating, binding));
   checks.push(await checkHostedSignals(manifest));
 
   const latencies = checks.map((check) => check.latencyMs).filter((value) => typeof value === 'number');

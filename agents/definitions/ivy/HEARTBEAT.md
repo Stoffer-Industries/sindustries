@@ -24,7 +24,7 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 1. **Discovery must run before any silent result.** Query the Tasks API through the shared classifier for every active task assigned to Ivy:
 
    ```
-   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Ivy --json
+   set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a; TASKS_API_BASE_URL="${TASKS_API_BASE_URL:?load TASKS_API_BASE_URL from ~/.openclaw/.env}" python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Ivy --json
    ```
 
    Do not return `NO_REPLY` or `HEARTBEAT_OK` before this query succeeds. The unified queue returns one deterministic `topCandidate` across task work, PR review requests, authored-PR feedback, authored-PR conflicts, and Ivy's own merge candidates. Action that candidate through `WORKFLOW.md` or `agents/skills/dev/pr-process/SKILL.md`. An `authoredPrConflict` is actionable: follow `WORKFLOW.md` section 6 to rebase, preserve both sides of content conflicts, push, and re-request review. The queue is read-only and never comments, reviews, changes task state, or merges automatically.

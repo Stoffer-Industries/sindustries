@@ -169,7 +169,7 @@ dependency_task_ids() {
   " "$MANIFEST"
 }
 
-accepted_states() { printf '%s\n' done accepted; }
+accepted_states() { printf '%s\n' 'done' 'accepted'; }
 
 for dependency_id in $(dependency_task_ids); do
   dependency_status="$(curl --fail --silent --show-error --max-time "${CUTOVER_TASKS_API_TIMEOUT:-15}" \
@@ -217,18 +217,40 @@ inventory_check="$(route_inventory | node --input-type=module -e "
     let readback = {};
     try { readback = JSON.parse(raw); } catch { readback = {}; }
     const declared = manifest.surfaces.map((s) => s.id).sort();
-    const observed = (readback.inScopeSurfaces ?? []).slice().sort();
+    // The inventory is compared against EVERY DECLARED surface, not
+    // only the in-scope ones. The read-back deliberately keeps the
+    // documented rollback surfaces out of 'inScopeSurfaces', because
+    // they are the surfaces that are SUPPOSED to stay on prodlike —
+    // so comparing the declared set against the in-scope set always
+    // reported the rollback surface as missing, this gate could never
+    // pass, and the cutover could never start.
+    //
+    // Read-back reports active surfaces and retained rollback
+    // surfaces separately. Their union is the complete declared route
+    // inventory; the retained surface is allowed to remain on
+    // prodlike, but it is not allowed to disappear from inventory.
+    const observed = [
+      ...(readback.inScopeSurfaces ?? []),
+      ...(readback.documentedRollbackSurfaces ?? []).map((entry) => entry.surface),
+    ].sort();
     const missing = declared.filter((id) => !observed.includes(id));
     if (missing.length > 0) {
       process.stdout.write('missing:' + missing.join(','));
     } else {
-      process.stdout.write('ok:' + declared.length);
+      const retained = (readback.documentedRollbackSurfaces ?? []).map((s) => s.surface);
+      process.stdout.write('ok:' + declared.length + (retained.length ? ':retained=' + retained.join(',') : ''));
     }
   });
 " "$MANIFEST")"
 
 if [[ "${inventory_check%%:*}" == "ok" ]]; then
-  record_gate "route-inventory" "pass" "route inventory matches the manifest (${inventory_check##*:} surfaces)"
+  inventory_detail="route inventory matches the manifest (${inventory_check#ok:})"
+  if [[ "${inventory_check#*retained=}" != "$inventory_check" ]]; then
+    inventory_count="${inventory_check#ok:}"
+    inventory_count="${inventory_count%%:*}"
+    inventory_detail="route inventory matches the manifest (${inventory_count} surfaces; retained rollback surface: ${inventory_check#*retained=})"
+  fi
+  record_gate "route-inventory" "pass" "$inventory_detail"
 else
   record_gate "route-inventory" "fail" "route inventory does not match the manifest (${inventory_check#*:})"
 fi
