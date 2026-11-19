@@ -1478,6 +1478,12 @@ jobs:
       - name: Run cutover manifest and route adapter contract test
         run: node --test infra/cloud/cutover/tests/cutover-core.test.mjs
 
+      # Task 020f423e review regressions: a local HTTP server proves GET
+      # carries no body, the Bearer token reaches only the wire header, and
+      # authenticated workflow reads follow prodlike/production bindings.
+      - name: Run cutover probe transport and binding contract test
+        run: node --test tests/cloud/tests/production-cutover-probes.test.mjs
+
       # Task 020f423e: the shell harness around the adapter — the rehearsal
       # refuses a production manifest, the preflight refuses an unset
       # observation duration, the executor refuses to start without a
