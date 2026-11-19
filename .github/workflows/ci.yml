@@ -1396,6 +1396,12 @@ jobs:
     # Task d63b1491 (W46 audit F4): five contract tests existed on disk but no
     # CI job executed them, so they asserted nothing in the merge gate.
     #
+    # Task 020f423e (production cloud cutover) adds two more offline suites
+    # to this job: the cutover manifest validator / route adapter rules, and
+    # the shell harness around them. Both are offline by construction — they
+    # drive the adapter against local state files, with no provider call, no
+    # credential and no network egress.
+    #
     #   - the PR opener identity guard (agents/skills/dev/pr-open)
     #   - the four cloud-database helper / constraint checks
     #
@@ -1423,6 +1429,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      # Task 020f423e: the job now runs a node suite as well as shell ones,
+      # so it pins the same Node major the rest of the workflow declares
+      # instead of inheriting the runner image's ambient Node.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Ensure the sha256 helper is available
         # `schema-presence.test.sh` stages a `sha256sum` stub that delegates to
@@ -1453,6 +1467,25 @@ jobs:
 
       - name: Run cloud database schema-presence contract test
         run: bash scripts/cloud/database/tests/schema-presence.test.sh
+
+      # Task 020f423e: the cutover manifest validator and the route adapter's
+      # compare-and-set, plan, read-back and history rules. A malformed
+      # manifest — one that carries a credential, one with an unset
+      # observation duration, one with a non-monotonic phase order, one with
+      # no declared rollback surface — must be REFUSED, because a manifest
+      # that validates is the only thing standing between a typo and a
+      # production route change.
+      - name: Run cutover manifest and route adapter contract test
+        run: node --test infra/cloud/cutover/tests/cutover-core.test.mjs
+
+      # Task 020f423e: the shell harness around the adapter — the rehearsal
+      # refuses a production manifest, the preflight refuses an unset
+      # observation duration, the executor refuses to start without a
+      # preflight or the production acknowledgement, the adapter refuses a
+      # stale expected version and a mismatched confirmation, and the
+      # redactor masks a credential before it reaches an artifact.
+      - name: Run cutover shell harness contract test
+        run: bash scripts/cloud/cutover/tests/cutover-harness.test.sh
 
   gog-cli-tests:
     # PR #886 (fix(agents-lib): bypass ambient proxy for the gog CLI).

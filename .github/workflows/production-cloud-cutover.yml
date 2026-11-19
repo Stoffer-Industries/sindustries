@@ -1,0 +1,244 @@
+# .github/workflows/production-cloud-cutover.yml
+#
+# Production cloud cutover: the route switch for the Mission Control
+# production runtime and its in-scope callers (task 020f423e).
+#
+# workflow_dispatch ONLY — never on push, never on schedule. A
+# production route switch is an operator action with a deliberate
+# window, not something a merge can start.
+#
+# TWO INDEPENDENT KEYS must both line up before any route changes:
+#
+#   1. The `production` GitHub Environment. Its required reviewers are
+#      the approval gate; a dispatch that has not been approved cannot
+#      start.
+#   2. The typed confirmation `CUTOVER PRODUCTION`, which the harness
+#      also requires as SINDUSTRIES_CUTOVER_PRODUCTION_ACK in the
+#      ENVIRONMENT. A mistyped command alone can never start a run.
+#
+# The manifest travels as a workflow input rather than as a tracked
+# file, because it carries the operator-owned values (surface URLs,
+# thresholds, observation duration) and the values change per window.
+# It is SAFE to pass as an input: the manifest validator REFUSES any
+# manifest that carries a credential-shaped substring, so a tracked or
+# pasted manifest cannot smuggle a secret into the workflow log. The
+# validator runs before anything else touches the manifest.
+#
+# Modes:
+#   plan     — read-only. Validates the manifest and prints the route
+#              plan and the prodlike read-back. Changes nothing.
+#   rehearse — the rollback rehearsal. STAGING ONLY: rehearse.sh
+#              refuses a production manifest.
+#   execute  — the phase walk. Requires both keys and the run-id
+#              confirmation.
+#   observe  — continuous probes against the LIVE binding. Read-only
+#              with respect to the route; never moves it.
+#   rollback — the runtime rollback. Requires both keys.
+#
+# Runbook: docs/runbooks/production-cloud-cutover.md
+
+name: production-cloud-cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan | rehearse | execute | observe | rollback'
+        required: true
+        type: choice
+        default: plan
+        options:
+          - plan
+          - rehearse
+          - execute
+          - observe
+          - rollback
+      manifest_json:
+        description: 'The cutover manifest (JSON). It must not carry a credential — the validator refuses one.'
+        required: true
+        type: string
+      confirm_production:
+        description: 'Type CUTOVER PRODUCTION to confirm this run may change the production route.'
+        required: false
+        type: string
+        default: ''
+      run_id:
+        description: 'The run id this dispatch belongs to. It must match the confirmation for a mutating mode.'
+        required: false
+        type: string
+        default: ''
+      tasks_api_base_url:
+        description: 'The Tasks API base the preflight reads the dependency tasks from.'
+        required: false
+        type: string
+        default: 'https://tasks-api.sindustries.co.nz/api/v1'
+
+permissions:
+  contents: read
+
+# One window, one run. A second dispatch waits for the first to finish
+# rather than interleaving route changes with it.
+concurrency:
+  group: production-cutover
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    name: Production route cutover
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 180
+    env:
+      ENVIRONMENT: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Write the manifest and validate it
+        env:
+          MANIFEST_JSON: ${{ inputs.manifest_json }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cloud-cutover"
+          chmod 0700 "$RUNNER_TEMP/cloud-cutover"
+          printf '%s' "$MANIFEST_JSON" > "$RUNNER_TEMP/cloud-cutover/manifest.json"
+          chmod 0600 "$RUNNER_TEMP/cloud-cutover/manifest.json"
+          # The validator is the gate: it refuses a manifest that carries
+          # a credential, a non-monotonic phase order, an unset
+          # observation duration, a surface with no rollback exception
+          # and every other malformed shape. Nothing else runs until it
+          # passes.
+          node --input-type=module -e "
+            import { loadManifest } from './infra/cloud/cutover/manifest.mjs';
+            const manifest = loadManifest(process.argv[1]);
+            process.stdout.write(JSON.stringify({
+              environment: manifest.environment,
+              taskId: manifest.taskId,
+              observationMinutes: manifest.run.observationMinutes,
+              surfaces: manifest.surfaces.map((s) => s.id),
+              phases: manifest.phases.map((p) => p.phase),
+            }, null, 2) + '\n');
+          " "$RUNNER_TEMP/cloud-cutover/manifest.json"
+
+      - name: Refuse a production manifest for the rehearsal
+        if: inputs.mode == 'rehearse'
+        run: |
+          set -euo pipefail
+          environment="$(node --input-type=module -e "
+            import { loadManifest } from './infra/cloud/cutover/manifest.mjs';
+            process.stdout.write(loadManifest(process.argv[1]).environment);
+          " "$RUNNER_TEMP/cloud-cutover/manifest.json")"
+          if [[ "$environment" == "production" ]]; then
+            echo "the rehearsal is STAGING ONLY — it must never run against the production manifest" >&2
+            exit 10
+          fi
+
+      - name: Refuse a mutating mode without both keys
+        if: inputs.mode == 'execute' || inputs.mode == 'rollback'
+        env:
+          CONFIRM: ${{ inputs.confirm_production }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM" != "CUTOVER PRODUCTION" ]]; then
+            echo "confirm_production must be exactly: CUTOVER PRODUCTION" >&2
+            exit 10
+          fi
+          if [[ -z "$RUN_ID" ]]; then
+            echo "run_id is required for a mutating mode" >&2
+            exit 10
+          fi
+          if [[ "$ENVIRONMENT" != "production" ]]; then
+            echo "ENVIRONMENT must be production" >&2
+            exit 10
+          fi
+
+      - name: Install the probe credentials
+        if: inputs.mode == 'execute' || inputs.mode == 'observe' || inputs.mode == 'rollback'
+        env:
+          TASKS_TOKEN: ${{ secrets.CUTOVER_PROBE_TASKS_TOKEN }}
+          SCHEDULER_TOKEN: ${{ secrets.CUTOVER_PROBE_SCHEDULER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$TASKS_TOKEN" || -z "$SCHEDULER_TOKEN" ]]; then
+            echo "the production Environment is missing a cutover probe credential" >&2
+            exit 11
+          fi
+          # The probes read them from the environment. They are never
+          # echoed, never written to a file, and never reach an artifact.
+          {
+            echo "CUTOVER_PROBE_TASKS_TOKEN=$TASKS_TOKEN"
+            echo "CUTOVER_PROBE_SCHEDULER_TOKEN=$SCHEDULER_TOKEN"
+          } >> "$GITHUB_ENV"
+
+      - name: Run the plan
+        if: inputs.mode == 'plan'
+        run: |
+          set -euo pipefail
+          MANIFEST="$RUNNER_TEMP/cloud-cutover/manifest.json"
+          export SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$RUNNER_TEMP/cloud-cutover/artifacts"
+          infra/cloud/bin/traffic-route plan --manifest "$MANIFEST" --binding production
+          infra/cloud/bin/traffic-route readback --manifest "$MANIFEST"
+
+      - name: Run the rehearsal (staging only)
+        if: inputs.mode == 'rehearse'
+        run: |
+          set -euo pipefail
+          export SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$RUNNER_TEMP/cloud-cutover/artifacts"
+          scripts/cloud/cutover/rehearse.sh \
+            --manifest "$RUNNER_TEMP/cloud-cutover/manifest.json" \
+            --run-id "${{ inputs.run_id }}"
+
+      - name: Run the cutover
+        if: inputs.mode == 'execute'
+        env:
+          CONFIRM: ${{ inputs.confirm_production }}
+          RUN_ID: ${{ inputs.run_id }}
+          TASKS_API_BASE_URL: ${{ inputs.tasks_api_base_url }}
+        run: |
+          set -euo pipefail
+          export SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$RUNNER_TEMP/cloud-cutover/artifacts"
+          export SINDUSTRIES_CUTOVER_PRODUCTION_ACK="$CONFIRM"
+          scripts/cloud/cutover/execute.sh \
+            --manifest "$RUNNER_TEMP/cloud-cutover/manifest.json" \
+            --run-id "$RUN_ID"
+
+      - name: Observe the live route
+        if: inputs.mode == 'observe'
+        env:
+          TASKS_API_BASE_URL: ${{ inputs.tasks_api_base_url }}
+        run: |
+          set -euo pipefail
+          export SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$RUNNER_TEMP/cloud-cutover/artifacts"
+          scripts/cloud/cutover/observe.sh \
+            --manifest "$RUNNER_TEMP/cloud-cutover/manifest.json" \
+            --run-id "${{ inputs.run_id }}"
+
+      - name: Run the rollback
+        if: inputs.mode == 'rollback'
+        env:
+          CONFIRM: ${{ inputs.confirm_production }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          export SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$RUNNER_TEMP/cloud-cutover/artifacts"
+          export SINDUSTRIES_CUTOVER_PRODUCTION_ACK="$CONFIRM"
+          scripts/cloud/cutover/rollback.sh \
+            --manifest "$RUNNER_TEMP/cloud-cutover/manifest.json" \
+            --run-id "$RUN_ID" \
+            --reason "operator rollback from workflow dispatch"
+
+      - name: Upload the redacted evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cloud-cutover-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/cloud-cutover/artifacts/**
+          retention-days: 30
+          if-no-files-found: warn

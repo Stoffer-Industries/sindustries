@@ -69,3 +69,10 @@ infra/cloud/observability/health-probe/fly.production.fly.toml
 
 # Model-eval run artefacts (per-model scorecards)
 agents/evals/results/
+
+# Production cutover evidence (task 020f423e). The route state, the cutover
+# state and the per-run evidence bundle are OPERATOR ARTIFACTS: they record
+# what happened in one window, they carry the run id, and they are never
+# committed. The human-facing half of the record is
+# docs/infra/production-cloud-cutover-<YYYY-MM-DD>.md.
+artifacts/
