@@ -163,11 +163,11 @@ assert_log_contains "INVOKED: releases --app sindustries-platform-staging --json
 assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
 # SHARED FATE: a tasks-api rollback rolls the whole platform back, so it
 # must check every child — not just tasks-api.
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 
@@ -194,11 +194,11 @@ FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.
 assert_eq "worker rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
 assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 
 echo "test: platform rolls the consolidated app back and smoke-checks all three services"
@@ -206,11 +206,11 @@ reset_log
 FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" platform --yes
 assert_eq "platform rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
-# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+# stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe)
 assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 
