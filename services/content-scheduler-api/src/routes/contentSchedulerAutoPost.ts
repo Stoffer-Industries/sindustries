@@ -149,7 +149,7 @@ contentSchedulerAutoPostRouter.post('/content-scheduler/auto-post/reconcile', as
 /**
  * Per-item status: useful for the Mission Control UI's auto-post panel
  * to surface which items are queued, overdue, or stuck. Not paginated;
- * the dataset is bounded by the daily cap (1 publish per day) so the
+ * the dataset is bounded by the daily cap (3 publishes per day) so the
  * volume is small.
  */
 contentSchedulerAutoPostRouter.get('/content-scheduler/auto-post/items', async (_req, res, next) => {

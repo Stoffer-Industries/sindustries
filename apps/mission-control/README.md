@@ -49,7 +49,7 @@ with a hover crosshair. The standalone bookmark dashboard was retired on
 
 The Content tab surfaces the Content Scheduler — a single-user queue for
 X posts. Items go through `queued → approved → published`; the publish
-endpoint enforces "max one X post per day" in `Pacific/Auckland`. The
+endpoint enforces "max three X posts per day" in `Pacific/Auckland`. The
 queue is read from `services/tasks-api`; see
 `docs/specs/content-scheduler-tab-tech-design.md` for the full design and
 `services/tasks-api/README.md` for the backend endpoints it depends on.
