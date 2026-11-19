@@ -59,6 +59,18 @@ cutover_require_commands
 MANIFEST="$(cutover_resolve_manifest "$MANIFEST")"
 
 # ---------------------------------------------------------------------------
+# The manifest is the CONTRACT, not one of the gates
+# ---------------------------------------------------------------------------
+#
+# Nothing can be planned or executed against a manifest the validator
+# refuses, so an invalid manifest is a HARD refusal in plan mode too.
+# Otherwise --plan prints a plan for a window that cannot exist, and a
+# reader takes that plan as a real one.
+if ! manifest_summary="$(cutover_validate_manifest "$MANIFEST" 2>&1)"; then
+  cutover_fail "the manifest is invalid: $(cutover_redact "$manifest_summary")" 2
+fi
+
+# ---------------------------------------------------------------------------
 # The gate ledger
 # ---------------------------------------------------------------------------
 #
@@ -89,11 +101,19 @@ record_gate() {
 # Gate: the manifest itself
 # ---------------------------------------------------------------------------
 
-if manifest_summary="$(cutover_validate_manifest "$MANIFEST" 2>&1)"; then
-  record_gate "manifest-valid" "pass" "manifest validated: $(printf '%s' "$manifest_summary" | node -e "let raw='';process.stdin.on('data',(c)=>{raw+=c;});process.stdin.on('end',()=>{const m=JSON.parse(raw);process.stdout.write(m.taskId+' '+m.environment);});")")"
-else
-  record_gate "manifest-valid" "fail" "$(cutover_redact "$manifest_summary")"
-fi
+manifest_task_and_environment="$(printf '%s' "$manifest_summary" | node -e "
+  let raw = '';
+  process.stdin.on('data', (chunk) => { raw += chunk; });
+  process.stdin.on('end', () => {
+    try {
+      const manifest = JSON.parse(raw);
+      process.stdout.write(manifest.taskId + ' ' + manifest.environment);
+    } catch {
+      process.stdout.write('unknown');
+    }
+  });
+")"
+record_gate "manifest-valid" "pass" "manifest validated: $manifest_task_and_environment"
 
 MANIFEST_HASH="$(cutover_manifest_hash "$MANIFEST")"
 

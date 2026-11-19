@@ -163,7 +163,7 @@ cutover_info "recorded the failure-injection step ($INJECTION_PATH)"
 # ---------------------------------------------------------------------------
 # 5 + 6. Invoke the REAL rollback and verify recovery
 # ---------------------------------------------------------------------------
-if ! rollback_output="$(scripts/cloud/cutover/rollback.sh --manifest "$MANIFEST" --run-id "$RUN_ID" --reason "staging rehearsal rollback" 2>&1)"; then
+if ! rollback_output="$("$CUTOVER_SCRIPTS_DIR/rollback.sh" --manifest "$MANIFEST" --run-id "$RUN_ID" --reason "staging rehearsal rollback" 2>&1)"; then
   cutover_write_evidence "$RUN_ID" "rehearsal-rollback-failed.json" "$rollback_output" >/dev/null
   cutover_fail "the rehearsal rollback failed — the rehearsal does not pass" 1
 fi
@@ -178,7 +178,7 @@ cutover_info "the rehearsal rollback completed — evidence $ROLLBACK_PATH"
 # AGAIN must succeed and change nothing: a rollback that only works
 # once is not a rollback, it is a race.
 live_version="$(cutover_route_version)"
-if ! idempotence_output="$(scripts/cloud/cutover/rollback.sh --manifest "$MANIFEST" --run-id "$RUN_ID" --reason "staging rehearsal idempotence check" 2>&1)"; then
+if ! idempotence_output="$("$CUTOVER_SCRIPTS_DIR/rollback.sh" --manifest "$MANIFEST" --run-id "$RUN_ID" --reason "staging rehearsal idempotence check" 2>&1)"; then
   cutover_write_evidence "$RUN_ID" "rehearsal-idempotence-failed.json" "$idempotence_output" >/dev/null
   cutover_fail "the rehearsal rollback is not idempotent — the rehearsal does not pass" 1
 fi
