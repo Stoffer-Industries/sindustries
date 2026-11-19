@@ -102,6 +102,49 @@ branch without rewriting the reviewed commits — see the "When the merge is
 refused because the branch is behind `main`" section of
 `agents/skills/dev/pr-process/SKILL.md`.
 
+### Status transition enforcement (task `fb5c4e40`)
+
+Two status transitions are validated at the API boundary. `PATCH /tasks/:id`
+rejects them with `409 Conflict` and a stable code, and leaves the task
+entirely unchanged:
+
+| Transition | Requires | Rejection code |
+|---|---|---|
+| `doing` → `acceptance` | a granted `qa_agent` approval, when the task type requires it | `QA_APPROVAL_REQUIRED` / `QA_APPROVAL_REVOKED` |
+| `acceptance` → `done` | a granted `accepted` approval, when the task type requires it | `ACCEPTANCE_APPROVAL_REQUIRED` |
+
+The required set is the config-driven one from `requiredApprovalsFor()`, so
+`content` and `research` tasks are unaffected and the policy stays editable
+without a deploy.
+
+**A caller that hits a 409 must not work around it by moving the task some
+other way.** The repair is to grant the approval properly (Ash for `qa_agent`,
+Tom for `accepted`) or to move the task back to `doing` for redelivery. There
+is no route that reaches `acceptance` without the QA gate — that is the point
+of the guard.
+
+### Identifying tasks that already skipped the gate (read-only)
+
+`agents/skills/ops/tasks-api/scripts/identify_skipped_qa_tasks.py` finds tasks
+that reached a gate without a granted `qa_agent` approval, and reports the
+repair options per task. It writes nothing — no approval, no status, no
+attention owner.
+
+```bash
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-api/scripts/identify_skipped_qa_tasks.py
+python3 agents/skills/ops/tasks-api/scripts/identify_skipped_qa_tasks.py --json
+```
+
+It reports two classes, because they mean different things:
+
+- `skipped_gate` — the `qa_agent` row was materialised and never granted.
+  This is the defect's signature and needs a repair decision.
+- `no_gate_row` — no `qa_agent` row was ever created, so the task predates
+  the QA gate. Not damage from the transition defect. A task still in
+  `acceptance` is itemised (it owes a decision); closed ones are only
+  counted.
+
 ### Draft PRs are never merge candidates
 
 The unified queue excludes **draft** PRs from `mergeCandidates`. GitHub refuses
