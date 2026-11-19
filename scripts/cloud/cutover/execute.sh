@@ -144,6 +144,22 @@ collect_phase_samples() {
   local failure_count=0
   local evidence_lines=""
   local sample_index=0
+  # The window's samples are also the INPUT to the abort thresholds.
+  # The error rate and the p95 latency are properties of the WINDOW,
+  # not of a single sample, so the samples are kept on disk as one
+  # compact JSON document per line and handed to the evaluator.
+  #
+  # The file is created EMPTY and truncated, not written through
+  # cutover_write_evidence: that helper writes a line even for empty
+  # content, and a leading blank line would be read as an unreadable
+  # sample and fail the evaluation closed for the wrong reason.
+  local samples_file
+  mkdir -p "$(cutover_evidence_dir "$RUN_ID")"
+  samples_file="$(cutover_evidence_dir "$RUN_ID")/phase-${phase}-samples.jsonl"
+  : > "$samples_file"
+  # The reason the phase failed, so the abort message names the breach
+  # rather than saying "the probes failed" for every kind of failure.
+  PHASE_ABORT_REASON="the probes did not pass"
   # The guard against a clock that never advances. A frozen clock with
   # an instant sleep would otherwise spin forever, so the loop is
   # bounded by what the declared hold and sample count can possibly
@@ -169,6 +185,36 @@ collect_phase_samples() {
     fi
     samples=$((samples + 1))
     evidence_lines+="$(printf '%s' "$sample_output" | tr '\n' ' ')"$'\n'
+    printf '%s' "$sample_output" | cutover_redact_json | tr -d '\n' >> "$samples_file"
+    printf '\n' >> "$samples_file"
+
+    # The manifest's abort thresholds are evaluated after EVERY
+    # sample, not once at the end of the phase.
+    #
+    # The evaluator owns the meaning of `errorRate` and
+    # `p95LatencyMs`; the executor only reacts to its verdict. Two
+    # gates live inside it that the failure counter alone never
+    # covered: a window whose latency is above the declared ceiling
+    # even though every status is healthy, and a window whose error
+    # rate is above the declared rate even though the failure COUNT
+    # has not reached `probeFailureCount` yet.
+    #
+    # Exit code 2 means the window could NOT be evaluated. That is a
+    # refusal, never a pass: a threshold gate that cannot see the
+    # window stops the window.
+    threshold_report=""
+    threshold_status=0
+    threshold_report="$(cutover_evaluate_thresholds "$MANIFEST" "$samples_file" 2>&1)" || threshold_status=$?
+    if [[ "$threshold_status" -eq 2 ]]; then
+      EVIDENCE_PATH="$(cutover_write_evidence "$RUN_ID" "phase-${phase}-threshold-error.json" "$evidence_lines")"
+      cutover_fail "phase $phase could not be evaluated against the manifest's abort thresholds: $(cutover_redact "$threshold_report") (evidence $EVIDENCE_PATH)" 1
+    fi
+    if [[ "$threshold_status" -eq 1 ]]; then
+      EVIDENCE_PATH="$(cutover_write_evidence "$RUN_ID" "phase-${phase}-abort.json" "$evidence_lines")"
+      cutover_warn "phase $phase aborted — the manifest's abort thresholds were breached: $(cutover_redact "$threshold_report") (evidence $EVIDENCE_PATH)"
+      PHASE_ABORT_REASON="the manifest's abort thresholds were breached"
+      return 1
+    fi
 
     abort_threshold="$(node --input-type=module -e "
       import { loadManifest } from '${CUTOVER_MANIFEST_MODULE}';
@@ -177,6 +223,7 @@ collect_phase_samples() {
     if (( failure_count >= abort_threshold )); then
       EVIDENCE_PATH="$(cutover_write_evidence "$RUN_ID" "phase-${phase}-abort.json" "$evidence_lines")"
       cutover_warn "phase $phase aborted — samples $samples, failures $failure_count (evidence $EVIDENCE_PATH)"
+      PHASE_ABORT_REASON="$failure_count failed probe sample(s) reached the manifest's probeFailureCount of $abort_threshold"
       return 1
     fi
 
@@ -271,7 +318,7 @@ for (( index = START_INDEX; index < ${#PHASES[@]}; index++ )); do
   fi
 
   if ! collect_phase_samples "$phase" "$binding" "$hold_seconds" "$min_samples"; then
-    abort_and_rollback "phase $phase failed its probes"
+    abort_and_rollback "phase $phase failed: ${PHASE_ABORT_REASON:-the probes did not pass}"
   fi
 
   cutover_write_state "$phase" "$MANIFEST_HASH" "$observed_version"

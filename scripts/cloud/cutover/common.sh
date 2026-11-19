@@ -53,10 +53,16 @@ CUTOVER_SCRIPTS_DIR="${CUTOVER_SCRIPTS_DIR_OVERRIDE:-$(cd "$(dirname "${BASH_SOU
 # command output masks credentials with this ONE module, so two
 # surfaces cannot drift apart.
 CUTOVER_REDACT_OUTPUT="$CUTOVER_REPO_ROOT/infra/cloud/platform/redact-output.mjs"
+CUTOVER_REDACT_MODULE="$CUTOVER_REDACT_OUTPUT"
 
 # The route adapter and the manifest validator.
 CUTOVER_ADAPTER="$CUTOVER_REPO_ROOT/infra/cloud/cutover/traffic-route.mjs"
 CUTOVER_MANIFEST_MODULE="$CUTOVER_REPO_ROOT/infra/cloud/cutover/manifest.mjs"
+
+# The abort-threshold evaluator. It owns the MEANING of the manifest's
+# run.abortThresholds, so the executor and the tests cannot drift apart
+# on what "errorRate" or "p95LatencyMs" means.
+CUTOVER_THRESHOLDS_MODULE="$CUTOVER_REPO_ROOT/infra/cloud/cutover/thresholds.mjs"
 
 # The probe suite. The probes run against the ACTIVE binding, so they
 # are the only thing in the harness that talks to the services.
@@ -144,6 +150,26 @@ cutover_redact() {
     out="(output could not be shown safely — the redactor failed)"
   fi
   printf '%s' "$out"
+}
+
+# Redact a JSON document WITHOUT flattening or capping it.
+#
+# `cutover_redact` is the OPERATOR shape: one flattened line, capped at
+# 400 characters, because an operator reads it in a terminal and pastes
+# it into a task comment. The probe samples are not operator text —
+# they are a machine-read window that the threshold evaluator parses —
+# so flattening would merge the samples and capping would truncate one
+# into invalid JSON.
+#
+# The masking RULES are the same ones; only the shape is preserved.
+cutover_redact_json() {
+  node --input-type=module -e "
+    import { redactOutput } from '${CUTOVER_REDACT_MODULE}';
+    let raw = '';
+    process.stdin.setEncoding('utf8');
+    for await (const chunk of process.stdin) raw += chunk;
+    process.stdout.write(redactOutput(raw));
+  "
 }
 
 # ---------------------------------------------------------------------------
@@ -445,6 +471,33 @@ cutover_assert_resumable() {
   if [[ "$live_route_version" != "$recorded_route_version" ]]; then
     cutover_fail "cannot resume: the live route is at version $live_route_version but the window recorded version $recorded_route_version — the route moved underneath the window" 1
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Abort thresholds
+# ---------------------------------------------------------------------------
+
+# Evaluate the manifest's abort thresholds against a window's samples.
+#
+# The MEANING of the thresholds lives in one node module, so the
+# executor, the runbook and the tests cannot drift apart on what
+# "errorRate" or "p95LatencyMs" means.
+#
+# The exit code is the whole point of this helper:
+#
+#   0  the window breaches nothing
+#   1  the window breaches at least one threshold
+#   2  the window could NOT be evaluated
+#
+# Code 2 is NOT a pass. An evaluator that cannot read its manifest or
+# its samples must never be read as "no breach": a threshold gate that
+# cannot see the window has to stop the window, not bless it.
+#
+# The report is printed on stdout so the caller can put the reason in
+# the abort message and in the evidence.
+cutover_evaluate_thresholds() {
+  local manifest="$1" samples_file="$2"
+  node "$CUTOVER_THRESHOLDS_MODULE" --manifest "$manifest" --samples "$samples_file"
 }
 
 # ---------------------------------------------------------------------------
