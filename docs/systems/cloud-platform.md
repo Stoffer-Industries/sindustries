@@ -537,8 +537,14 @@ BullMQ queue — was discharged by that cutover: the four per-service
 staging apps were destroyed ahead of it, so the platform's auto-post worker
 is the only consumer of the queue. The cutover order was
 `docs/runbooks/platform-consolidation-rollback.md` §3, which records the
-sequence as it was executed on 2026-11-07 (steps 3, 4 and 7 did not run and
-remain blocked on task `5cb4a8fe`).
+sequence as it was executed on 2026-11-07 (the DNS steps 3, 4 and 7 did not
+run in that sequence). The DNS leg has since landed separately: task
+`5cb4a8fe` created the three stable `*.staging.sindustries.co.nz` records and
+pointed them at the platform app, so stable-hostname traffic is live and the
+`*.fly.dev` provider hostnames are the documented fallback rather than the
+only route. Verified 2026-11-19: each stable hostname resolves to the
+platform app's provider hostname and answers HTTP 200 on `/health`
+(`sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostnames are the per-service *.staging.sindustries.co.nz names -->).
 
 ## Account / ownership / billing
 
