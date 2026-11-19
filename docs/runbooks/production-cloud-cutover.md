@@ -44,13 +44,28 @@ AC2 requires that after the switch **no active in-scope caller still targets pro
 
 **The live route is the OpenClaw runtime configuration, not the GitHub checkout.** Repository-owned prompts, heartbeats, and skills consume these variables; they no longer pin a local URL over the runtime value.
 
+Every in-scope surface's route lives in the runtime configuration. The adapter can only move a route it can read, so a surface with no managed caller is a surface the cutover cannot move — the manifest refuses it outright (see "Every in-scope surface names a managed caller" below).
+
 | Managed caller file (relative to `SINDUSTRIES_CUTOVER_CALLER_ROOT`) | Key | Prodlike | Production |
 |---|---|---|---|
 | `.env` | `TASKS_API_BASE_URL` | `http://localhost:4001/api/v1` | Tasks API stable URL |
 | `workspace/.env` | `TASKS_API_BASE_URL` | `http://localhost:4001/api/v1` | Tasks API stable URL |
 | `.env` | `CONTENT_SCHEDULER_BASE_URL` | `http://localhost:4004` | Content Scheduler stable origin |
+| `.env` | `MISSION_CONTROL_BASE_URL` | `http://localhost:5175` | Mission Control stable origin |
+| `.env` | `TASKS_APP_BASE_URL` | `http://localhost:5176` | Tasks app stable origin |
 
 The adapter atomically replaces only those URL literals, preserves the existing file mode, reads the files back, and refuses to record a route version unless every managed caller resolves the requested binding. The files may contain credentials; the adapter never prints their contents.
+
+**PREREQUISITE — the runtime configuration must already carry every route above.** The adapter refuses the whole switch if any managed caller cannot be read: a caller whose file is missing, or whose file carries neither the prodlike nor the production literal, is a caller the cutover cannot move, and the switch is refused before the first write rather than half-way through it. So `MISSION_CONTROL_BASE_URL` and `TASKS_APP_BASE_URL` must be present in `~/.openclaw/.env` **with the prodlike values above** before the window opens. Provision them out of band; the cutover does not create them, and it does not guess a value it did not find.
+
+Verify the runtime configuration carries every route before the window — this is a read-only check:
+
+```bash
+for key in TASKS_API_BASE_URL CONTENT_SCHEDULER_BASE_URL \
+           MISSION_CONTROL_BASE_URL TASKS_APP_BASE_URL; do
+  grep -q "^${key}=" "$HOME/.openclaw/.env" || echo "MISSING: $key"
+done
+```
 
 Before any mutating command on the operator host:
 
@@ -65,6 +80,10 @@ The variable is mandatory for `execute` and `rollback`. A GitHub-hosted runner h
 `agents/definitions/lox/HEARTBEAT.md` mentions `tasks-api-prodlike-down` as a **probe name**, not as a target. It is an alert label and stays.
 
 **The read-back proves the live callers and the surfaces.** `infra/cloud/bin/traffic-route readback` reads the managed runtime files and reports each observed binding. A surface recorded as production while one of its managed callers still carries the prodlike URL is not clean and cannot complete the cutover.
+
+**The route state cannot prove itself.** The read-back takes a surface's binding from its LIVE managed caller. A surface with no live managed caller would fall back to the route state — which was written by the very command that moved the route, so reading it back proves only that the command recorded what it intended to do. Such a surface is now reported as `unprovenSurfaces` and the read-back is **not** clean. The documented rollback surfaces are the only exemption: their binding is the prodlike origin by definition, and "nothing moved it" is the point.
+
+**Every in-scope surface names a managed caller.** The manifest validator refuses a surface that is in scope but declares no managed caller — one with no callers at all, or one with only `external` callers the adapter will never write. The reason is the same one: if nothing could have moved the surface, then nothing moving it must not be expressible as a manifest.
 
 ---
 
@@ -275,6 +294,8 @@ The error rate is the request-level rate across the window's checks, so it catch
 **A latency breach aborts even when every HTTP status is healthy and every sample verdict is `PASS`.** That case was the reason the gates exist: the sample verdict only reflects whether a check failed, not whether it was fast enough.
 
 The thresholds are evaluated by one module — `infra/cloud/cutover/thresholds.mjs` — so the executor, the runbook and the tests cannot drift apart on what the fields mean. **A window that cannot be evaluated is refused, never reported as a pass:** an unreadable sample, a malformed sample file or a manifest with no thresholds stops the window.
+
+**The executor calls the evaluator through `infra/cloud/cutover/thresholds-cli.mjs`, never through the module.** The module decides whether to run its own command line by comparing the process entry point against its module URL, and that comparison is false whenever the path is not byte-identical to the URL — a symlinked checkout, a temporary directory, a path with a space in it. When it was false the module exited 0 **without evaluating anything**, and the executor read exit 0 as "no threshold breached": the abort thresholds were silently disabled. The wrapper imports the module and calls the evaluation unconditionally, so there is no entry-point detection on the path that matters and nothing to get wrong.
 
 **Planned** canary errors caused by the explicit staging rehearsal do not apply to production. Any production probe outage is an AC failure **even if the rollback succeeds**.
 

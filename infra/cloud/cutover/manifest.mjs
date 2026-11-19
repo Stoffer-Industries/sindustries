@@ -289,6 +289,15 @@ export function validateManifest(manifest) {
   if (!Array.isArray(manifest.surfaces) || manifest.surfaces.length === 0) {
     throw new Error('manifest: surfaces must be a non-empty array');
   }
+  // The structural requirement is checked BEFORE the per-surface rules,
+  // so a manifest that has no rollback surface reports that first
+  // rather than a downstream consequence of it.
+  const rollbackSurfaces = manifest.surfaces.filter((s) => s.rollbackSurface);
+  if (rollbackSurfaces.length === 0) {
+    throw new Error(
+      'manifest: at least one surface must be declared as a rollback surface — the prodlike origin is retained, not decommissioned, by this task',
+    );
+  }
   const surfaceIds = new Set();
   const callerIds = new Set();
   for (const surface of manifest.surfaces) {
@@ -377,12 +386,34 @@ export function validateManifest(manifest) {
         );
       }
     }
-  }
-  const rollbackSurfaces = manifest.surfaces.filter((s) => s.rollbackSurface);
-  if (rollbackSurfaces.length === 0) {
-    throw new Error(
-      'manifest: at least one surface must be declared as a rollback surface — the prodlike origin is retained, not decommissioned, by this task',
-    );
+
+    // ---- an in-scope surface MUST be able to move -----------------------
+    //
+    // The adapter can only move a MANAGED caller: it rewrites the URL
+    // literal in a caller file it owns. A surface with no managed
+    // caller therefore has no route the adapter can move, and the
+    // read-back fell back to the JOURNAL for it — the journal written
+    // by the very command that was supposed to move the route. So the
+    // route state could claim such a surface was production while
+    // nothing had changed anywhere, and the read-back still called it
+    // clean.
+    //
+    // That is the hole this rule closes: an in-scope surface that
+    // names no managed caller is refused at load time, because
+    // "nothing could have moved it" must not be expressible as a
+    // manifest.
+    //
+    // The documented rollback surfaces are exempt: they are SUPPOSED to
+    // stay where they are, and their binding is the prodlike origin by
+    // definition.
+    if (!surface.rollbackSurface) {
+      const managedCallers = surface.callers.filter((caller) => caller.owner === 'managed');
+      if (managedCallers.length === 0) {
+        throw new Error(
+          `manifest: surface ${surface.id} is in scope but declares no managed caller — the adapter can only move a managed caller, so this surface could be recorded as production without any live route changing. Name the managed caller that carries this surface's route, or declare the surface as a rollback surface`,
+        );
+      }
+    }
   }
 
   // ---- phases -------------------------------------------------------------

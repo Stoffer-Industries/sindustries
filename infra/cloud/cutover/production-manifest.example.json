@@ -88,16 +88,6 @@
       ]
     },
     {
-      "id": "budget-api",
-      "kind": "api",
-      "productionBaseUrl": "https://budget-api.sindustries.co.nz/api/v1",
-      "prodlikeBaseUrl": "http://localhost:4002/api/v1",
-      "healthPath": "/health",
-      "rollbackSurface": false,
-      "callerClass": "mission-control",
-      "callers": []
-    },
-    {
       "id": "mission-control",
       "kind": "frontend",
       "productionBaseUrl": "https://mission-control.sindustries.co.nz",
@@ -105,7 +95,15 @@
       "healthPath": "/",
       "rollbackSurface": false,
       "callerClass": "operator-facing-ui",
-      "callers": []
+      "callers": [
+        {
+          "id": "openclaw-runtime-mission-control",
+          "path": ".env",
+          "owner": "managed",
+          "prodlikeTarget": "http://localhost:5175",
+          "productionTarget": "https://mission-control.sindustries.co.nz"
+        }
+      ]
     },
     {
       "id": "tasks-app",
@@ -115,7 +113,15 @@
       "healthPath": "/",
       "rollbackSurface": false,
       "callerClass": "operator-facing-ui",
-      "callers": []
+      "callers": [
+        {
+          "id": "openclaw-runtime-tasks-app",
+          "path": ".env",
+          "owner": "managed",
+          "prodlikeTarget": "http://localhost:5176",
+          "productionTarget": "https://tasks.sindustries.co.nz"
+        }
+      ]
     },
     {
       "id": "prodlike-fallback",

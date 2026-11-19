@@ -61,6 +61,30 @@ function exampleManifest() {
 }
 
 /**
+ * Materialise a managed caller root for a manifest at a binding.
+ *
+ * The adapter's read-back reads the LIVE caller files, so a read-back
+ * test needs a real tree on disk. Every managed caller gets a file
+ * carrying its own target literal, exactly as the operator's runtime
+ * configuration does.
+ *
+ * @param {object} manifest the manifest whose callers are materialised
+ * @param {string} root the directory the caller paths resolve against
+ * @param {'prodlike'|'production'} binding the binding the callers carry
+ */
+function writeCallerRoot(manifest, root, binding) {
+  for (const surface of manifest.surfaces) {
+    for (const caller of surface.callers ?? []) {
+      if (caller.owner !== 'managed') continue;
+      const target = join(root, caller.path);
+      mkdirSync(dirname(target), { recursive: true });
+      const literal = binding === 'production' ? caller.productionTarget : caller.prodlikeTarget;
+      writeFileSync(target, `${caller.id}=${literal}\n`, { flag: 'a' });
+    }
+  }
+}
+
+/**
  * @param {object} manifest
  * @param {RegExp} expected
  */
@@ -315,16 +339,86 @@ test('the prodlike read-back names the surfaces still on prodlike', () => {
   assert.equal(readback.documentedRollbackSurfaces.length, 1);
 });
 
-test('the prodlike read-back is clean once every in-scope surface is on production', () => {
+test('the prodlike read-back is clean once every in-scope surface is on production', (t) => {
   const manifest = loadManifest(EXAMPLE_MANIFEST);
   const live = {
     ...LIVE,
     binding: 'production',
     surfaces: targetBindings(manifest, 'production'),
   };
-  const readback = prodlikeReadBack(manifest, live);
+  // The read-back proves the LIVE callers, so the clean case needs a
+  // real caller tree on disk. A read-back with no caller root reads no
+  // caller at all — see the next test.
+  const root = mkdtempSync(join(tmpdir(), 'cutover-clean-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeCallerRoot(manifest, root, 'production');
+  const readback = prodlikeReadBack(manifest, live, { root });
   assert.equal(readback.clean, true);
   assert.equal(readback.stillTargetingProdlike.length, 0);
+  assert.equal(readback.unprovenSurfaces.length, 0);
+});
+
+test('a read-back with no live caller is not clean — the journal cannot prove itself', () => {
+  const manifest = loadManifest(EXAMPLE_MANIFEST);
+  const live = {
+    ...LIVE,
+    binding: 'production',
+    surfaces: targetBindings(manifest, 'production'),
+  };
+  // No caller root: nothing is read from disk, so every in-scope
+  // surface falls back to the route state. The route state was written
+  // by the very command that moved the route, so reading a binding out
+  // of it proves nothing — and it used to be reported as clean.
+  const readback = prodlikeReadBack(manifest, live);
+  assert.equal(readback.clean, false);
+  assert.ok(readback.unprovenSurfaces.length > 0);
+  for (const entry of readback.unprovenSurfaces) {
+    assert.notEqual(entry.surface, 'prodlike-fallback');
+    assert.match(entry.detail, /not proof/);
+  }
+  // The documented rollback surface is exempt: nothing moved it on
+  // purpose, so "no live caller" is not a gap there.
+  assert.ok(!readback.unprovenSurfaces.some((entry) => entry.surface === 'prodlike-fallback'));
+});
+
+test('every in-scope surface in the shipped manifest names a managed caller', () => {
+  const manifest = loadManifest(EXAMPLE_MANIFEST);
+  for (const surface of inScopeSurfaces(manifest)) {
+    const managed = (surface.callers ?? []).filter((caller) => caller.owner === 'managed');
+    assert.ok(
+      managed.length > 0,
+      `in-scope surface ${surface.id} names no managed caller — the route state could claim it moved without any live route changing`,
+    );
+  }
+});
+
+test('an in-scope surface with no managed caller is refused', () => {
+  const manifest = exampleManifest();
+  const surface = manifest.surfaces.find((entry) => entry.id === 'tasks-app');
+  surface.callers = [];
+  assertRefused(manifest, /declares no managed caller/);
+});
+
+test('a surface with only external callers is refused — nothing could move it', () => {
+  const manifest = exampleManifest();
+  const surface = manifest.surfaces.find((entry) => entry.id === 'tasks-app');
+  surface.callers = [
+    {
+      id: 'tasks-app-external',
+      path: 'tasks-app.txt',
+      owner: 'external',
+      prodlikeTarget: 'http://localhost:5176',
+      productionTarget: 'https://tasks.sindustries.co.nz',
+    },
+  ];
+  assertRefused(manifest, /declares no managed caller/);
+});
+
+test('a rollback surface with no caller is still allowed', () => {
+  const manifest = exampleManifest();
+  const surface = manifest.surfaces.find((entry) => entry.rollbackSurface);
+  surface.callers = [];
+  assert.doesNotThrow(() => validateManifest(manifest));
 });
 
 test('the route switch rewrites live callers and read-back observes the files', (t) => {
@@ -456,20 +550,6 @@ test('a production set with a retained rollback caller lands and records the rou
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'workspace'), { recursive: true });
 
-  // Every caller file still resolves prodlike.
-  writeFileSync(
-    join(root, '.env'),
-    'TASKS_API_BASE_URL=http://localhost:4001/api/v1\nCONTENT_SCHEDULER_BASE_URL=http://localhost:4004\n',
-  );
-  writeFileSync(
-    join(root, 'workspace/.env'),
-    'TASKS_API_BASE_URL=http://localhost:4001/api/v1\n',
-  );
-  writeFileSync(
-    join(root, 'rollback.env'),
-    'TASKS_API_BASE_URL=http://localhost:4001/api/v1\n',
-  );
-
   // The example manifest with a MANAGED caller on the documented
   // rollback surface. This is the case that used to fail the switch
   // AFTER it had rewritten the in-scope callers, so the command exited
@@ -484,6 +564,17 @@ test('a production set with a retained rollback caller lands and records the rou
       prodlikeTarget: 'http://localhost:4001/api/v1',
       productionTarget: 'https://tasks-api.sindustries.co.nz/api/v1',
     });
+
+  // Every caller file still resolves prodlike. The runtime
+  // configuration carries the route for EVERY in-scope surface, so a
+  // caller the adapter cannot read is a caller the switch refuses to
+  // move — the fixture has to be complete for the switch to be
+  // allowed to run at all.
+  writeCallerRoot(manifest, root, 'prodlike');
+  writeFileSync(
+    join(root, 'rollback.env'),
+    'TASKS_API_BASE_URL=http://localhost:4001/api/v1\n',
+  );
   const manifestPath = join(root, 'manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const statePath = join(root, 'state/route.json');
