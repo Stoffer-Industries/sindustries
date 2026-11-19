@@ -24,7 +24,7 @@ For the **Vercel env contract** see [`infra/cloud/vercel-env-matrix.json`](../..
 and the static check `tests/cloud/scripts/check-vercel-env-matrix.mjs` (enforced
 on every CI run).
 
-For the **per-service deploy procedure** see [Cloud Platform](../systems/cloud-platform.md).
+For the **deploy procedure** see [Cloud Platform](../systems/cloud-platform.md) § "Deploy procedure (reference)".
 
 **Last full live verification:** 2026-11-13 — see
 [§9 — Observed state](#9-observed-state-live-verification-2026-11-13) for
