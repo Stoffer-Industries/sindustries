@@ -17,14 +17,16 @@
 # The application code of all three services is untouched; only the traffic
 # entry point moved.
 #
-# The stable hostnames may not resolve yet, so the router ALSO exposes
-# path-prefix routes on the provider hostname. That keeps the platform
-# usable and testable while DNS is blocked, and it is the proof path used
-# by the hostname verification matrix.
+# The router exposes BOTH routing modes: host-header routing on the stable
+# hostnames, and path-prefix routes on the provider hostname. The stable
+# STAGING hostnames are live (task 5cb4a8fe created the records), and the
+# path-prefix routes remain the proof path used by the hostname verification
+# matrix — they are also what keeps an environment reachable while its own
+# stable DNS is still being stood up.
 #
 # Host-routing is matched on the Host header, which nginx sees regardless of
-# whether the hostname resolves in DNS — so these blocks work the moment the
-# CNAME lands, with no config change.
+# whether the hostname resolves in DNS — so these blocks work whether or not
+# an environment's DNS is in place, with no config change.
 #
 # LOGS
 # ----

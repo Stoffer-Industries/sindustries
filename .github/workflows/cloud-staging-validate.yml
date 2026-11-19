@@ -192,9 +192,10 @@ jobs:
           # reported as a success is worse than a timeout.
           #
           # Hosts are checked, NOT endpoints: a stable hostname that does
-          # not resolve yet (the CNAME gap on task 5cb4a8fe) is still a
-          # valid target and must not fail this check. The checker never
-          # resolves DNS.
+          # not resolve in DNS is still a valid target and must not fail
+          # this check. The checker never resolves DNS. (The stable staging
+          # hostnames do resolve now — task 5cb4a8fe created the records —
+          # but the rule is unchanged: DNS is not this check's business.)
           node tests/cloud/scripts/check-staging-target-preflight.mjs \
             --target STAGING_TASKS_API_URL tasks-api "${TASKS_API_URL}" \
             --target STAGING_BUDGET_API_URL budget-api "${BUDGET_API_URL}" \

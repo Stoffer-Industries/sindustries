@@ -65,9 +65,10 @@ env:
   NODE_VERSION: '22'
   FLY_APP: sindustries-platform-staging
   FLY_CONFIG: infra/cloud/fly/platform.fly.toml
-  # The provider hostname the platform answers on before the stable
-  # hostnames resolve.
-  # stable-fallback: provider URL pending the stable-hostname CNAME move (task 5cb4a8fe)
+  # The provider hostname the platform answers on. The stable hostnames are
+  # live too (task 5cb4a8fe created the records), so the provider URL is the
+  # documented fallback and the path-prefix proof path, not the only route.
+  # stable-fallback: provider URL superseded by the live stable hostnames — CNAME + cert landed 2026-11-10, verified live 2026-11-19 (task 5cb4a8fe)
   PROVIDER_URL: https://sindustries-platform-staging.fly.dev
 
 jobs:

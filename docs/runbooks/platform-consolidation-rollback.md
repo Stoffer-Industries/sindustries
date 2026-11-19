@@ -9,12 +9,15 @@ Quinn, 2026-11-05). The system-level description is
 `docs/systems/cloud-platform.md` §"Shared-fate topology (staging)".
 
 > **Status: the app-level cutover was executed on 2026-11-07; the DNS
-> steps did not run.** Section 3 records the sequence as it was run, except
-> for steps 3, 4 and 7 — moving the CNAMEs, verifying on the stable
-> hostnames and re-pointing the health probe — which did not run and remain
-> blocked on task `5cb4a8fe`. Traffic today reaches the platform only via
-> the `*.fly.dev` fallback hostnames; the stable
-> `*.staging.sindustries.co.nz` records do not resolve. The four
+> steps did not run in that sequence.** Section 3 records the sequence as it
+> was run, except for steps 3, 4 and 7 — moving the CNAMEs, verifying on
+> the stable hostnames and re-pointing the health probe — which did not run
+> on 2026-11-07. The DNS leg has since landed separately: task `5cb4a8fe`
+> created the three stable `*.staging.sindustries.co.nz` records and pointed
+> them at the platform app (verified 2026-11-19: each hostname resolves to
+> `sindustries-platform-staging.fly.dev` and answers HTTP 200 on `/health`),
+> so stable-hostname traffic is live and the `*.fly.dev` provider hostnames
+> are the documented fallback rather than the only route. The four
 > per-service staging Fly apps
 > (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`,
 > `sindustries-content-scheduler-api-staging`,
@@ -146,8 +149,9 @@ variable, so it cannot be used to bypass this order, but it is not the
 documented route: the CI path is the one that provisions the app's secrets
 before the deploy.
 
-The app comes up on its provider hostname; the three stable hostnames still
-point at the old apps, so nothing user-visible changes. Verify:
+The app comes up on its provider hostname. At the time of the cutover the
+three stable hostnames did not exist yet (task `5cb4a8fe` created them
+afterwards), so nothing user-visible changed. Verify:
 
 ```
 curl -fsS https://sindustries-platform-staging.fly.dev/tasks-api/health
@@ -164,6 +168,11 @@ restart count, last exit code, RSS and heartbeat.
 Point `tasks-api`, `budget-api` and `content-scheduler-api` CNAMEs at
 `sindustries-platform-staging.fly.dev`. This is the Cloudflare step that is
 blocked on Tom's token.
+
+> **Done, out of band.** This step did not run on 2026-11-07, but task
+> `5cb4a8fe` created the three records afterwards (verified 2026-11-19: all
+> three resolve to `sindustries-platform-staging.fly.dev` and answer HTTP
+> 200 on `/health`).
 
 ### Step 4 — verify on the stable hostnames
 
@@ -233,8 +242,8 @@ Two different failures need two different responses.
 > move the DNS back to and nothing to scale back up. Restoring per-service
 > hosting is a forward remediation — re-create the apps and redeploy them —
 > not a backout, and it is not covered by this runbook. The stable staging
-> hostnames are not created either (the operator-owned DNS step in task
-> `5cb4a8fe` is still open), so there is no traffic to move back.
+> hostnames exist and point at the platform app (task `5cb4a8fe` created the
+> records), so there is no second app to move that traffic back to.
 
 ### The image is bad (inside the platform app)
 
@@ -249,8 +258,9 @@ This rolls the platform app back one release. It does **not** move traffic
 
 1. ~~Point the three CNAMEs back at the old apps~~ — **not available.** The old
    apps were destroyed on 2026-11-07, so there is no app to point a CNAME at,
-   and the stable hostnames do not resolve yet either (task `5cb4a8fe`,
-   operator-owned DNS step).
+   and the stable hostnames now point at the platform app itself (task
+   `5cb4a8fe` created the records), so there is no second app to move them
+   to.
 
 2. ~~Scale the old apps back up~~ — **not available.** `fly scale count`
    against a destroyed app fails. Re-creating and redeploying the four
