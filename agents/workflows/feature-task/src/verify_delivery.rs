@@ -134,6 +134,72 @@ pub(crate) fn qa_agent_verified_failures(task: &crate::Task) -> Vec<String> {
     }
 }
 
+/// Fingerprint recorded when a task reached `acceptance` without a granted
+/// `qa_agent` approval.
+///
+/// Distinct from the ordinary pending-QA fingerprint (which is the failure
+/// text): `verify_delivery_qa_agent_skipped` means the gate was BYPASSED,
+/// not merely still open. The two states need different repairs, so they
+/// must be distinguishable in the lobster state and in the operator queue.
+pub(crate) const QA_GATE_SKIPPED_FINGERPRINT: &str = "verify_delivery_qa_agent_skipped";
+
+/// Comment tag for the skipped-gate report. Distinct from
+/// `[qa-agent-blocked]`, which means "the gate is open and waiting for Ash"
+/// — the gate here was never run.
+const QA_GATE_SKIPPED_TAG: &str = "[qa-agent-skipped]";
+
+/// True when the task reached `acceptance` without a granted `qa_agent`
+/// approval.
+///
+/// The status alone is not evidence that the QA gate ran. `is_past` compares
+/// status ranks, so a task promoted early satisfies it and used to be
+/// reported as `already_past_doing` with `criteria_met = true` — the gate
+/// treated the status as proof it had been satisfied, which is the exact
+/// inversion the gate exists to prevent (task `fb5c4e40` AC3).
+///
+/// The predicate reads the approval row state only. The Lobster's stricter
+/// `qa_agent_verified` also excludes the comment-derived deferred and blocked
+/// markers, which the Tasks API cannot see; the API-side guard is the floor
+/// and the Lobster is the stricter of the two. Narrowing this to the row
+/// state also keeps a later `[qa-agent-blocked]` verdict on an already-accepted
+/// task from being re-reported as a skipped gate.
+pub(crate) fn qa_gate_skipped(task: &Task) -> bool {
+    task.status == "acceptance" && !task_approvals::task_approval_granted(task, "qa_agent")
+}
+
+/// Blocked envelope for a task that was promoted to `acceptance` without a
+/// granted `qa_agent` approval.
+///
+/// The task is already at `acceptance`; this stage does not move it and does
+/// not synthesise, grant or revoke any approval. It reports the damage so an
+/// authorised operator can choose between a QA rerun by Ash and a manual
+/// status repair (task `fb5c4e40` AC3/AC5).
+fn block_with_skipped_qa_gate(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
+    let failures = vec![
+        "Task is in `acceptance` but the structured `qa_agent` approval is missing, pending or revoked; the QA gate was skipped. Repair requires either a QA rerun by Ash or a manual status repair by an authorised operator — this workflow will not grant the approval and will not move the task.".to_string(),
+    ];
+    env.criteria_met = false;
+    env.action_taken = QA_GATE_SKIPPED_FINGERPRINT.to_string();
+    env.failures = failures.clone();
+    if args.dry_run {
+        return Ok(env);
+    }
+    // Comment and state writes are deduped on the fingerprint, so a re-run
+    // of this stage while the task is still damaged does not spam the task
+    // with the same report on every sweep.
+    if env.lobster_state.failure_fingerprint.as_deref() != Some(QA_GATE_SKIPPED_FINGERPRINT) {
+        env.lobster_state.failure_fingerprint = Some(QA_GATE_SKIPPED_FINGERPRINT.to_string());
+        add_comment(
+            &args.base_url,
+            &env.task.id,
+            &format!("{QA_GATE_SKIPPED_TAG}\n{}", failures.join("\n")),
+        )?;
+        write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+    }
+    analytics::emit_gate_failure_events(args, &env.task, "verify_delivery", &env.failures);
+    Ok(env)
+}
+
 /// Current AC-evidence pins of the delivery PRs that matter right now.
 ///
 /// `body` is carried alongside the head SHA because the two pins are read
@@ -461,6 +527,15 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         );
     }
     if is_past(&env.task, "doing") {
+        // AC3 of task `fb5c4e40`: a task that reached `acceptance` without a
+        // granted `qa_agent` approval skipped Ash's gate. The status is not
+        // evidence that the gate ran, so the damaged state is reported
+        // instead of being treated as an already-satisfied stage. The early
+        // return itself is kept — a legitimately passed gate must still be a
+        // no-op on a re-run.
+        if qa_gate_skipped(&env.task) {
+            return block_with_skipped_qa_gate(&args, env);
+        }
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_doing".to_string();
@@ -760,6 +835,8 @@ pub(crate) fn code_task_verify_delivery(args: StageArgs) -> Result<Envelope> {
 mod tests {
     use super::*;
     use crate::qa_evidence_drift::DriftField;
+    use crate::LobsterState;
+    use std::path::PathBuf;
 
     fn live_pr(number: i64, head: &str, digest: &str) -> (String, LiveEvidence) {
         (
@@ -1099,5 +1176,120 @@ mod tests {
             "https://github.com/baz/qux/pull/12",
             &latest_urls
         ));
+    }
+
+    // ---- task fb5c4e40: a task promoted past the QA gate ----
+    //
+    // `is_past` compares status ranks, so a task that was promoted to
+    // `acceptance` before Ash's `qa_agent` gate ran satisfies
+    // `is_past(task, "doing")` and used to be reported as
+    // `already_past_doing` with `criteria_met = true`. These tests pin the
+    // replacement behaviour: the status is not evidence that the gate ran.
+
+    /// A task in `acceptance` whose `qa_agent` row is in `qa_state`.
+    /// `None` means the task carries no `qa_agent` row at all.
+    fn acceptance_task(qa_state: Option<&str>) -> Task {
+        Task {
+            id: "fb5c4e40-e3ba-4413-a040-47b2b56ddd35".to_string(),
+            title: "AC3 skipped-gate fixture".to_string(),
+            status: "acceptance".to_string(),
+            task_type: Some("code".to_string()),
+            approvals: qa_state
+                .map(|state| {
+                    vec![crate::TaskApproval {
+                        approval_type: "qa_agent".to_string(),
+                        state: state.to_string(),
+                        ..Default::default()
+                    }]
+                })
+                .unwrap_or_default(),
+            ..Task::default()
+        }
+    }
+
+    #[test]
+    fn an_accepted_task_without_a_granted_qa_agent_reports_a_skipped_gate() {
+        assert!(qa_gate_skipped(&acceptance_task(Some("pending"))));
+        assert!(qa_gate_skipped(&acceptance_task(Some("revoked"))));
+        assert!(qa_gate_skipped(&acceptance_task(None)));
+    }
+
+    #[test]
+    fn an_accepted_task_with_a_granted_qa_agent_is_not_a_skipped_gate() {
+        assert!(!qa_gate_skipped(&acceptance_task(Some("approved"))));
+    }
+
+    #[test]
+    fn a_task_outside_acceptance_is_not_a_skipped_gate() {
+        for status in ["open", "ready", "doing", "done"] {
+            let mut task = acceptance_task(Some("pending"));
+            task.status = status.to_string();
+            assert!(
+                !qa_gate_skipped(&task),
+                "a {status} task must not be reported as a skipped gate"
+            );
+        }
+    }
+
+    #[test]
+    fn the_skipped_gate_envelope_blocks_and_records_its_own_fingerprint() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task: acceptance_task(Some("pending")),
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+
+        let result = block_with_skipped_qa_gate(&args, env).expect("dry run must not error");
+
+        assert!(!result.criteria_met);
+        assert_eq!(result.action_taken, "verify_delivery_qa_agent_skipped");
+        assert_eq!(result.action_taken, QA_GATE_SKIPPED_FINGERPRINT);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].contains("qa_agent"));
+    }
+
+    #[test]
+    fn the_skipped_gate_envelope_synthesises_no_approval_and_moves_no_status() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task: acceptance_task(Some("pending")),
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+
+        let result = block_with_skipped_qa_gate(&args, env).expect("dry run must not error");
+
+        // AC5: the report identifies the damage. It never grants, revokes or
+        // otherwise rewrites an approval, and it never moves the task.
+        assert_eq!(result.task.approvals.len(), 1);
+        assert_eq!(result.task.approvals[0].state, "pending");
+        assert_eq!(result.task.status, "acceptance");
+    }
+
+    #[test]
+    fn the_skipped_gate_fingerprint_is_distinct_from_the_pending_qa_fingerprint() {
+        // The ordinary pending-QA block stores the failure text as its
+        // fingerprint; the skipped gate stores its own name. A state reader
+        // must be able to tell "Ash has not acted yet" apart from "the gate
+        // was bypassed".
+        let pending = qa_agent_verified_failures(&acceptance_task(Some("pending")));
+        assert_ne!(pending.join("\n"), QA_GATE_SKIPPED_FINGERPRINT);
     }
 }

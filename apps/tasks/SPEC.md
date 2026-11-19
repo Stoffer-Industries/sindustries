@@ -54,6 +54,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
 2. On mobile, user changes status via dropdown in the detail view
 3. `statusChangedAt` is recorded on each transition
 4. Moving to `done` records `completedAt`; moving away from `done` clears it
+5. Two transitions are rejected by the API when an approval prerequisite is unmet: `doing` → `acceptance` requires a granted `qa_agent` approval, and `acceptance` → `done` requires a granted `accepted` approval. The API answers `409 Conflict` with a stable code (`QA_APPROVAL_REQUIRED`, `QA_APPROVAL_REVOKED`, `ACCEPTANCE_APPROVAL_REQUIRED`) and leaves the task unchanged. The board surfaces the API's error message and the card stays in its original column.
 
 ### 4. Filter the backlog
 1. User applies filters: status, priority, assignee, tag, due date range, text search

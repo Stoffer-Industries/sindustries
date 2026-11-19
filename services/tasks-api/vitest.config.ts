@@ -6,6 +6,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     exclude: [
       'test/db-integration.test.ts',
+      'test/statusTransition.integration.test.ts',
       'test/taskAttentionOwnersPositionMove.test.ts',
       'test/dedupeAttentionOwnersScript.test.ts',
       'test/featureTaskAnalyticsBudget.integration.test.ts',

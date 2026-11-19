@@ -519,11 +519,28 @@ open → ready → doing → acceptance → done
 | `acceptance` | PR merged (code/feature) or delivered (content), awaiting Tom acceptance |
 | `done` | Accepted and closed |
 
-State transitions are enforced by convention, not database constraints. Quinn validates before advancing.
+State transitions are mostly a matter of convention, but two of them are now enforced at the API boundary — see [Enforced status transitions](#enforced-status-transitions) below.
 
 `blocked` and `dependencyBlocked` are independent: a task is visibly blocked when either is true. `completedAt` is set on → done and cleared on ← done. `statusChangedAt` is updated on every status change and powers Kanban board sorting (time-in-column).
 
 The fluid AC lifecycle (spec drift re-approval flow) replaces the old hard-block on drift with a Tom-gated re-approval flow. See [Spec Checksum Safeguards](#spec-checksum-safeguards-factory-v2-last-grandfathered-edit) below.
+
+### Enforced status transitions
+
+Two status transitions are validated at the Tasks API boundary rather than left to convention. The API rejects an illegal transition with `409 Conflict` and a stable machine-readable code, and leaves the task **entirely unchanged** — `status`, `statusChangedAt` and `completedAt` are all untouched, and no approval row is created, mutated or revoked.
+
+| Transition | Required | Rejection code |
+|---|---|---|
+| `doing` → `acceptance` | the task type's required set includes `qa_agent`, **and** the task has a `qa_agent` approval row with `state: approved` and no `revokedAt` | `QA_APPROVAL_REQUIRED` (row missing or still pending) · `QA_APPROVAL_REVOKED` (row revoked) |
+| `acceptance` → `done` | the task type's required set includes `accepted`, **and** the task has an `accepted` approval row with `state: approved` and no `revokedAt` | `ACCEPTANCE_APPROVAL_REQUIRED` |
+
+The required set comes from the [required-approvals policy](#required-approvals-policy), so the rule stays editable without a deploy and task types that require no `qa_agent` (`content`, `research`) are unaffected. Every other transition is still allowed, including the `acceptance → doing` rollback that the attention-owner handoff relies on.
+
+The guard is enforced at the API rather than in the Lobster because the Lobster is the workflow's *driver*, not its boundary: any caller — the Lobster, a script, the Tasks UI, another agent holding an API token — can reach `PATCH /tasks/:id`. The Lobster keeps its own gate as a second, independent defence, and its `verify_delivery` stage no longer treats "the task is already past `doing`" as proof that the QA gate ran. A task sitting in `acceptance` with a materialised but never-granted `qa_agent` row is reported with the `verify_delivery_qa_agent_skipped` fingerprint rather than as an already-satisfied stage.
+
+The two layers do not agree exactly, and should not be described as if they do. The API checks the approval row's state; the Lobster's stricter `qa_agent_verified` predicate also excludes the comment-derived `[qa-agent-deferred]` and `[qa-agent-blocked]` markers, which the API cannot see. The API is the floor, the Lobster is the stricter of the two.
+
+Read-only identification of tasks that already reached a gate without the grant is available from `agents/skills/ops/tasks-api/scripts/identify_skipped_qa_tasks.py`. It writes nothing — it only reports, with the repair options per task.
 
 ---
 
@@ -536,7 +553,7 @@ Base path: `/api/v1`
 | `GET` | `/tasks` | List with filters: status, priority, assignee, tag, q, blocked, taskType, cursor, workflowGateOwner, attentionOwner |
 | `POST` | `/tasks` | Create task |
 | `GET` | `/tasks/:id` | Get task with comments, tags, dependencies, approvals, attention owners, derived workflowGates |
-| `PATCH` | `/tasks/:id` | Partial update — status, priority, assignee, tags, specChecksum, description, dependsOnIds, attentionOwners |
+| `PATCH` | `/tasks/:id` | Partial update — status, priority, assignee, tags, specChecksum, description, dependsOnIds, attentionOwners. A status transition that violates an approval prerequisite is rejected with `409` and leaves the task unchanged — see [Enforced status transitions](#enforced-status-transitions) |
 | `DELETE` | `/tasks/:id` | Soft archive (sets archivedAt) |
 | `GET` | `/tasks/:id/comments` | List comments |
 | `POST` | `/tasks/:id/comments` | Add comment (drift-tolerant) |

@@ -26,6 +26,7 @@ import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
 import { deliveryEvidenceCommentWhere } from './tasks/_deliveryEvidence.ts';
 import { descriptionHasSpecDrift, specChecksumForDescription } from './tasks/_spec.ts';
+import { statusTransitionError } from './tasks/_statusTransitions.ts';
 import {
   buildWorkflowGateOwnerWhere,
   connectTags,
@@ -632,7 +633,13 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
     const existing = await prisma.task.findFirst({
       where: { id, archivedAt: null },
-      include: { attentionOwners: { orderBy: { position: 'asc' } } }
+      include: {
+        attentionOwners: { orderBy: { position: 'asc' } },
+        // The status-transition guard reads the task's approval rows to
+        // decide whether `doing → acceptance` and `acceptance → done` are
+        // legal. Task `fb5c4e40` AC1.
+        approvals: true
+      }
     });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
@@ -696,9 +703,59 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       updates.priority = req.body.priority;
     }
 
+    // The EFFECTIVE task type — the type the task will have once this
+    // request is applied — is resolved BEFORE the status guard runs.
+    //
+    // Task `fb5c4e40` review finding: the guard used to read
+    // `existing.taskType`, the type the task has NOW, while the SAME
+    // request was also allowed to change that type. A task typed
+    // `research` — which requires no approval for the acceptance
+    // transition — could PATCH `taskType: 'code'` and
+    // `status: 'acceptance'` in ONE request: the guard saw the old
+    // type, required nothing, allowed the transition, and the write
+    // then produced a CODE task sitting at acceptance with no
+    // `qa_agent` approval. That is the exact bypass the guard exists
+    // to prevent, and a single PATCH was enough to reach it.
+    //
+    // The guard must therefore evaluate the type the task WILL have,
+    // not the one it happens to have while the request is still in
+    // flight. The taskType is validated here as well, so an invalid
+    // type is refused before the guard reasons about it.
+    let effectiveTaskType: string | null = existing.taskType;
+    if (req.body?.taskType !== undefined) {
+      if (req.body.taskType && !validTaskTypes.has(req.body.taskType)) {
+        return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
+      }
+      effectiveTaskType = req.body.taskType || null;
+      updates.taskType = effectiveTaskType;
+    }
+
     if (req.body?.status !== undefined) {
       if (!validStatuses.has(req.body.status)) {
         return badRequest(res, 'INVALID_STATUS_VALUE', 'Invalid status value');
+      }
+      // Task `fb5c4e40` AC1/AC2: the API is the enforcement boundary for
+      // the workflow gate order. An illegal transition is rejected with a
+      // 409 BEFORE any write happens, so the task — status, statusChangedAt
+      // and completedAt — is left entirely unchanged.
+      const requiredApprovalsConfig = loadRequiredApprovalsConfig();
+      const transitionError = statusTransitionError({
+        fromStatus: existing.status,
+        toStatus: req.body.status,
+        requiredApprovals: requiredApprovalsFor(
+          requiredApprovalsConfig,
+          effectiveTaskType
+        ),
+        approvals: existing.approvals ?? [],
+        gateOwners: requiredApprovalsConfig.owners
+      });
+      if (transitionError) {
+        return sendError(
+          res,
+          transitionError.status,
+          transitionError.code,
+          transitionError.message
+        );
       }
       updates.status = req.body.status;
       updates.statusChangedAt = new Date();
@@ -717,13 +774,6 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
     if (req.body?.blocked !== undefined) {
       updates.blocked = Boolean(req.body.blocked);
-    }
-
-    if (req.body?.taskType !== undefined) {
-      if (req.body.taskType && !validTaskTypes.has(req.body.taskType)) {
-        return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
-      }
-      updates.taskType = req.body.taskType || null;
     }
 
     if (hasDependencyUpdate) {

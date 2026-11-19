@@ -7,6 +7,7 @@ export default defineConfig({
     environment: 'node',
     include: [
       'test/db-integration.test.ts',
+      'test/statusTransition.integration.test.ts',
       'test/taskAttentionOwnersPositionMove.test.ts',
       'test/dedupeAttentionOwnersScript.test.ts',
       'test/featureTaskAnalyticsBudget.integration.test.ts',
