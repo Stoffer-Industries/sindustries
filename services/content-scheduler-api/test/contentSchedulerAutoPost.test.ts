@@ -534,7 +534,11 @@ describe('processAutoPostJob', () => {
     prismaMock.contentSchedulerItem.findUnique
       .mockResolvedValueOnce(item)
       .mockResolvedValueOnce(item);
-    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([{ id: 'already-published' }]);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([
+      { id: 'already-published-1' },
+      { id: 'already-published-2' },
+      { id: 'already-published-3' }
+    ]);
 
     const outcome = await processAutoPostJob(
       { itemId: 'i1', scheduledFor: item.scheduledFor, scheduleVersion: 1 },
