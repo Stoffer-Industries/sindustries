@@ -759,6 +759,34 @@ The operator procedure is in [`docs/runbooks/production-data-migration-restore.m
 
 ---
 
+## Production route cutover (task `020f423e`)
+
+The data cutover above moves the DATA. The route cutover moves the ROUTE: which origin each in-scope surface is bound to. They are separate tasks because they are separate failures — data that landed in the wrong place and traffic that reached the wrong place need different recoveries.
+
+**What the route is.** This deployment has no weighted load balancer between two live origins: the stable hostnames CNAME at the cloud platform, and the callers resolve their base URL from the environment they run in. So the route adapter is not a traffic splitter — it is the guarded control plane that owns which origin each surface is bound to, driven through a fixed phase order (`prodlike` → `canary` → `partial` → `majority` → `cloud_active` → `observing` → `acceptance_pending`). The approved tech design anticipated this case explicitly: if the provider cannot do weighted traffic, the adapter must support an atomic, health-checked origin switch at the stable front-door; DNS TTL alone does not satisfy the interface. The binding switch is atomic per run, health-checked before and after, and reversible — which is the property the design was actually protecting.
+
+**Ownership boundary.** The route state is an infra/workflow-boundary artefact, not a product service. `infra/cloud/cutover/` owns the declarative manifest and the adapter; `scripts/cloud/cutover/` owns the guarded preflight, switch, observe and rollback orchestration. The adapter holds no credentials and makes no provider calls: it exists to make a mistake impossible to make silently.
+
+**Why compare-and-set.** A cutover window has more than one pair of hands in it. Two operators, or an operator and a retry, must not silently overwrite each other's route change. Every write carries the route version the operator believed was live and is refused when the live version has moved. The manifest is likewise validated fail-closed: a manifest carrying a credential-shaped substring, an unset observation duration, a non-monotonic phase order, or no declared rollback surface is refused rather than used.
+
+**Rollback modes.** (1) *Runtime rollback* — the normal case: route traffic back to the warm prodlike services, which keep using the canonical cloud PostgreSQL/Redis, so there is no data divergence. (2) *Cloud data-layer incident* — never point prodlike at the stale pre-cutover database after production writes; quiesce writes, restore from the accepted backup/PITR, reconcile, and route only after a second go/no-go. (3) *Pre-write abort* — the frozen pre-cutover database is usable only once the write ledger proves no cloud-only writes occurred. No dual-write or multi-primary layer is introduced.
+
+**Prodlike is retained.** Decommissioning is not part of this task. It stays warm and healthy through the observation period and remains the tested rollback surface until Tom explicitly accepts; a successful switch is not a reason to remove it. The harness's final phase is `acceptance_pending` and it stops there — the script never accepts on Tom's behalf and never retires the fallback.
+
+**Operational surfaces.**
+
+| Surface | Path |
+|---|---|
+| Operator runbook | [`docs/runbooks/production-cloud-cutover.md`](../runbooks/production-cloud-cutover.md) |
+| Execution record template | [`docs/infra/production-cloud-cutover-record-template.md`](../infra/production-cloud-cutover-record-template.md) |
+| Tech design | `docs/specs/production-cloud-cutover-rollback-tech-design.md` |
+| Route adapter | `infra/cloud/cutover/traffic-route.mjs` (CLI: `infra/cloud/bin/traffic-route`) |
+| Harness | `scripts/cloud/cutover/` — `preflight.sh`, `execute.sh`, `observe.sh`, `rehearse.sh`, `rollback.sh`, `verify-local-recovery.sh` |
+| Continuous probes | `tests/cloud/production-cutover-probes.mjs` |
+| Dispatch workflow | `.github/workflows/production-cloud-cutover.yml` (`workflow_dispatch` only, `production` Environment, concurrency group `production-cutover`) |
+
+---
+
 ## Credential boundary
 
 The `.openclaw` boundary Quinn confirmed on the PR #508 review (merged `d6ee2d8`):

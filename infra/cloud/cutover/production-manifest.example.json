@@ -1,0 +1,147 @@
+{
+  "$comment": [
+    "Example production cutover manifest (task 020f423e).",
+    "This file is the TEMPLATE: copy it, fill in the operator-owned values, and",
+    "pass the copy to the cutover scripts with --manifest. It is tracked so the",
+    "shape is reviewable; it must never carry a credential, a DSN or a token.",
+    "The format is JSON, not YAML: the repo has no YAML parser dependency, and",
+    "the machine-owned config in this repo is JSON (infra/cloud/hostname-matrix.json).",
+    "The approved tech design names a 'versioned YAML' manifest; the shape and",
+    "the fail-closed validation are what matter, and JSON keeps the manifest",
+    "readable by the same tooling with no new dependency."
+  ],
+  "manifestVersion": 1,
+  "taskId": "020f423e-a18d-4435-98cb-664b655f675b",
+  "environment": "production",
+  "description": "Production cloud cutover: Mission Control runtime and its in-scope callers move from the prodlike origin to the verified cloud deployment, with prodlike retained as a tested rollback surface until Tom accepts the observation period.",
+
+  "run": {
+    "observationMinutes": 60,
+    "windowOpensNzdt": "2026-11-22T19:00:00+13:00",
+    "operatorRoles": {
+      "goNoGo": "Tom",
+      "execution": "Quinn",
+      "engineering": "Rowan"
+    },
+    "abortThresholds": {
+      "probeFailureCount": 1,
+      "errorRate": 0.005,
+      "p95LatencyMs": 1500,
+      "activeAlertCount": 1
+    }
+  },
+
+  "origins": {
+    "prodlike": {
+      "kind": "local",
+      "label": "prodlike (local stack, retained as rollback source)",
+      "dataPlane": "local-postgres",
+      "note": "Kept warm and healthy through the observation period. It must be repointed at the canonical cloud PostgreSQL/Redis before it can serve as a data-safe runtime rollback target; the runbook records that step as a gate."
+    },
+    "production": {
+      "kind": "cloud",
+      "label": "production (consolidated Fly platform)",
+      "dataPlane": "canonical-cloud-postgres",
+      "note": "The verified cloud deployment. One consolidated platform app hosts the Tasks API, the Content Scheduler and the Budget API as supervisor children."
+    }
+  },
+
+  "surfaces": [
+    {
+      "id": "tasks-api",
+      "kind": "api",
+      "productionBaseUrl": "https://tasks-api.sindustries.co.nz/api/v1",
+      "prodlikeBaseUrl": "http://localhost:4001/api/v1",
+      "healthPath": "/health",
+      "rollbackSurface": false,
+      "callerClass": "tasks-api-and-agent-automation"
+    },
+    {
+      "id": "content-scheduler-api",
+      "kind": "api",
+      "productionBaseUrl": "https://content-scheduler-api.sindustries.co.nz/api/v1",
+      "prodlikeBaseUrl": "http://localhost:4004/api/v1",
+      "healthPath": "/health",
+      "rollbackSurface": false,
+      "callerClass": "content-scheduler-and-cron-callers"
+    },
+    {
+      "id": "budget-api",
+      "kind": "api",
+      "productionBaseUrl": "https://budget-api.sindustries.co.nz/api/v1",
+      "prodlikeBaseUrl": "http://localhost:4002/api/v1",
+      "healthPath": "/health",
+      "rollbackSurface": false,
+      "callerClass": "mission-control"
+    },
+    {
+      "id": "mission-control",
+      "kind": "frontend",
+      "productionBaseUrl": "https://mission-control.sindustries.co.nz",
+      "prodlikeBaseUrl": "http://localhost:5175",
+      "healthPath": "/",
+      "rollbackSurface": false,
+      "callerClass": "operator-facing-ui"
+    },
+    {
+      "id": "tasks-app",
+      "kind": "frontend",
+      "productionBaseUrl": "https://tasks.sindustries.co.nz",
+      "prodlikeBaseUrl": "http://localhost:5176",
+      "healthPath": "/",
+      "rollbackSurface": false,
+      "callerClass": "operator-facing-ui"
+    },
+    {
+      "id": "prodlike-fallback",
+      "kind": "origin",
+      "productionBaseUrl": "http://localhost:4001/api/v1",
+      "prodlikeBaseUrl": "http://localhost:4001/api/v1",
+      "healthPath": "/health",
+      "rollbackSurface": true,
+      "callerClass": "documented-rollback-surface",
+      "note": "The prodlike origin is NOT decommissioned by this task. It is the retained rollback surface and is the one documented exception to 'no in-scope caller targets prodlike'."
+    }
+  ],
+
+  "phases": [
+    { "phase": "baseline", "binding": "prodlike", "holdSeconds": 300, "minSamples": 2 },
+    { "phase": "canary", "binding": "production", "holdSeconds": 300, "minSamples": 2 },
+    { "phase": "partial", "binding": "production", "holdSeconds": 300, "minSamples": 2 },
+    { "phase": "majority", "binding": "production", "holdSeconds": 300, "minSamples": 2 },
+    { "phase": "cloud_active", "binding": "production", "holdSeconds": 600, "minSamples": 3 },
+    { "phase": "observing", "binding": "production", "holdSeconds": 3600, "minSamples": 6 },
+    { "phase": "acceptance_pending", "binding": "production", "holdSeconds": 0, "minSamples": 1 }
+  ],
+
+  "probes": {
+    "intervalSeconds": 60,
+    "minSamplesPerStep": 2,
+    "timeoutSeconds": 20,
+    "syntheticIdentity": "cutover-probe@cutover.invalid",
+    "cleanupRequired": true
+  },
+
+  "gates": {
+    "requiredDependencyTaskIds": [
+      "2850c5ac-252e-404a-863b-b83755b2f618",
+      "4b3d6e9c-d1ba-462c-aa72-4371ce81d8c7",
+      "f2c23e26-9d26-451d-bf62-e1a357fa24ab"
+    ],
+    "requiredEvidence": [
+      "dependency-acceptance",
+      "backup-and-restore-test",
+      "local-fallback-health",
+      "worker-leadership",
+      "route-inventory",
+      "credential-and-callback-preflight",
+      "staging-rollback-rehearsal"
+    ],
+    "requiredOperatorFields": ["observationMinutes", "operatorRoles.goNoGo", "operatorRoles.execution"]
+  },
+
+  "evidence": {
+    "artifactDir": "artifacts/cutover",
+    "recordTemplate": "docs/infra/production-cloud-cutover-record-template.md"
+  }
+}

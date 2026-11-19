@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# bin/traffic-route — operator-facing route adapter for the SIndustries
+# production cutover (task 020f423e, "Execute production cloud cutover
+# with rollback verification").
+#
+# The adapter itself lives in infra/cloud/cutover/traffic-route.mjs.
+# This wrapper exists for the same reason infra/cloud/bin/status does:
+# one place that resolves the repository root, checks the tools the
+# command needs, and runs the underlying module with a predictable
+# interpreter — so an operator never has to remember which file is the
+# script and which file is the module.
+#
+# WHAT IT DOES
+#   get      — print the live route state
+#   plan     — print the diff between the live route and a requested
+#              binding (read-only; it never writes)
+#   set      — apply a binding with compare-and-set and a typed
+#              confirmation (the only writing command)
+#   wait     — wait until the route state shows the expected binding
+#   readback — print which in-scope surfaces still target prodlike
+#
+# WHAT IT DOES NOT DO
+# It holds no credential, makes no provider call, and never writes
+# without --expected-version, --run-id and a matching --confirm. The
+# route state is an operator artifact under the artifact directory, not
+# a tracked file.
+#
+# Usage:
+#   infra/cloud/bin/traffic-route get
+#   infra/cloud/bin/traffic-route plan --manifest <path> --binding production
+#   infra/cloud/bin/traffic-route set --manifest <path> --binding production \
+#       --expected-version 3 --run-id <id> --confirm <id>
+#   infra/cloud/bin/traffic-route wait --binding production --expected-version 4 --timeout 60
+#   infra/cloud/bin/traffic-route readback --manifest <path>
+#
+# Exit codes:
+#   0  the command succeeded
+#   1  the command ran and refused (bad state, stale version, bad manifest)
+#   2  invalid usage / a required tool is missing
+
+set -euo pipefail
+
+# bin/ -> cloud/ -> infra/ -> repo root (3 levels up)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
+  REPO_ROOT="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
+fi
+
+ADAPTER="$REPO_ROOT/infra/cloud/cutover/traffic-route.mjs"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node not on PATH (the route adapter is a node module)" >&2
+  exit 2
+fi
+if [[ ! -f "$ADAPTER" ]]; then
+  echo "ERROR: route adapter not found at $ADAPTER" >&2
+  exit 2
+fi
+
+exec node "$ADAPTER" "$@"
