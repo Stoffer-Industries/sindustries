@@ -36,7 +36,7 @@ AC1–AC4 wording.
 Collapsed from the emitted `staging-workflows.json` (full JSON is the artifact
 attached to the workflow):
 
-<!-- stable-fallback: dated 2026-10-04 evidence; the provider URLs in the JSON below were the live target at run time, superseded by https://<service>.staging.sindustries.co.nz once the stable CNAMEs + certs land (task 5cb4a8fe) -->
+<!-- stable-fallback: dated 2026-10-04 evidence; the provider URLs in the JSON below were the live target at run time, superseded by the stable CNAMEs now live (task 5cb4a8fe) — https://tasks-api.staging.sindustries.co.nz, https://budget-api.staging.sindustries.co.nz, https://content-scheduler-api.staging.sindustries.co.nz -->
 
 ```json
 {
@@ -62,9 +62,9 @@ attached to the workflow):
   },
   "cleanup": { "ok": true, "operations": [] },
   "services": {
-    "tasksApi":        { "url": "https://sindustries-tasks-api-staging.fly.dev",        "version": null, "matchesIntent": false }, // stable-fallback: dated 2026-10-04 evidence; provider URL was the live target at run time, superseded by https://tasks-api.staging.sindustries.co.nz once the stable CNAME + cert land (task 5cb4a8fe)
-    "budgetApi":       { "url": "https://sindustries-budget-api-staging.fly.dev",       "version": null, "matchesIntent": false }, // stable-fallback: dated 2026-10-04 evidence; provider URL was the live target at run time, superseded by https://budget-api.staging.sindustries.co.nz once the stable CNAME + cert land (task 5cb4a8fe)
-    "contentScheduler":{ "url": "https://sindustries-content-scheduler-api-staging.fly.dev", "version": null, "matchesIntent": false } // stable-fallback: dated 2026-10-04 evidence; provider URL was the live target at run time, superseded by https://content-scheduler-api.staging.sindustries.co.nz once the stable CNAME + cert land (task 5cb4a8fe)
+    "tasksApi":        { "url": "https://sindustries-tasks-api-staging.fly.dev",        "version": null, "matchesIntent": false },
+    "budgetApi":       { "url": "https://sindustries-budget-api-staging.fly.dev",       "version": null, "matchesIntent": false },
+    "contentScheduler":{ "url": "https://sindustries-content-scheduler-api-staging.fly.dev", "version": null, "matchesIntent": false }
   }
 }
 ```
