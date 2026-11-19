@@ -300,6 +300,37 @@ export function applyRouteSwitch(root, manifest, binding) {
 }
 
 /**
+ * The managed callers that did NOT land on the requested binding.
+ *
+ * The documented rollback surfaces are EXCLUDED, and they have to be.
+ * applyRouteSwitch() deliberately leaves the rollback surfaces where
+ * they are — a retained rollback caller on prodlike is the evidence
+ * that the rollback stayed honest, not evidence that the switch
+ * failed. Asserting on it made every production switch report "the
+ * route was NOT moved" AFTER it had already rewritten the callers, so
+ * the command exited non-zero and never wrote the route state: a
+ * half-moved route with no journal entry.
+ *
+ * @param {object} manifest
+ * @param {object} snapshot caller id -> observed binding
+ * @param {string} binding the requested binding
+ * @returns {Array<[string, string]>} the callers that did not move
+ */
+export function routeSwitchNotMoved(manifest, snapshot, binding) {
+  const retainedRollbackCallers = new Set(
+    rollbackSurfaces(manifest).flatMap((surface) =>
+      (surface.callers ?? []).map((caller) => caller.id),
+    ),
+  );
+  return Object.entries(snapshot).filter(([id, observed]) => {
+    if (retainedRollbackCallers.has(id)) return false;
+    const caller = findCaller(manifest, id);
+    if (!caller || caller.owner !== 'managed') return false;
+    return observed !== binding;
+  });
+}
+
+/**
  * `set` — apply a binding with compare-and-set.
  *
  * @param {object} manifest
@@ -699,11 +730,7 @@ export function main(argv) {
         // the caller files are re-read and every managed caller must
         // now resolve the requested origin.
         const after = callerSnapshot(root, manifest);
-        const notMoved = Object.entries(after).filter(([id, binding]) => {
-          const caller = findCaller(manifest, id);
-          if (!caller || caller.owner !== 'managed') return false;
-          return binding !== options.binding;
-        });
+        const notMoved = routeSwitchNotMoved(manifest, after, options.binding);
         if (notMoved.length > 0) {
           throw new Error(
             `traffic-route: the caller switch did not land for ${notMoved
