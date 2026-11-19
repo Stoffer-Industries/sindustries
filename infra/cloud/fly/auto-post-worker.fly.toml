@@ -81,5 +81,7 @@ kill_timeout = '5s'
   # has no http_service so the canary strategy manifests as a single
   # new machine brought up alongside the prior release; Fly promotes it
   # once it's healthy. For rollback: `fly releases rollback <v>` (see
-  # docs/runbooks/cloud-deployment-rollback.md, planned in WS3).
+  # docs/specs/cloud-deployment-foundation-tech-design.md "Rollback"
+  # section; the prior docs/runbooks/cloud-deployment-rollback.md was
+  # retired in PR #583).
   strategy = 'canary'
