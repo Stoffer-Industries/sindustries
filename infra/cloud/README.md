@@ -67,12 +67,19 @@ the platform app now hosts every service.
 | ~~`sindustries-content-scheduler-api-staging`~~ | `services/content-scheduler-api/` | Retired 2026-11-07. Now a content-scheduler-api child of the platform. Health at `/health`. Port 4003.                         |
 | ~~`sindustries-auto-post-worker-staging`~~ | `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` | Retired 2026-11-07. The worker still runs — as a child of the platform, on the same BullMQ queue. **Not** HTTP-exposed. |
 
-The per-service `fly/*.fly.toml` files are retained as templates for the
-production migration; no operator surface deploys them any more, and
+The per-service `fly/*.fly.toml` files are retained as historical templates
+only. The production migration they were kept for has landed: production runs
+the one consolidated platform app too
+(`infra/cloud/fly/platform.production.overlay.toml` →
+`sindustries-platform-production`, task `fb1240c0`), so in neither environment
+is a per-service app ever created. No operator surface deploys them any more
+— `infra/cloud/bin/deploy` resolves every service name to
+`infra/cloud/fly/platform.fly.toml` — and
 `infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the build if
-one comes back — a resurrected worker app would be a SECOND consumer on the
+one comes back: a resurrected worker app would be a SECOND consumer on the
 same BullMQ queue, and every scheduled post would be processed twice,
-silently.
+silently. Their pending deletion is recorded in
+`docs/runbooks/platform-consolidation-rollback.md` §5.
 
 The stable staging hostnames are live: each
 `<service>.staging.sindustries.co.nz` CNAME points at the consolidated
