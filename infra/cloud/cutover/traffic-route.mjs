@@ -467,6 +467,7 @@ export function prodlikeReadBack(manifest, live, options = {}) {
   const stillProdlike = [];
   const callerObservations = [];
   const surfaceBindings = [];
+  const unproven = [];
 
   for (const surface of manifest.surfaces) {
     const observations = root ? readSurfaceCallers(root, surface) : [];
@@ -511,6 +512,31 @@ export function prodlikeReadBack(manifest, live, options = {}) {
         url: surface.prodlikeBaseUrl,
       });
     }
+
+    // A surface bound from the JOURNAL is not evidence of anything.
+    //
+    // The journal is written by the very command that moved the route,
+    // so reading a surface's binding back out of it says only that the
+    // command recorded what it intended to do. A surface with no live
+    // managed caller has nothing to read, so the journal was all there
+    // was — and the read-back called that clean. The route state could
+    // claim the surface was production while no live route had
+    // changed.
+    //
+    // So an IN-SCOPE surface whose binding came from the journal is
+    // reported as unproven, and an unproven surface is not clean. The
+    // documented rollback surfaces are exempt: their binding is the
+    // prodlike origin by definition, and "nothing moved it" is the
+    // point.
+    if (!surface.rollbackSurface && source === 'journal') {
+      unproven.push({
+        surface: surface.id,
+        callerClass: surface.callerClass,
+        url: surface.productionBaseUrl,
+        detail:
+          'no live managed caller was read for this surface — its binding came from the route state itself, which is not proof that any route moved',
+      });
+    }
   }
 
   const managedCallersNotOnProduction = callerObservations.filter(
@@ -551,6 +577,9 @@ export function prodlikeReadBack(manifest, live, options = {}) {
       binding: observation.binding,
       detail: observation.detail,
     })),
+    // The in-scope surfaces the read-back could NOT prove. Their
+    // binding came from the route state, not from a live caller.
+    unprovenSurfaces: unproven,
     externalCallersOutstanding: externalOutstanding.map((observation) => ({
       id: observation.id,
       surface: observation.surface,
@@ -561,13 +590,15 @@ export function prodlikeReadBack(manifest, live, options = {}) {
     clean:
       stillProdlike.length === 0 &&
       managedCallersNotOnProduction.length === 0 &&
-      externalOutstanding.length === 0,
+      externalOutstanding.length === 0 &&
+      unproven.length === 0,
     // The window is only COMPLETE when every managed caller is
     // observed on production and no external caller is outstanding.
     complete:
       stillProdlike.length === 0 &&
       managedCallersNotOnProduction.length === 0 &&
-      externalOutstanding.length === 0,
+      externalOutstanding.length === 0 &&
+      unproven.length === 0,
   };
 }
 

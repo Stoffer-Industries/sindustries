@@ -61,8 +61,22 @@ CUTOVER_MANIFEST_MODULE="$CUTOVER_REPO_ROOT/infra/cloud/cutover/manifest.mjs"
 
 # The abort-threshold evaluator. It owns the MEANING of the manifest's
 # run.abortThresholds, so the executor and the tests cannot drift apart
-# on what "errorRate" or "p95LatencyMs" means.
-CUTOVER_THRESHOLDS_MODULE="$CUTOVER_REPO_ROOT/infra/cloud/cutover/thresholds.mjs"
+# on what "errorRate" or "p95LatencyMs" means. The module lives at
+# infra/cloud/cutover/thresholds.mjs.
+#
+# The executor calls it through the CLI wrapper below, never through
+# the module: thresholds.mjs decides whether to run its own command
+# line by comparing the process entry point against its module URL,
+# and that comparison is false whenever the path is not byte-identical
+# to the URL (a symlinked checkout, a temporary directory, a path with
+# a space in it). When it was false the module exited 0 WITHOUT
+# evaluating anything, and the executor read exit 0 as "no threshold
+# breached" — the abort thresholds silently disabled.
+#
+# The wrapper imports the module and calls runCli() unconditionally,
+# so there is no entry-point detection on this path and nothing to get
+# wrong. The evaluator either evaluates the window or exits 2.
+CUTOVER_THRESHOLDS_CLI="$CUTOVER_REPO_ROOT/infra/cloud/cutover/thresholds-cli.mjs"
 
 # The probe suite. The probes run against the ACTIVE binding, so they
 # are the only thing in the harness that talks to the services.
@@ -497,7 +511,7 @@ cutover_assert_resumable() {
 # the abort message and in the evidence.
 cutover_evaluate_thresholds() {
   local manifest="$1" samples_file="$2"
-  node "$CUTOVER_THRESHOLDS_MODULE" --manifest "$manifest" --samples "$samples_file"
+  node "$CUTOVER_THRESHOLDS_CLI" --manifest "$manifest" --samples "$samples_file"
 }
 
 # ---------------------------------------------------------------------------

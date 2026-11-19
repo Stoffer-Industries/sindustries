@@ -76,7 +76,9 @@
  *   2  the window could not be evaluated (an error, never a pass)
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { loadManifest } from './manifest.mjs';
 
@@ -314,17 +316,99 @@ export function runCli(argv) {
   return evaluation.breaches.length > 0 ? 1 : 0;
 }
 
-const invokedDirectly =
-  typeof process !== 'undefined' &&
-  Array.isArray(process.argv) &&
-  process.argv[1] &&
-  import.meta.url === `file://${process.argv[1]}`;
+/**
+ * Whether THIS module is the entry point of the current process.
+ *
+ * The naive check — `import.meta.url === \`file://${process.argv[1]}\`` — is
+ * wrong whenever the raw path is not byte-identical to the module URL:
+ *
+ *   - Node resolves the entry point through symlinks, so a checkout
+ *     reached through a symlinked path (a temporary directory, a
+ *     `/tmp` -> `/private/tmp` alias, a symlinked worktree root) gets an
+ *     `import.meta.url` of the REAL path and a `process.argv[1]` of the
+ *     LINKED one.
+ *   - A path containing a space, or any other character that has to be
+ *     percent-encoded in a file: URL, comes back different from the raw
+ *     path.
+ *
+ * In both cases the comparison is FALSE, the CLI block below never runs,
+ * and the process exits 0 WITHOUT evaluating anything. That is the worst
+ * failure mode an abort gate can have: the executor reads exit 0 as "no
+ * threshold breached" and the window carries on with the thresholds it
+ * was supposed to enforce switched off.
+ *
+ * So both sides are compared as REAL paths.
+ *
+ * @returns {boolean} true when this module is the process entry point
+ */
+function isEntryPoint() {
+  if (typeof process === 'undefined') return false;
+  if (!Array.isArray(process.argv) || !process.argv[1]) return false;
+  const entry = resolve(process.argv[1]);
+  let self;
+  try {
+    self = realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+  try {
+    return self === realpathSync(entry);
+  } catch {
+    // The entry path could not be resolved. Fall back to comparing the
+    // resolved paths directly: if they are the same file, this IS the
+    // entry point.
+    try {
+      return resolve(fileURLToPath(import.meta.url)) === entry;
+    } catch {
+      return false;
+    }
+  }
+}
 
-if (invokedDirectly) {
+/**
+ * Whether the process was given the evaluator's own CLI arguments.
+ *
+ * Used to FAIL LOUD instead of silent: a process that was asked to
+ * evaluate thresholds and did not must not exit 0, because exit 0 is
+ * the executor's "no breach" verdict.
+ *
+ * The guard only applies when THIS module is the one that was
+ * launched. When the CLI wrapper is the entry point, the wrapper owns
+ * the evaluation — it imports this module and calls runCli()
+ * unconditionally — so the guard must not interfere with it.
+ *
+ * @returns {boolean}
+ */
+function wasAskedToEvaluate() {
+  if (typeof process === 'undefined' || !Array.isArray(process.argv)) return false;
+  const asked = process.argv
+    .slice(2)
+    .some((arg) => arg === '--manifest' || arg === '--samples');
+  if (!asked) return false;
+  const entry = process.argv[1];
+  if (!entry) return true;
+  try {
+    return basename(entry) === basename(fileURLToPath(import.meta.url));
+  } catch {
+    return true;
+  }
+}
+
+if (isEntryPoint()) {
   try {
     process.exitCode = runCli(process.argv.slice(2));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 2;
   }
+} else if (wasAskedToEvaluate()) {
+  // The CLI arguments reached this module but it did not recognise
+  // itself as the entry point, so the evaluation below did not run.
+  // Exiting 0 here would tell the executor that no threshold was
+  // breached — the exact opposite of what happened. A gate that cannot
+  // see the window must stop the window, not bless it.
+  process.stderr.write(
+    'thresholds: the evaluator was given its CLI arguments but was not the process entry point — refusing to exit 0 without evaluating\n',
+  );
+  process.exitCode = 2;
 }

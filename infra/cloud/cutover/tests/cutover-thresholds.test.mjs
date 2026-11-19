@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,7 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const THRESHOLDS_MODULE = join(HERE, '..', 'thresholds.mjs');
+const THRESHOLDS_CLI = join(HERE, '..', 'thresholds-cli.mjs');
 const EXAMPLE_MANIFEST = join(HERE, '..', 'production-manifest.example.json');
 
 const MANIFEST = {
@@ -242,4 +243,91 @@ test('the CLI refuses with exit code 2 when the window cannot be evaluated', () 
     status = error.status;
   }
   assert.equal(status, 2);
+});
+
+test('the CLI still evaluates when the module is reached through a symlinked path', () => {
+  // Node resolves the entry point through symlinks, so `import.meta.url`
+  // is the REAL path and `process.argv[1]` is the LINKED one. The old
+  // entry-point check compared the two as raw strings, so it was false
+  // here — the CLI block never ran, the module exited 0 WITHOUT
+  // evaluating, and the executor read that as "no threshold breached".
+  // The abort thresholds were silently disabled.
+  //
+  // The comparison is now done on the real paths, and the regression
+  // drives it through a symlink rather than trusting the comparison.
+  const directory = mkdtempSync(join(tmpdir(), 'cutover-thresholds-symlink-'));
+  const link = join(directory, 'cutover');
+  symlinkSync(join(HERE, '..'), link, 'dir');
+
+  const samplesPath = join(directory, 'samples.jsonl');
+  writeFileSync(
+    samplesPath,
+    `${JSON.stringify(sample({ checks: [check('tasks-api', { latencyMs: 2100 })] }))}\n`,
+  );
+
+  let status = 0;
+  let output = '';
+  try {
+    output = execFileSync(
+      process.execPath,
+      [join(link, 'thresholds.mjs'), '--manifest', EXAMPLE_MANIFEST, '--samples', samplesPath],
+      { encoding: 'utf8' },
+    );
+  } catch (error) {
+    status = error.status;
+    output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
+  }
+  assert.equal(status, 1, 'the breach must be reported through the symlinked path');
+  assert.match(output, /threshold breach: p95LatencyMs/);
+
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test('the CLI wrapper always evaluates — it has no entry-point detection to get wrong', () => {
+  // The production call path uses the wrapper, which imports the module
+  // and calls runCli() unconditionally. There is nothing to detect and
+  // nothing to mis-detect.
+  const directory = mkdtempSync(join(tmpdir(), 'cutover-thresholds-wrapper-'));
+  const samplesPath = join(directory, 'samples.jsonl');
+  writeFileSync(
+    samplesPath,
+    `${JSON.stringify(sample({ checks: [check('tasks-api', { latencyMs: 2100 })] }))}\n`,
+  );
+
+  let status = 0;
+  let output = '';
+  try {
+    output = execFileSync(
+      process.execPath,
+      [THRESHOLDS_CLI, '--manifest', EXAMPLE_MANIFEST, '--samples', samplesPath],
+      { encoding: 'utf8' },
+    );
+  } catch (error) {
+    status = error.status;
+    output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
+  }
+  assert.equal(status, 1);
+  assert.match(output, /threshold breach: p95LatencyMs/);
+
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test('the CLI wrapper reports an unreadable window as exit code 2, never as a pass', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'cutover-thresholds-wrapper-'));
+  const samplesPath = join(directory, 'samples.jsonl');
+  writeFileSync(samplesPath, 'not-json\n');
+
+  let status = 0;
+  try {
+    execFileSync(
+      process.execPath,
+      [THRESHOLDS_CLI, '--manifest', EXAMPLE_MANIFEST, '--samples', samplesPath],
+      { encoding: 'utf8' },
+    );
+  } catch (error) {
+    status = error.status;
+  }
+  assert.equal(status, 2);
+
+  rmSync(directory, { recursive: true, force: true });
 });
