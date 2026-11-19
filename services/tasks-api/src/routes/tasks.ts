@@ -26,6 +26,7 @@ import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
 import { deliveryEvidenceCommentWhere } from './tasks/_deliveryEvidence.ts';
 import { descriptionHasSpecDrift, specChecksumForDescription } from './tasks/_spec.ts';
+import { statusTransitionError } from './tasks/_statusTransitions.ts';
 import {
   buildWorkflowGateOwnerWhere,
   connectTags,
@@ -632,7 +633,13 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
     const existing = await prisma.task.findFirst({
       where: { id, archivedAt: null },
-      include: { attentionOwners: { orderBy: { position: 'asc' } } }
+      include: {
+        attentionOwners: { orderBy: { position: 'asc' } },
+        // The status-transition guard reads the task's approval rows to
+        // decide whether `doing → acceptance` and `acceptance → done` are
+        // legal. Task `fb5c4e40` AC1.
+        approvals: true
+      }
     });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
@@ -699,6 +706,29 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     if (req.body?.status !== undefined) {
       if (!validStatuses.has(req.body.status)) {
         return badRequest(res, 'INVALID_STATUS_VALUE', 'Invalid status value');
+      }
+      // Task `fb5c4e40` AC1/AC2: the API is the enforcement boundary for
+      // the workflow gate order. An illegal transition is rejected with a
+      // 409 BEFORE any write happens, so the task — status, statusChangedAt
+      // and completedAt — is left entirely unchanged.
+      const requiredApprovalsConfig = loadRequiredApprovalsConfig();
+      const transitionError = statusTransitionError({
+        fromStatus: existing.status,
+        toStatus: req.body.status,
+        requiredApprovals: requiredApprovalsFor(
+          requiredApprovalsConfig,
+          existing.taskType
+        ),
+        approvals: existing.approvals ?? [],
+        gateOwners: requiredApprovalsConfig.owners
+      });
+      if (transitionError) {
+        return sendError(
+          res,
+          transitionError.status,
+          transitionError.code,
+          transitionError.message
+        );
       }
       updates.status = req.body.status;
       updates.statusChangedAt = new Date();
