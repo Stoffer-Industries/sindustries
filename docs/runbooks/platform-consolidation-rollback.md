@@ -325,34 +325,62 @@ Everything in this list is a step that must be removed or flipped once the
 cutover has happened — they are transitional guards, not permanent
 configuration.
 
-- [ ] **Remove the app-existence guard** in
+**State as of 2026-11-19:** four of the seven steps were completed when the
+cutover landed, and the checklist still listed them as pending — so a reader
+would infer that CI still dispatched per-service deploys and that the matrix
+still named the retired apps. The completed steps are now ticked with the
+change that closed them; the three that are genuinely still open stay
+unticked.
+
+- [x] **Remove the app-existence guard** in
       `.github/workflows/deploy-staging-platform.yml` (the
       "Check that the platform app is provisioned" step). It exists only so
       CI does not fail before the app exists; after cutover the app must
       always exist, and a missing app should fail the deploy loudly.
-- [ ] **Remove the four per-service path filters** from the `changes` job in
+      **Done 2026-11-07** (commit `c8795105`): the guard step is gone from
+      the workflow, and the "Provision the platform app and its secrets"
+      step owns the app.
+- [x] **Remove the four per-service path filters** from the `changes` job in
       `.github/workflows/ci.yml` (`tasks_api`, `budget_api`,
       `content_scheduler_api`, `auto_post_worker`) and replace them with the
       single `platform` filter. The four are kept until the cutover lands
       because a filter change on `main` redeploys.
-- [ ] **Remove the four per-service deploy jobs** from `.github/workflows/ci.yml`
+      **Done 2026-11-07** (commit `cc21a828`): the `changes` job carries the
+      single `platform` filter for these four services and no per-service
+      filter remains.
+- [x] **Remove the four per-service deploy jobs** from `.github/workflows/ci.yml`
       (`deploy-tasks-api-staging`, `deploy-budget-api-staging`,
       `deploy-content-scheduler-api-staging`, `deploy-auto-post-worker-staging`).
-- [ ] **Update `infra/cloud/hostname-matrix.json`** so the three API
+      **Done 2026-11-07** (commit `cc21a828`): `ci.yml` calls only
+      `deploy-staging-platform.yml` and `deploy-staging-health-probe.yml`.
+- [x] **Update `infra/cloud/hostname-matrix.json`** so the three API
       surfaces' `flyApp` records the consolidated app. This is deliberately
       NOT done in the implementation PR: the matrix records which app
       *serves* each hostname, and that only becomes true when the CNAMEs
       move. Changing it earlier would make the source of truth lie about
       live traffic.
+      **Done:** the three API surfaces' `cnameTargets.staging` record
+      `sindustries-platform-staging.fly.dev` and `cnameTargets.production`
+      record `sindustries-platform-production.fly.dev`; no retired
+      per-service app name is left in the matrix.
 - [ ] **Delete the four per-service `infra/cloud/fly/*.fly.toml` files and
       the four per-service Dockerfiles** once nothing references them.
+      Still open: the eight files are still in the tree, and the retired
+      deploy workflows, the retired Dockerfiles and the static contracts
+      (`infra/cloud/scripts/tests/fly-toml-context.test.sh`,
+      `tests/cloud/tests/check-cors-origin-matrix.test.mjs`) still reference
+      them, so the deletions have to land with those references removed.
 - [ ] **Delete the four per-service deploy workflows**
       (`.github/workflows/deploy-staging-{tasks-api,budget-api,content-scheduler-api,auto-post-worker}.yml`).
       The static check `tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs`
       requires them to exist — update that check in the same change.
+      Still open: the four files are still in the tree (each carries a
+      RETIRED banner) and the static check still requires three of them.
 - [ ] **Remove the `platform` app's own `PLATFORM_*` secret indirection** if
       the three Redis instances turn out to be identical (one-line change in
       `infra/cloud/platform/platform-services.mjs` plus a secret rename).
+      Still open: the three Redis instances have not been confirmed
+      identical.
 
 ---
 
