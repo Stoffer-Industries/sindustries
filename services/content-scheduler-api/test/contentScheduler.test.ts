@@ -148,7 +148,7 @@ describe('guardPublish', () => {
 
   it('allows publishing while fewer than three items have published today', () => {
     const result = guardPublish(
-      itemFixture({ id: 'aaaa', status: 'approved', approvedAt: now }),
+      itemFixture({ id: 'aaaa', status: 'approved', approvedAt: now }) as unknown as Parameters<typeof guardPublish>[0],
       { publishedCount: 2, publishedItemId: 'bbbb' },
       now
     );
