@@ -703,6 +703,33 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       updates.priority = req.body.priority;
     }
 
+    // The EFFECTIVE task type — the type the task will have once this
+    // request is applied — is resolved BEFORE the status guard runs.
+    //
+    // Task `fb5c4e40` review finding: the guard used to read
+    // `existing.taskType`, the type the task has NOW, while the SAME
+    // request was also allowed to change that type. A task typed
+    // `research` — which requires no approval for the acceptance
+    // transition — could PATCH `taskType: 'code'` and
+    // `status: 'acceptance'` in ONE request: the guard saw the old
+    // type, required nothing, allowed the transition, and the write
+    // then produced a CODE task sitting at acceptance with no
+    // `qa_agent` approval. That is the exact bypass the guard exists
+    // to prevent, and a single PATCH was enough to reach it.
+    //
+    // The guard must therefore evaluate the type the task WILL have,
+    // not the one it happens to have while the request is still in
+    // flight. The taskType is validated here as well, so an invalid
+    // type is refused before the guard reasons about it.
+    let effectiveTaskType: string | null = existing.taskType;
+    if (req.body?.taskType !== undefined) {
+      if (req.body.taskType && !validTaskTypes.has(req.body.taskType)) {
+        return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
+      }
+      effectiveTaskType = req.body.taskType || null;
+      updates.taskType = effectiveTaskType;
+    }
+
     if (req.body?.status !== undefined) {
       if (!validStatuses.has(req.body.status)) {
         return badRequest(res, 'INVALID_STATUS_VALUE', 'Invalid status value');
@@ -717,7 +744,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         toStatus: req.body.status,
         requiredApprovals: requiredApprovalsFor(
           requiredApprovalsConfig,
-          existing.taskType
+          effectiveTaskType
         ),
         approvals: existing.approvals ?? [],
         gateOwners: requiredApprovalsConfig.owners
@@ -747,13 +774,6 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
     if (req.body?.blocked !== undefined) {
       updates.blocked = Boolean(req.body.blocked);
-    }
-
-    if (req.body?.taskType !== undefined) {
-      if (req.body.taskType && !validTaskTypes.has(req.body.taskType)) {
-        return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
-      }
-      updates.taskType = req.body.taskType || null;
     }
 
     if (hasDependencyUpdate) {

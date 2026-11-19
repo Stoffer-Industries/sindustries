@@ -177,6 +177,79 @@ describe('status transition enforcement — acceptance → done', () => {
   });
 });
 
+describe('status transition enforcement — the atomic task-type bypass', () => {
+  // Task `fb5c4e40` review finding: the transition guard evaluated the
+  // approval policy against the task's CURRENT type, while the same
+  // request was also allowed to CHANGE that type. A task typed
+  // `research` — whose mapping requires no approval for the acceptance
+  // transition — could therefore submit `taskType: 'code'` and
+  // `status: 'acceptance'` in ONE request: the guard saw the old type,
+  // required nothing, allowed the transition, and the write produced a
+  // CODE task sitting at acceptance with no `qa_agent` approval.
+  //
+  // The guard must evaluate the type the task WILL have. These
+  // assertions pin that, and they pin that the refused write leaves
+  // NEITHER field changed.
+  it('refuses a combined task-type and status write and leaves both fields unchanged', async () => {
+    const created = await authedRequest(app)
+      .post('/api/v1/tasks')
+      .send({
+        title: 'CI atomic task type bypass',
+        taskType: 'research',
+        priority: 'high'
+      });
+    expect(created.status).toBe(201);
+    createdTaskIds.push(created.body.data.id);
+    const taskId = created.body.data.id;
+
+    await moveTo(taskId, 'doing');
+    const before = await readTask(taskId);
+    expect(before.status).toBe('doing');
+    expect(before.taskType).toBe('research');
+
+    // ONE request, BOTH fields: the type that requires `qa_agent` and
+    // the status that needs it.
+    const bypass = await authedRequest(app)
+      .patch(`/api/v1/tasks/${taskId}`)
+      .send({ taskType: 'code', status: 'acceptance' });
+
+    expect(bypass.status).toBe(409);
+    expect(bypass.body.error.code).toBe('QA_APPROVAL_REQUIRED');
+
+    // Neither field moved: no status change, no type change.
+    const after = await readTask(taskId);
+    expect(after.status).toBe('doing');
+    expect(after.taskType).toBe('research');
+    expect(after.statusChangedAt).toBe(before.statusChangedAt);
+    expect(after.completedAt).toBeNull();
+  });
+
+  it('allows a combined write when the POST-update type needs no gate', async () => {
+    // The guard evaluates the type the task WILL have. It is not a
+    // blanket refusal of combined writes: a move to a type whose own
+    // mapping requires nothing is still allowed.
+    const created = await authedRequest(app)
+      .post('/api/v1/tasks')
+      .send({
+        title: 'CI atomic combined write without a gate',
+        taskType: 'research',
+        priority: 'medium'
+      });
+    expect(created.status).toBe(201);
+    createdTaskIds.push(created.body.data.id);
+    const taskId = created.body.data.id;
+
+    await moveTo(taskId, 'doing');
+    const combined = await authedRequest(app)
+      .patch(`/api/v1/tasks/${taskId}`)
+      .send({ taskType: 'content', status: 'acceptance' });
+
+    expect(combined.status).toBe(200);
+    expect(combined.body.data.status).toBe('acceptance');
+    expect(combined.body.data.taskType).toBe('content');
+  });
+});
+
 describe('status transition enforcement — read-only identification (AC5)', () => {
   it('lists tasks in acceptance whose type requires qa_agent without a granted row', async () => {
     // The identification query is read-only. It must not write, grant or
