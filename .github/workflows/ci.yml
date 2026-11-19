@@ -1484,6 +1484,16 @@ jobs:
       - name: Run cutover probe transport and binding contract test
         run: node --test tests/cloud/tests/production-cutover-probes.test.mjs
 
+      # Task 020f423e review regressions: the manifest's abort thresholds
+      # must be ENFORCED, not merely declared. The error rate and the
+      # p95 latency were validated by the manifest loader and then never
+      # read, so a window with healthy HTTP statuses and a latency three
+      # times the approved ceiling passed anyway. These regressions prove
+      # the latency and error-rate gates abort, and that a window the
+      # evaluator cannot read is refused rather than reported as a pass.
+      - name: Run cutover abort threshold contract test
+        run: node --test infra/cloud/cutover/tests/cutover-thresholds.test.mjs
+
       # Task 020f423e: the shell harness around the adapter — the rehearsal
       # refuses a production manifest, the preflight refuses an unset
       # observation duration, the executor refuses to start without a

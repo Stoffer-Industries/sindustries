@@ -260,6 +260,22 @@ Abort **immediately** and invoke the runtime rollback for any of the following. 
 - Evidence collection is unavailable long enough that a safe state cannot be established.
 - An operator calls abort.
 
+### The manifest's thresholds are enforced, not merely declared
+
+The manifest's `run.abortThresholds` are the authority for the probe-based abort conditions. All three are evaluated by the executor after **every** sample, not once at the end of the phase — a cutover that observes a degraded surface for an hour before noticing is worse than one that stops at the first sign of it.
+
+| Threshold | What it measures | Breach |
+| --- | --- | --- |
+| `probeFailureCount` | Failed probe **samples** in the phase window | The count of failed samples reaches the threshold |
+| `errorRate` | Failed probe **checks** ÷ all probe checks in the window | The measured error rate is above the declared rate |
+| `p95LatencyMs` | The 95th percentile of the observed latencies, **per check id** | Any check's p95 latency is above the declared ceiling |
+
+The error rate is the request-level rate across the window's checks, so it catches a slow bleed of failures that never reaches the failure *count*. The p95 latency is computed per check id rather than as one global pool, so the abort message names the surface that breached and a fast surface cannot mask a slow one.
+
+**A latency breach aborts even when every HTTP status is healthy and every sample verdict is `PASS`.** That case was the reason the gates exist: the sample verdict only reflects whether a check failed, not whether it was fast enough.
+
+The thresholds are evaluated by one module — `infra/cloud/cutover/thresholds.mjs` — so the executor, the runbook and the tests cannot drift apart on what the fields mean. **A window that cannot be evaluated is refused, never reported as a pass:** an unreadable sample, a malformed sample file or a manifest with no thresholds stops the window.
+
 **Planned** canary errors caused by the explicit staging rehearsal do not apply to production. Any production probe outage is an AC failure **even if the rollback succeeds**.
 
 ```bash

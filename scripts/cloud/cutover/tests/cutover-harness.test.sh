@@ -399,6 +399,83 @@ expect_pass "a phase cannot finish before its declared hold" \
   ' _ "$CUTOVER_DIR/common.sh"
 
 # ---------------------------------------------------------------------------
+# The abort thresholds are ENFORCED, not just declared
+# ---------------------------------------------------------------------------
+#
+# The manifest declares three abort thresholds. The failure-count gate
+# was enforced for a long time; the error-rate and the p95-latency
+# gates were not, so a window with healthy HTTP statuses and a latency
+# three times the approved ceiling passed anyway. These assertions pin
+# the two missing gates, and they pin the fail-closed behaviour: a
+# window the evaluator cannot read is refused, never reported as a
+# pass.
+THRESHOLD_SAMPLES="$WORK_DIR/threshold-samples.jsonl"
+
+expect_fail "the threshold evaluator refuses a window whose latency breaches the manifest ceiling" 1 "threshold breach: p95LatencyMs" \
+  bash -c '
+    source "$1"
+    printf "%s\n" "{\"verdict\":\"PASS\",\"checks\":[{\"id\":\"tasks-api\",\"ok\":true,\"status\":200,\"latencyMs\":2100}]}" > "$2"
+    cutover_evaluate_thresholds "$3" "$2"
+  ' _ "$CUTOVER_DIR/common.sh" "$THRESHOLD_SAMPLES" "$EXAMPLE"
+
+expect_fail "the threshold evaluator refuses a window whose error rate breaches the manifest rate" 1 "threshold breach: errorRate" \
+  bash -c '
+    source "$1"
+    printf "%s\n" "{\"verdict\":\"FAIL\",\"checks\":[{\"id\":\"tasks-api\",\"ok\":false,\"status\":500,\"latencyMs\":100},{\"id\":\"mission-control\",\"ok\":true,\"status\":200,\"latencyMs\":100}]}" > "$2"
+    cutover_evaluate_thresholds "$3" "$2"
+  ' _ "$CUTOVER_DIR/common.sh" "$THRESHOLD_SAMPLES" "$EXAMPLE"
+
+expect_pass "the threshold evaluator accepts a healthy window" \
+  bash -c '
+    source "$1"
+    printf "%s\n" "{\"verdict\":\"PASS\",\"checks\":[{\"id\":\"tasks-api\",\"ok\":true,\"status\":200,\"latencyMs\":120}]}" > "$2"
+    cutover_evaluate_thresholds "$3" "$2"
+  ' _ "$CUTOVER_DIR/common.sh" "$THRESHOLD_SAMPLES" "$EXAMPLE"
+
+expect_fail "the threshold evaluator refuses a window it cannot read" 2 "is not JSON" \
+  bash -c '
+    source "$1"
+    printf "%s\n" "not-json" > "$2"
+    cutover_evaluate_thresholds "$3" "$2"
+  ' _ "$CUTOVER_DIR/common.sh" "$THRESHOLD_SAMPLES" "$EXAMPLE"
+
+# ---------------------------------------------------------------------------
+# The EXECUTOR aborts on a threshold breach
+# ---------------------------------------------------------------------------
+#
+# The assertions above prove the evaluator's verdict. This one proves
+# the executor ACTS on it: a window whose probes are all healthy and
+# all fast enough to pass the sample verdict, but whose latency is
+# above the manifest's ceiling, must ABORT the window and roll back.
+#
+# It runs the real executor. Only the two collaborators that would
+# touch production are stubbed: the preflight (which would otherwise
+# refuse in a test environment) and the rollback (which must not run
+# against a real route).
+EXECUTOR_SCRIPTS="$WORK_DIR/executor-scripts"
+mkdir -p "$EXECUTOR_SCRIPTS"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$EXECUTOR_SCRIPTS/preflight.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$EXECUTOR_SCRIPTS/rollback.sh"
+chmod +x "$EXECUTOR_SCRIPTS/preflight.sh" "$EXECUTOR_SCRIPTS/rollback.sh"
+
+SLOW_PROBES="$WORK_DIR/slow-probes.mjs"
+printf '%s\n' \
+  'process.stdout.write(JSON.stringify({verdict: "PASS", checks: [{id: "tasks-api", ok: true, status: 200, latencyMs: 2100}]}));' \
+  > "$SLOW_PROBES"
+
+EXECUTOR_CALLER_ROOT="$WORK_DIR/executor-caller-root"
+cp -R "$CALLER_ROOT" "$EXECUTOR_CALLER_ROOT"
+
+expect_fail "the executor aborts the window when a probe breaches the latency ceiling" 1 "abort thresholds were breached" \
+  env SINDUSTRIES_CUTOVER_PRODUCTION_ACK="CUTOVER PRODUCTION" \
+      CUTOVER_PROBES_OVERRIDE="$SLOW_PROBES" \
+      CUTOVER_SCRIPTS_DIR_OVERRIDE="$EXECUTOR_SCRIPTS" \
+      SINDUSTRIES_CUTOVER_ARTIFACT_DIR="$WORK_DIR/executor-artifacts" \
+      SINDUSTRIES_CUTOVER_CALLER_ROOT="$EXECUTOR_CALLER_ROOT" \
+      SINDUSTRIES_CUTOVER_STATE_FILE="$WORK_DIR/executor-artifacts/production-route.json" \
+  bash "$CUTOVER_DIR/execute.sh" --manifest "$EXAMPLE" --phase baseline
+
+# ---------------------------------------------------------------------------
 # Rehearsal gates: every observed outcome controls the result
 # ---------------------------------------------------------------------------
 expect_pass "a local-recovery result carries the shell state into its JSON evidence" \
