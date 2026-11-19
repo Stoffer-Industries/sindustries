@@ -63,6 +63,19 @@ MANIFEST="$(cutover_resolve_manifest "$MANIFEST")"
 cutover_assert_environment "$MANIFEST" "$CUTOVER_ENVIRONMENT"
 RUN_ID="$(cutover_run_id)"
 
+# ---------------------------------------------------------------------------
+# The typed acknowledgement is checked FIRST
+# ---------------------------------------------------------------------------
+#
+# The acknowledgement is the cheapest absolute gate there is: it says
+# the operator meant to do this. It is checked BEFORE the lock and BEFORE
+# the preflight, so a mistyped run fails immediately, with one clear
+# message, and it never takes the operator lock or waits on a preflight
+# it was never going to pass.
+if [[ "$CUTOVER_ENVIRONMENT" == "production" ]]; then
+  cutover_assert_production_ack
+fi
+
 # The operator lock is taken BEFORE the preflight: two operators must
 # not both be inside the window, even if one of them is only reading.
 cutover_acquire_lock
@@ -73,7 +86,7 @@ cutover_acquire_lock
 #
 # The execution does not decide whether it may start. The preflight
 # does, and its verdict is recorded as part of the window's evidence.
-PREFLIGHT_RESULT="$(scripts/cloud/cutover/preflight.sh --manifest "$MANIFEST" --run-id "$RUN_ID" 2>&1)" || {
+PREFLIGHT_RESULT="$("$CUTOVER_SCRIPTS_DIR/preflight.sh" --manifest "$MANIFEST" --run-id "$RUN_ID" 2>&1)" || {
   printf '%s\n' "$(cutover_redact "$PREFLIGHT_RESULT")" >&2
   cutover_fail "preflight did not pass — the cutover does not start" 1
 }
@@ -107,7 +120,7 @@ abort_and_rollback() {
   local reason="$1"
   cutover_warn "ABORT: $reason"
   cutover_write_state "rolled_back" "$MANIFEST_HASH" "$(cutover_route_version)"
-  if scripts/cloud/cutover/rollback.sh --manifest "$MANIFEST" --run-id "$RUN_ID" --reason "$reason"; then
+  if "$CUTOVER_SCRIPTS_DIR/rollback.sh" --manifest "$MANIFEST" --run-id "$RUN_ID" --reason "$reason"; then
     cutover_fail "cutover aborted and rolled back: $reason" 1
   fi
   cutover_fail "cutover aborted and the ROLLBACK ITSELF FAILED: $reason — prodlike remains the authoritative source and the route state is in $CUTOVER_ROUTE_STATE_FILE" 1
@@ -191,11 +204,6 @@ if [[ -n "$ONLY_PHASE" ]]; then
   if [[ "$found" -eq 0 ]]; then
     cutover_fail "unknown phase '$ONLY_PHASE'" 2
   fi
-fi
-
-# The production acknowledgement is required before ANY route change.
-if [[ "$CUTOVER_ENVIRONMENT" == "production" ]]; then
-  cutover_assert_production_ack
 fi
 
 MANIFEST_HASH="$(cutover_manifest_hash "$MANIFEST")"

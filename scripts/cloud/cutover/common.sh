@@ -42,6 +42,12 @@ if command -v git >/dev/null 2>&1 && [[ -d "$CUTOVER_REPO_ROOT/.git" ]]; then
   CUTOVER_REPO_ROOT="$(git -C "$CUTOVER_REPO_ROOT" rev-parse --show-toplevel)"
 fi
 
+# The harness scripts live next to this file. They are invoked by
+# ABSOLUTE path: a sibling script reached by a relative path only works
+# when the operator happens to be standing in the repository root, and a
+# cutover must not depend on the operator's working directory.
+CUTOVER_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # The shared credential redactor. Every operator surface that shows
 # command output masks credentials with this ONE module, so two
 # surfaces cannot drift apart.
@@ -97,8 +103,11 @@ CUTOVER_PRODUCTION_ACK_VALUE="CUTOVER PRODUCTION"
 
 cutover_info() { printf '\033[36m[cutover]\033[0m %s\n' "$*"; }
 cutover_warn() { printf '\033[33m[cutover]\033[0m %s\n' "$*" >&2; }
+# The message is $1 and the exit code is $2. The message must NOT include
+# the exit code: these lines get pasted into task comments and runbooks,
+# and a trailing "2" reads as part of the sentence.
 cutover_fail() {
-  printf '\033[31m[cutover]\033[0m %s\n' "$*" >&2
+  printf '\033[31m[cutover]\033[0m %s\n' "$1" >&2
   exit "${2:-1}"
 }
 
@@ -183,19 +192,28 @@ cutover_resolve_manifest() {
 # Validate the manifest through the shared validator and fail closed on
 # any problem. The validator is the ONLY place the manifest shape is
 # decided, so the scripts and the tests cannot drift apart.
+#
+# The validator's message is the operator-facing reason: a node stack
+# trace is not a reason, and it carries absolute paths that have no
+# business in a task comment.
 cutover_validate_manifest() {
   local manifest_path="$1"
   local output
   if ! output="$(node --input-type=module -e "
     import { loadManifest } from '${CUTOVER_MANIFEST_MODULE}';
-    const manifest = loadManifest(process.argv[1]);
-    process.stdout.write(JSON.stringify({
-      environment: manifest.environment,
-      taskId: manifest.taskId,
-      observationMinutes: manifest.run.observationMinutes,
-      surfaces: manifest.surfaces.map((s) => s.id),
-      phases: manifest.phases.map((p) => p.phase),
-    }));
+    try {
+      const manifest = loadManifest(process.argv[1]);
+      process.stdout.write(JSON.stringify({
+        environment: manifest.environment,
+        taskId: manifest.taskId,
+        observationMinutes: manifest.run.observationMinutes,
+        surfaces: manifest.surfaces.map((s) => s.id),
+        phases: manifest.phases.map((p) => p.phase),
+      }));
+    } catch (error) {
+      process.exitCode = 1;
+      process.stderr.write(String(error && error.message ? error.message : error));
+    }
   " "$manifest_path" 2>&1)"; then
     cutover_fail "manifest validation failed: $(cutover_redact "$output")" 2
   fi
@@ -219,11 +237,26 @@ cutover_manifest_hash() {
 }
 
 # The manifest's environment, read through the validator.
+#
+# It FAILS CLOSED on an invalid manifest. Reading the environment
+# directly out of the manifest module let an invalid manifest raise an
+# unhandled node exception, so the caller died with a stack trace and
+# exit 1 instead of a named refusal — which is indistinguishable from a
+# crash, and reads as one in an operator's log.
 cutover_manifest_environment() {
-  node --input-type=module -e "
-    import { loadManifest } from '${CUTOVER_MANIFEST_MODULE}';
-    process.stdout.write(loadManifest(process.argv[1]).environment);
-  " "$1"
+  local summary
+  summary="$(cutover_validate_manifest "$1")"
+  printf '%s' "$summary" | node -e "
+    let raw = '';
+    process.stdin.on('data', (chunk) => { raw += chunk; });
+    process.stdin.on('end', () => {
+      try {
+        process.stdout.write(JSON.parse(raw).environment);
+      } catch {
+        process.stdout.write('unknown');
+      }
+    });
+  "
 }
 
 # ---------------------------------------------------------------------------
