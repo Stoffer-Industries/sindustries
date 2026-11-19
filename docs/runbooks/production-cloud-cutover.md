@@ -138,7 +138,7 @@ The preflight is a **gate, not a report**. It fails closed: an environment it co
 | P11 | Operators, communication channel, observation duration and abort thresholds are set | `gates.requiredOperatorFields` → `observationMinutes`, `operatorRoles.goNoGo`, `operatorRoles.execution` |
 | P12 | No deploy, migration, secret rotation or competing cutover is in progress | The operator lock (`artifacts/cutover/cutover.lock`) plus the operator's own check. |
 | P13 | The hosted stack answers and the read-scoped observability credential is present | The probe reads `GET <stack>/api/alertmanager/grafana/api/v2/alerts` and compares the count of firing alerts against `abortThresholds.activeAlertCount`. A missing credential, an unreadable endpoint or a payload that is not an alert list all **fail** the check — an unobserved signal is not a healthy signal. |
-| P13 | A **fresh passing rollback rehearsal** exists for this route mechanics | `gates.requiredEvidence` → `staging-rollback-rehearsal`. Documentation review cannot satisfy AC4. |
+| P14 | A **fresh passing rollback rehearsal** exists for this route mechanics | `gates.requiredEvidence` → `staging-rollback-rehearsal`. Documentation review cannot satisfy AC4. |
 
 ---
 
