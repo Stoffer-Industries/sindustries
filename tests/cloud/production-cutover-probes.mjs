@@ -384,27 +384,107 @@ export async function checkContentScheduler(manifest, runId, mutating, binding) 
 }
 
 /**
- * The hosted signals: database, Redis, worker and queue health, and the
- * active alert count. These are read through the observability surface
- * when one is configured; when it is not, the check reports that the
- * signal was unavailable rather than reporting a pass.
+ * The path on the hosted Grafana stack that answers "how many alerts are
+ * firing right now": the Alertmanager v2 alerts endpoint, which returns
+ * the FIRING alerts as a bare JSON array.
+ *
+ * This is the same endpoint the hosted-observability runbook already uses
+ * to capture per-alert state (`infra/cloud/observability/evidence-capture.sh`).
+ *
+ * The provisioning endpoint (`/api/v1/provisioning/alert-rules`) is NOT
+ * the same thing: it returns rule DEFINITIONS, not firing alerts. The
+ * stack carries ten definitions, so a definition count would breach a
+ * threshold of one on every single run — and a probe that always aborts
+ * is indistinguishable from a probe that never worked.
+ */
+export const HOSTED_ALERTS_PATH = '/api/alertmanager/grafana/api/v2/alerts';
+
+/**
+ * Normalise a credential to the bare token, so the shared `request()`
+ * helper is the only thing that ever builds the Authorization header.
+ *
+ * The hosted stack's credentials are stored in the quoted
+ * `Bearer <service-account-token>` form (see
+ * `docs/systems/observability.md`), so passing one straight to
+ * `request()` would put `Bearer Bearer <token>` on the wire.
+ *
+ * @param {string} value
+ * @returns {string} the bare token
+ */
+function bearerToken(value) {
+  return String(value ?? '').trim().replace(/^Bearer\s+/i, '');
+}
+
+/**
+ * Read the firing-alert list out of a response body.
+ *
+ * The count is only meaningful when the body IS an alert list. Anything
+ * else means the active alert count is UNKNOWN, and an unknown count is
+ * not zero: the previous version of this probe defaulted a missing
+ * `activeAlerts` field to 0 and reported a PASS, so any change to the
+ * response shape would have turned a failing signal into a green one.
+ *
+ * @param {unknown} body
+ * @returns {Array<unknown>|null} the alert list, or null when unreadable
+ */
+function readActiveAlerts(body) {
+  if (Array.isArray(body)) return body;
+  if (body && typeof body === 'object') {
+    if (Array.isArray(body.data)) return body.data;
+    if (Array.isArray(body.alerts)) return body.alerts;
+  }
+  return null;
+}
+
+/**
+ * The hosted signals: the active alert count over the hosted stack, which
+ * is where the database, Redis, worker and queue alerts live — a firing
+ * alert on any of them is an active alert here.
+ *
+ * These are read through the hosted observability surface. When it is not
+ * configured, the check reports that the signal was unavailable rather
+ * than reporting a pass: an unobserved signal is not a healthy signal.
  *
  * @param {object} manifest
  * @returns {Promise<object>} a check record
  */
-async function checkHostedSignals(manifest) {
-  const baseUrl = process.env.CUTOVER_OBSERVABILITY_BASE_URL ?? '';
-  const token = readSecret('CUTOVER_OBSERVABILITY_TOKEN');
+export async function checkHostedSignals(manifest) {
+  // `||`, not `??`: an override that is set but EMPTY must fall through to
+  // the canonical variable rather than becoming an empty base URL.
+  const baseUrl = (
+    process.env.CUTOVER_OBSERVABILITY_BASE_URL ||
+    process.env.GRAFANA_CLOUD_INSTANCE_URL ||
+    ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  const token = bearerToken(
+    readSecret('CUTOVER_OBSERVABILITY_TOKEN') || readSecret('GRAFANA_CLOUD_READER_AUTH'),
+  );
+  const threshold = Number(
+    manifest.run?.abortThresholds?.activeAlertCount ?? Number.POSITIVE_INFINITY,
+  );
+
   if (!baseUrl) {
     return {
       id: 'signals:hosted',
       ok: false,
       skipped: true,
       detail:
-        'no hosted observability endpoint in the environment (CUTOVER_OBSERVABILITY_BASE_URL) — an unobserved signal is not a healthy signal',
+        'no hosted observability endpoint in the environment — set GRAFANA_CLOUD_INSTANCE_URL (the hosted stack base URL) or CUTOVER_OBSERVABILITY_BASE_URL; an unobserved signal is not a healthy signal',
     };
   }
-  const url = `${baseUrl.replace(/\/+$/, '')}/api/v1/health`;
+  if (!token) {
+    return {
+      id: 'signals:hosted',
+      ok: false,
+      skipped: true,
+      detail:
+        'no hosted observability credential in the environment — set GRAFANA_CLOUD_READER_AUTH (the read-scoped credential from infra/cloud/observability/.env.local) or CUTOVER_OBSERVABILITY_TOKEN; an unobserved signal is not a healthy signal',
+    };
+  }
+
+  const url = `${baseUrl}${HOSTED_ALERTS_PATH}`;
   const response = await request(url, { token });
   if (!response.ok) {
     return {
@@ -412,15 +492,25 @@ async function checkHostedSignals(manifest) {
       ok: false,
       status: response.status,
       latencyMs: response.latencyMs,
-      detail: 'the hosted signal health read failed',
+      detail: 'the hosted alert read failed',
       error: response.error ?? null,
     };
   }
-  const payload = response.body?.data ?? response.body ?? {};
-  const activeAlerts = Number(payload.activeAlerts ?? payload.active_alerts ?? 0);
-  const threshold = Number(
-    manifest.run?.abortThresholds?.activeAlertCount ?? Number.POSITIVE_INFINITY,
-  );
+
+  const alerts = readActiveAlerts(response.body);
+  if (alerts === null) {
+    return {
+      id: 'signals:hosted',
+      ok: false,
+      status: response.status,
+      latencyMs: response.latencyMs,
+      detail:
+        'the hosted alert read returned a payload that is not an alert list — the active alert count is unknown, and an unobserved signal is not a healthy signal',
+      error: null,
+    };
+  }
+
+  const activeAlerts = alerts.length;
   return {
     id: 'signals:hosted',
     ok: activeAlerts < threshold,
