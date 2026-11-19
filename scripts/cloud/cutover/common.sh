@@ -594,9 +594,31 @@ cutover_route_version() {
 # ---------------------------------------------------------------------------
 
 # The phases the manifest declares, in order.
+#
+# A READER THAT STOPS EARLY MUST NOT KILL THE PRODUCER.
+#
+# The phase lookups below read this listing through a pipe. A reader
+# that exits as soon as it has the field it wants closes the pipe
+# under the writer, and the writer's next write lands on a closed
+# reader. Node writes to a pipe SYNCHRONOUSLY on Linux, so that write
+# raises EPIPE, and an unhandled 'error' event takes the whole node
+# process down with it — and the cutover window with it. On macOS the
+# same write is queued and the error never reaches the operator, which
+# is why this only ever failed on the CI runner, where it killed the
+# executor before it could name the abort reason and the refusal read
+# as an unexplained crash.
+#
+# EPIPE here means the reader had what it needed, so the producer
+# exits cleanly. The consumers below are ALSO changed to drain the
+# listing instead of exiting early, so the producer is not cut off in
+# the first place.
 cutover_manifest_phases() {
   node --input-type=module -e "
     import { loadManifest } from '${CUTOVER_MANIFEST_MODULE}';
+    process.stdout.on('error', (error) => {
+      if (error && error.code === 'EPIPE') process.exit(0);
+      throw error;
+    });
     for (const phase of loadManifest(process.argv[1]).phases) {
       process.stdout.write(phase.phase + '\t' + phase.binding + '\t' + phase.holdSeconds + '\t' + phase.minSamples + '\n');
     }
@@ -604,24 +626,28 @@ cutover_manifest_phases() {
 }
 
 # The binding a phase runs under.
+#
+# The awk below reads the WHOLE listing rather than exiting at the
+# first match: exiting closes the pipe under the producer, and on Linux
+# that is what killed the executor mid-window (see the note above).
 cutover_phase_binding() {
-  cutover_manifest_phases "$1" | awk -F'\t' -v phase="$2" '$1 == phase { print $2; exit }'
+  cutover_manifest_phases "$1" | awk -F'\t' -v phase="$2" '$1 == phase && !seen { print $2; seen = 1 }'
 }
 
 # The hold and sample count a phase declares.
 cutover_phase_hold() {
-  cutover_manifest_phases "$1" | awk -F'\t' -v phase="$2" '$1 == phase { print $3; exit }'
+  cutover_manifest_phases "$1" | awk -F'\t' -v phase="$2" '$1 == phase && !seen { print $3; seen = 1 }'
 }
 
 cutover_phase_min_samples() {
-  cutover_manifest_phases "$1" | awk -F'\t' -v phase="$2" '$1 == phase { print $4; exit }'
+  cutover_manifest_phases "$1" | awk -F'\t' -v phase="$2" '$1 == phase && !seen { print $4; seen = 1 }'
 }
 
 # The next phase after the one named, or an empty string at the end.
 cutover_next_phase() {
   cutover_manifest_phases "$1" | awk -F'\t' -v phase="$2" '
     $1 == phase { found = 1; next }
-    found == 1 { print $1; exit }
+    found == 1 && !printed { print $1; printed = 1 }
   '
 }
 

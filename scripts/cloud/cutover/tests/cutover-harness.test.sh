@@ -466,6 +466,49 @@ printf '%s\n' \
 EXECUTOR_CALLER_ROOT="$WORK_DIR/executor-caller-root"
 cp -R "$CALLER_ROOT" "$EXECUTOR_CALLER_ROOT"
 
+# ---------------------------------------------------------------------------
+# A reader that stops early must not kill the producer
+# ---------------------------------------------------------------------------
+#
+# The phase lookups used to pipe the phase listing into an awk that
+# exited at the first match. Exiting closes the pipe under the
+# producer, and Node writes to a pipe synchronously on Linux — so the
+# producer's next write raised EPIPE and the unhandled 'error' event
+# took the node process down with it. Under `set -o pipefail` that
+# surfaced as a failed pipeline, and the executor died BEFORE it could
+# name the abort reason: the refusal read as an unexplained crash
+# instead of the latency breach it actually was. It only ever failed on
+# the CI runner; on macOS the write is queued and the error is lost.
+#
+# The regression drives the hostile reader directly, so the producer is
+# proved to survive it instead of relying on the executor to notice.
+expect_pass "the phase listing survives a reader that stops early" \
+  bash -c '
+    source "$1"
+    set -o pipefail
+    # (1) The hostile reader: a reader that closes the pipe before the
+    # producer writes anything. This is the condition that killed the
+    # executor on Linux, where the write is synchronous and the EPIPE
+    # is raised on the spot. `true` is the portable way to say it — it
+    # exits without reading a byte, so the producer writes into a pipe
+    # that has no reader at all.
+    if ! cutover_manifest_phases "$2" | true; then
+      printf "the phase listing failed when the reader stopped early\n" >&2
+      exit 1
+    fi
+    # (2) The real reader: a reader that takes the field it wants and
+    # stops. The value must be right, and the producer must exit clean
+    # rather than dying on a closed pipe.
+    if ! value="$(cutover_manifest_phases "$2" | awk -F"\t" "\$1 == \"baseline\" { print \$2; exit }")"; then
+      printf "the phase lookup failed when the reader stopped early\n" >&2
+      exit 1
+    fi
+    if [[ "$value" != "prodlike" ]]; then
+      printf "expected the baseline binding, got %s\n" "$value" >&2
+      exit 1
+    fi
+  ' _ "$CUTOVER_DIR/common.sh" "$EXAMPLE"
+
 expect_fail "the executor aborts the window when a probe breaches the latency ceiling" 1 "abort thresholds were breached" \
   env SINDUSTRIES_CUTOVER_PRODUCTION_ACK="CUTOVER PRODUCTION" \
       CUTOVER_PROBES_OVERRIDE="$SLOW_PROBES" \
