@@ -779,6 +779,8 @@ The data cutover above moves the DATA. The route cutover moves the ROUTE: which 
 
 **Prodlike is retained.** Decommissioning is not part of this task. It stays warm and healthy through the observation period and remains the tested rollback surface until Tom explicitly accepts; a successful switch is not a reason to remove it. The harness's final phase is `acceptance_pending` and it stops there — the script never accepts on Tom's behalf and never retires the fallback.
 
+**The preflight names a missing credential, and refuses a substituted one.** The hosted-signals probe reads the active alert count from the hosted Grafana stack and fails closed without a credential, so the window already stops — but it stopped inside the health gate, where the result reads "the probes do not report production healthy" and sends the operator to the service instead of to the environment, when the actual defect is a credential nobody provisioned. The preflight now carries a `hosted-observability-credential` gate that names the missing endpoint or credential directly, and that refuses the window when the hosted-observability credential is byte-identical to `GRAFANA_CLOUD_PROVISIONING_AUTH`: the provisioning token can write dashboards and delete alert rules, so it must never observe production and never reach the window's evidence. The read-scoped token is a separate service account from the provisioning one, and it is not in `infra/cloud/observability/.env.local` — that file carries the provisioning token only.
+
 **Operational surfaces.**
 
 | Surface | Path |

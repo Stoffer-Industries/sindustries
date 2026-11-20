@@ -80,7 +80,23 @@ export GRAFANA_CLOUD_INSTANCE_URL="https://sindustries.grafana.net"
 export GRAFANA_CLOUD_READER_AUTH="Bearer <read-scoped service-account token>"
 ```
 
-Use the **read-scoped** credential, not the provisioning one. The provisioning token can write dashboards and delete alert rules; it must not be the credential the window is observed with. `GRAFANA_CLOUD_READER_AUTH` lives in `infra/cloud/observability/.env.local` — see `docs/runbooks/hosted-observability-ops.md` for how it is provisioned and rotated.
+Use the **read-scoped** credential, not the provisioning one. The provisioning token can write dashboards and delete alert rules; it must not be the credential the window is observed with.
+
+**The read-scoped credential is NOT the credential in `.env.local`.** `infra/cloud/observability/.env.local` carries `GRAFANA_CLOUD_PROVISIONING_AUTH` — the write-scoped provisioning token — and nothing else. `GRAFANA_CLOUD_READER_AUTH` is a **separate** service account (Grafana Cloud → Users and access → Service accounts, `Viewer` plus `metrics:read`, `logs:read` and `alerts:read`), provisioned by Tom and exported into the operator's environment. Do not look for it in `.env.local`: it is not there.
+
+Until that token exists, the window does not start. The hosted-signals probe fails closed without it, and the preflight names the missing credential instead of reporting an unhealthy service — see P13.
+
+**The two tokens must not stand in for one another.** The preflight refuses the window when the hosted-observability credential is byte-identical to `GRAFANA_CLOUD_PROVISIONING_AUTH`, so a write-scoped token can never observe production and never reaches the window's evidence.
+
+```bash
+# Pre-window check: the credential must be present, and it must be the read-scoped one.
+export GRAFANA_CLOUD_INSTANCE_URL="https://sindustries.grafana.net"
+export GRAFANA_CLOUD_READER_AUTH="Bearer <read-scoped service-account token>"
+[ "$GRAFANA_CLOUD_READER_AUTH" != "$GRAFANA_CLOUD_PROVISIONING_AUTH" ] \
+  || echo "REFUSING: the provisioning token is standing in for the read-scoped credential"
+```
+
+See `docs/runbooks/hosted-observability-ops.md` for the reader credential's scopes and its rotation cadence.
 
 This is a read-only check, and it can be run before the window:
 
@@ -137,7 +153,7 @@ The preflight is a **gate, not a report**. It fails closed: an environment it co
 | P10 | Synthetic authenticated probe credentials exist in the provider secret runner and are excluded from logs | The probes record correlation IDs and booleans, never tokens or domain payloads. |
 | P11 | Operators, communication channel, observation duration and abort thresholds are set | `gates.requiredOperatorFields` → `observationMinutes`, `operatorRoles.goNoGo`, `operatorRoles.execution` |
 | P12 | No deploy, migration, secret rotation or competing cutover is in progress | The operator lock (`artifacts/cutover/cutover.lock`) plus the operator's own check. |
-| P13 | The hosted stack answers and the read-scoped observability credential is present | The probe reads `GET <stack>/api/alertmanager/grafana/api/v2/alerts` and compares the count of firing alerts against `abortThresholds.activeAlertCount`. A missing credential, an unreadable endpoint or a payload that is not an alert list all **fail** the check — an unobserved signal is not a healthy signal. |
+| P13 | The hosted stack answers and the read-scoped observability credential is present | The probe reads `GET <stack>/api/alertmanager/grafana/api/v2/alerts` and compares the count of firing alerts against `abortThresholds.activeAlertCount`. A missing credential, an unreadable endpoint or a payload that is not an alert list all **fail** the check — an unobserved signal is not a healthy signal. The preflight's `hosted-observability-credential` gate names the missing endpoint or credential directly, and refuses the window when the credential is the write-scoped provisioning token (see §0.1). |
 | P14 | A **fresh passing rollback rehearsal** exists for this route mechanics | `gates.requiredEvidence` → `staging-rollback-rehearsal`. Documentation review cannot satisfy AC4. |
 
 ---
