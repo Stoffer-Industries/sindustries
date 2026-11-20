@@ -51,9 +51,11 @@ consolidation cutover, so their `*.fly.dev` hostnames no longer serve these
 APIs. `infra/cloud/hostname-matrix.json` (`stagingRoutes`) and
 `infra/cloud/platform/nginx.conf.template` are the sources of truth for the routes;
 the stable app-name hostnames (`tasks-api.staging.sindustries.co.nz` and
-siblings) land with task `5cb4a8fe`.
+siblings) are live — task `5cb4a8fe` created the CNAMEs and each points at the
+platform app, so a surface answers on its own hostname root as well as on the
+provider-host path prefix.
 
-<!-- stable-fallback: provider URL pending the stable-hostname CNAME move (task 5cb4a8fe) -->
+<!-- stable-fallback: provider URL is the documented path-prefix route; the stable hostnames are live (CNAME + cert landed 2026-11-10, verified live 2026-11-20, task 5cb4a8fe) -->
 
 ## Bearer token sourcing
 
