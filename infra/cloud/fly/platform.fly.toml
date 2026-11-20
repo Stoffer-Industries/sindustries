@@ -19,8 +19,9 @@
 #   budget-api.staging.sindustries.co.nz            (routed by Host header)
 #   content-scheduler-api.staging.sindustries.co.nz  (routed by Host header)
 # The provider host serves the same three surfaces behind one path prefix
-# each (/tasks-api, /budget-api, /content-scheduler-api); the router is
-# infra/cloud/platform/nginx.conf.
+# each (/tasks-api, /budget-api, /content-scheduler-api); the router's
+# source config is infra/cloud/platform/nginx.conf.template, which the
+# supervisor renders to /tmp/sindustries-platform/nginx.conf at boot.
 # stable-fallback: sindustries-platform-staging.fly.dev — the provider host behind the stable hostnames.
 #
 # WHY ONE [[services]] BLOCK AND NOT THREE
