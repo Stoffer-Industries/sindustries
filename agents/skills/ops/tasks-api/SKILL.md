@@ -18,8 +18,14 @@ Use API-first task operations for all automation flows.
 
 ## Base URL
 
+`TASKS_API_BASE_URL` is the live route, owned by `~/.openclaw/.env`. Load it from
+the runtime environment; the prodlike default is a local-dev fallback only, so a
+caller running inside the OpenClaw runtime follows the live route instead of
+pinning prodlike.
+
 ```bash
-export TASKS_API_BASE_URL=http://localhost:4001/api/v1
+set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a
+export TASKS_API_BASE_URL="${TASKS_API_BASE_URL:-http://localhost:4001/api/v1}"
 ```
 
 ## Script
@@ -131,8 +137,7 @@ repair options per task. It writes nothing — no approval, no status, no
 attention owner.
 
 ```bash
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-  python3 agents/skills/ops/tasks-api/scripts/identify_skipped_qa_tasks.py
+python3 agents/skills/ops/tasks-api/scripts/identify_skipped_qa_tasks.py
 python3 agents/skills/ops/tasks-api/scripts/identify_skipped_qa_tasks.py --json
 ```
 

@@ -1308,6 +1308,22 @@ jobs:
       - name: Run production cutover readiness contract test
         run: node --test tests/cloud/tests/check-production-cutover-readiness.test.mjs
 
+      # Task 020f423e (AC2): the route adapter moves the runtime
+      # configuration and the read-back reads those same files back, so a
+      # cron prompt or a skill that pins a prodlike origin LITERALLY is a
+      # caller no switch can move — and a read-back that cannot see it. The
+      # runbook claimed the repository-owned callers consume the route
+      # variable; this check makes that claim mechanical, and fails closed
+      # when a caller pins prodlike again.
+      - name: Check agent caller routes
+        run: node tests/cloud/scripts/check-agent-caller-routes.mjs
+
+      # Run by explicit path so the repository-wide contract-test orphan
+      # guard sees it as executed. The sentinel cases prove the gate can
+      # actually go red — a gate that cannot fail asserts nothing.
+      - name: Run agent caller routes contract test
+        run: node --test tests/cloud/tests/check-agent-caller-routes.test.mjs
+
       # Task fb1240c0 (Slice D): the five operator read-backs are recorded
       # by a person, and the record is compared against the production
       # surfaces it must cover. The operator had no way to learn those

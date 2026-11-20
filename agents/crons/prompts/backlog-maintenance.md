@@ -8,8 +8,17 @@ Read both skills before starting.
 
 ## Step 1 — Fetch untyped tasks
 
+Load the live route from the runtime environment. `TASKS_API_BASE_URL` is
+owned by `~/.openclaw/.env`; the prodlike default is a local-dev fallback only,
+so this cron follows the live route instead of pinning prodlike.
+
 ```bash
-curl -s "http://localhost:4001/api/v1/tasks?status=open&limit=1000" | python3 -c "
+set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a
+TASKS_API_BASE_URL="${TASKS_API_BASE_URL:-http://localhost:4001/api/v1}"
+```
+
+```bash
+curl -s "${TASKS_API_BASE_URL}/tasks?status=open&limit=1000" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 tasks = [t for t in data.get('data', []) if not t.get('taskType')]
@@ -41,7 +50,7 @@ source of truth for backlog work, not the agent incident registry.
 ## Step 5 — Spec integrity: feature tasks missing a spec
 
 ```bash
-curl -s "http://localhost:4001/api/v1/tasks?status=open&taskType=feature&limit=1000" | python3 -c "
+curl -s "${TASKS_API_BASE_URL}/tasks?status=open&taskType=feature&limit=1000" | python3 -c "
 import json, sys, re, os
 WORKSPACE = '/Users/quinnstoffer/.openclaw/workspace'
 data = json.load(sys.stdin)
@@ -65,6 +74,7 @@ For each problem, apply the feature-task-create skill. If the description has en
 python3 << 'EOF'
 import os, re, json, urllib.request
 WORKSPACE = '/Users/quinnstoffer/.openclaw/workspace'
+TASKS_API_BASE_URL = os.environ.get("TASKS_API_BASE_URL") or "http://localhost:4001/api/v1"
 SPEC_DIR = os.path.join(WORKSPACE, 'brain/tasks/specs/open')
 spec_files = []
 if os.path.isdir(SPEC_DIR):
@@ -76,7 +86,7 @@ if not spec_files:
 else:
     referenced = set()
     for status in ('open', 'doing', 'acceptance'):
-        with urllib.request.urlopen(f'http://localhost:4001/api/v1/tasks?status={status}&limit=1000') as r:
+        with urllib.request.urlopen(f'{TASKS_API_BASE_URL}/tasks?status={status}&limit=1000') as r:
             for t in json.loads(r.read())['data']:
                 for m in re.finditer(r'brain/tasks/specs/\S+\.md', t.get('description', '')):
                     referenced.add(m.group(0))

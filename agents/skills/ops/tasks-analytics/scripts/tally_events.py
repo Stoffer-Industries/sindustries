@@ -21,7 +21,11 @@ the pre-pagination output on the same events. A server that does not send
 a `pagination` object is treated as a single-page response.
 
 Usage:
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 tally_events.py [--days N]
+  python3 tally_events.py [--days N]
+
+TASKS_API_BASE_URL is required and is read from the environment. It is the live
+route, owned by `~/.openclaw/.env`; the prodlike origin is a local-dev fallback
+only, so a caller running inside the OpenClaw runtime follows the live route.
 
 Prints JSON to stdout:
   {
