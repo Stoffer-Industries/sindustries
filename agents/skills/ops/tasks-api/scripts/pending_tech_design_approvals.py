@@ -7,8 +7,11 @@ comments are audit/context only, while ``task.approvals`` is the sole gate
 source shared by this queue and the feature-task Lobster.
 
 Usage:
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 \\
-    python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py
+  python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py
+
+  TASKS_API_BASE_URL is required and is read from the environment. It is the live
+  route, owned by `~/.openclaw/.env`; the prodlike origin is a local-dev fallback
+  only, so a caller running inside the OpenClaw runtime follows the live route.
 
   Scopes to ACTIVE_STATUSES by default. Pass --status one or more times to
   override (including a terminal status, for deliberate forensics).

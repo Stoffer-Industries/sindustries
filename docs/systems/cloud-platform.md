@@ -785,6 +785,8 @@ The data cutover above moves the DATA. The route cutover moves the ROUTE: which 
 
 **The preflight names a missing credential, and refuses a substituted one.** The hosted-signals probe reads the active alert count from the hosted Grafana stack and fails closed without a credential, so the window already stops — but it stopped inside the health gate, where the result reads "the probes do not report production healthy" and sends the operator to the service instead of to the environment, when the actual defect is a credential nobody provisioned. The preflight now carries a `hosted-observability-credential` gate that names the missing endpoint or credential directly, and that refuses the window when the hosted-observability credential is byte-identical to `GRAFANA_CLOUD_PROVISIONING_AUTH`: the provisioning token can write dashboards and delete alert rules, so it must never observe production and never reach the window's evidence. The read-scoped token is a separate service account from the provisioning one, and it is not in `infra/cloud/observability/.env.local` — that file carries the provisioning token only.
 
+**The route has two classes of caller, and the read-back only sees one.** The adapter's managed caller inventory is the runtime configuration — the `.env` keys it writes and the read-back reads back. AC2 names more than that: "agent workflows, cron/automation callers, deployment configuration and operator-facing docs", and those callers live in the repository. A repository-owned caller follows the live route by RESOLVING the route variable, never by pinning an origin, and because the manifest does not name them the adapter's read-back cannot see them. `tests/cloud/scripts/check-agent-caller-routes.mjs` is therefore a hard gate on the repository side: it fails closed when a cron prompt, a heartbeat prompt or a skill assigns a prodlike origin to the route variable, targets one in a `curl` or an HTTP client call, or pairs one with a request method. The origin is allowed as the default of a route variable, because a local-dev fallback is not a route. AC2's proof is two halves — the read-back proves the runtime configuration moved, and this gate proves the repository-owned callers will follow it — and neither half is sufficient alone.
+
 **Operational surfaces.**
 
 | Surface | Path |
@@ -795,6 +797,7 @@ The data cutover above moves the DATA. The route cutover moves the ROUTE: which 
 | Route adapter | `infra/cloud/cutover/traffic-route.mjs` (CLI: `infra/cloud/bin/traffic-route`) |
 | Harness | `scripts/cloud/cutover/` — `preflight.sh`, `execute.sh`, `observe.sh`, `rehearse.sh`, `rollback.sh`, `verify-local-recovery.sh` |
 | Continuous probes | `tests/cloud/production-cutover-probes.mjs` |
+| Repository caller gate | `tests/cloud/scripts/check-agent-caller-routes.mjs` (AC2's second half — the repository-owned callers the adapter's read-back cannot see) |
 | Dispatch workflow | `.github/workflows/production-cloud-cutover.yml` (`workflow_dispatch` only, `production` Environment, concurrency group `production-cutover`) |
 
 ---

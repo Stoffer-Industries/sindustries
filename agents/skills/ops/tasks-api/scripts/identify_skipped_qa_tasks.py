@@ -27,9 +27,12 @@ different handling:
     are only counted.
 
 Usage:
-    TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-      python3 identify_skipped_qa_tasks.py
-    python3 identify_skipped_qa_tasks.py --json
+  python3 identify_skipped_qa_tasks.py
+  python3 identify_skipped_qa_tasks.py --json
+
+TASKS_API_BASE_URL is required and is read from the environment. It is the live
+route, owned by `~/.openclaw/.env`; the prodlike origin is a local-dev fallback
+only, so a caller running inside the OpenClaw runtime follows the live route.
 """
 
 from __future__ import annotations

@@ -88,9 +88,16 @@ If the directory doesn't exist or contains no rows: output empty patterns list, 
 
 ## Step 1 — Weekly aggregate snapshot
 
+Load the live route from the runtime environment. `TASKS_API_BASE_URL` is owned by
+`~/.openclaw/.env`; the prodlike default is a local-dev fallback only.
+
 ```bash
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-  python3 agents/skills/ops/tasks-analytics/scripts/weekly_summary.py --weeks 2 | jq .
+set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a
+export TASKS_API_BASE_URL="${TASKS_API_BASE_URL:-http://localhost:4001/api/v1}"
+```
+
+```bash
+python3 agents/skills/ops/tasks-analytics/scripts/weekly_summary.py --weeks 2 | jq .
 ```
 
 Take the most recent bucket (current week, Monday-start) as the headline. Keep the prior
@@ -105,8 +112,7 @@ below applies.
 ## Step 2 — Terminal tasks this week (for titles + per-task deep checks)
 
 ```bash
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-  python3 agents/skills/ops/tasks-analytics/scripts/get_terminal_tasks.py --days 7 \
+python3 agents/skills/ops/tasks-analytics/scripts/get_terminal_tasks.py --days 7 \
   | jq -r '.[] | "\(.id[0:8]) — \(.title)"'
 ```
 
@@ -123,7 +129,6 @@ up failures while stuck in `doing`/`ready`/`acceptance` without ever reaching `d
 tasks), fetches each task's events, and tallies.
 
 ```bash
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
   python3 agents/skills/ops/tasks-analytics/scripts/tally_events.py --days 7 | jq .
 ```
 
@@ -198,7 +203,6 @@ Take the highest-score entry from the combined Step 0 + Step 3 ranking (skip any
 Build a feature task:
 
 ```bash
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
   python3 agents/skills/ops/tasks-api/tasks_api_client.py create \
     --title "<suggested-action, one line, title-case, max 80 chars>" \
     --description "<observation + count + evidence links + pattern-slug>" \

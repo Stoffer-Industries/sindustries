@@ -24,7 +24,8 @@ for extraction.
 ## Usage
 
 ```bash
-export TASKS_API_BASE_URL=http://localhost:4001/api/v1
+set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a
+export TASKS_API_BASE_URL="${TASKS_API_BASE_URL:-http://localhost:4001/api/v1}"
 
 python3 agents/skills/ops/tasks-analytics/scripts/weekly_summary.py --weeks 2 | jq '.data[0]'
 python3 agents/skills/ops/tasks-analytics/scripts/get_terminal_tasks.py --days 7 | jq 'length'

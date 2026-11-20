@@ -5,7 +5,11 @@ Wraps the two-status fetch + completedAt cutoff filter that factory-retro's
 Step 2 used to do inline.
 
 Usage:
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 get_terminal_tasks.py [--days N] [--status done --status accepted]
+  python3 get_terminal_tasks.py [--days N] [--status done --status accepted]
+
+TASKS_API_BASE_URL is required and is read from the environment. It is the live
+route, owned by `~/.openclaw/.env`; the prodlike origin is a local-dev fallback
+only, so a caller running inside the OpenClaw runtime follows the live route.
 
 Prints a JSON array of task objects to stdout.
 """

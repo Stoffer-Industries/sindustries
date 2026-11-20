@@ -2,14 +2,19 @@
 """Minimal Tasks API client for workspace automations.
 
 Usage examples:
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --limit 50
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py create --title "Test" --priority high
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --status doing
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --workflow-gate-owner Quinn
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --attention-owner Tom
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py approve --id <task-id> --type tech_design
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py revoke-approval --id <task-id> --type tech_design
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py archive --id <task-id>
+  python3 scripts/tasks_api_client.py list --limit 50
+  python3 scripts/tasks_api_client.py create --title "Test" --priority high
+  python3 scripts/tasks_api_client.py patch --id <task-id> --status doing
+  python3 scripts/tasks_api_client.py list --workflow-gate-owner Quinn
+  python3 scripts/tasks_api_client.py list --attention-owner Tom
+  python3 scripts/tasks_api_client.py approve --id <task-id> --type tech_design
+  python3 scripts/tasks_api_client.py revoke-approval --id <task-id> --type tech_design
+  python3 scripts/tasks_api_client.py archive --id <task-id>
+
+TASKS_API_BASE_URL is required and is read from the environment. It is the live
+route, owned by `~/.openclaw/.env`; the prodlike origin is a local-dev fallback
+only, so a caller running inside the OpenClaw runtime inherits the live route
+from that file rather than pinning prodlike here.
 """
 
 # Agent-driven attention-owner writes must use the reason-bearing reconcile or

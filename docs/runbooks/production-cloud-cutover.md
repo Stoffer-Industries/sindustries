@@ -42,7 +42,7 @@ AC2 requires that after the switch **no active in-scope caller still targets pro
 | Mission Control | `https://mission-control.sindustries.co.nz` |
 | Tasks app | `https://tasks.sindustries.co.nz` |
 
-**The live route is the OpenClaw runtime configuration, not the GitHub checkout.** Repository-owned prompts, heartbeats, and skills consume these variables; they no longer pin a local URL over the runtime value.
+**The live route is the OpenClaw runtime configuration, not the GitHub checkout.** The adapter moves the runtime configuration; the repository-owned callers consume the same variables. §0.2 is that second class of in-scope caller, and the gate that keeps it honest.
 
 Every in-scope surface's route lives in the runtime configuration. The adapter can only move a route it can read, so a surface with no managed caller is a surface the cutover cannot move — the manifest refuses it outright (see "Every in-scope surface names a managed caller" below).
 
@@ -55,6 +55,29 @@ Every in-scope surface's route lives in the runtime configuration. The adapter c
 | `.env` | `TASKS_APP_BASE_URL` | `http://localhost:5176` | Tasks app stable origin |
 
 The adapter atomically replaces only those URL literals, preserves the existing file mode, reads the files back, and refuses to record a route version unless every managed caller resolves the requested binding. The files may contain credentials; the adapter never prints their contents.
+
+### 0.2 The repository-owned callers — the second in-scope class
+
+The managed caller table above is the adapter's inventory: the files it writes and the read-back reads back. It is **not** the whole of AC2. AC2 names "agent workflows, cron/automation callers, deployment configuration and operator-facing docs", and those callers live in this repository.
+
+A repository-owned caller follows the live route by **resolving the route variable**, never by pinning an origin:
+
+```bash
+set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a
+TASKS_API_BASE_URL="${TASKS_API_BASE_URL:-http://localhost:4001/api/v1}"
+```
+
+The prodlike literal is the local-dev fallback. The runtime value wins whenever the runtime environment carries the route — which, after the switch, it does.
+
+**These surfaces are not in the manifest, so the adapter's read-back cannot see them.** That is why the repository carries its own gate, and it is a hard gate: a caller that pins a prodlike origin fails CI.
+
+```bash
+node tests/cloud/scripts/check-agent-caller-routes.mjs
+```
+
+It fails closed on a hard assignment (`TASKS_API_BASE_URL=http://localhost:4001/api/v1`), a `curl` that targets prodlike, an HTTP client call that targets prodlike, and a request method paired with a prodlike URL. It allows the origin as the *default* of a route variable, and allows prose that merely mentions one.
+
+**AC2's proof is therefore two halves, not one.** The adapter's read-back proves the runtime configuration moved; this gate proves the repository-owned callers will follow it. Neither is sufficient alone — a caller that pins prodlike is invisible to the read-back, and a clean read-back is not a proof while such a caller exists.
 
 **PREREQUISITE — the runtime configuration must already carry every route above.** The adapter refuses the whole switch if any managed caller cannot be read: a caller whose file is missing, or whose file carries neither the prodlike nor the production literal, is a caller the cutover cannot move, and the switch is refused before the first write rather than half-way through it. So `MISSION_CONTROL_BASE_URL` and `TASKS_APP_BASE_URL` must be present in `~/.openclaw/.env` **with the prodlike values above** before the window opens. Provision them out of band; the cutover does not create them, and it does not guess a value it did not find.
 

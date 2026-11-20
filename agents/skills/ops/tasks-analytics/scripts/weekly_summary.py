@@ -4,7 +4,11 @@
 Wraps: GET /feature-task-analytics/weekly?weeks=<N>
 
 Usage:
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 weekly_summary.py [--weeks N]
+  python3 weekly_summary.py [--weeks N]
+
+TASKS_API_BASE_URL is required and is read from the environment. It is the live
+route, owned by `~/.openclaw/.env`; the prodlike origin is a local-dev fallback
+only, so a caller running inside the OpenClaw runtime follows the live route.
 
 Prints the raw JSON response to stdout (pipe to `jq` for extraction).
 """

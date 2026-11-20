@@ -62,8 +62,9 @@ QUINN OPS TASKS
 Quinn-assigned tasks with no taskType (not feature/content) have no lobster. Heartbeat is the engine.
 
 Each heartbeat:
-1. Fetch open Quinn-assigned tasks:
-   `curl -s "http://localhost:4001/api/v1/tasks?assignee=Quinn&status=open" | python3 -c "import json,sys; tasks=[t for t in json.load(sys.stdin)['data'] if not t.get('taskType')]; print(json.dumps(tasks, indent=2))"`
+1. Fetch open Quinn-assigned tasks (load the live route from the runtime environment first:
+   `set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a`):
+   `curl -s "${TASKS_API_BASE_URL}/tasks?assignee=Quinn&status=open" | python3 -c "import json,sys; tasks=[t for t in json.load(sys.stdin)['data'] if not t.get('taskType')]; print(json.dumps(tasks, indent=2))"`
 2. **If none: skip this section entirely. No output.**
 3. Sort by `createdAt` ascending (oldest first). Take the top task.
 4. Read the description fully. Determine if it can be completed this heartbeat pass:
