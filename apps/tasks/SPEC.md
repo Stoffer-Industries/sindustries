@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-11-20 (board rejection e2e coverage, task fb5c4e40)
+**Last updated:** 2026-11-20 (task card containment guarantee, task 7c008472)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 
@@ -33,6 +33,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
    - An explicit "Edit" control in the description header always enters inline text edit mode, and becomes "Done" while editing.
    - The classification is scoped to the rendered description: a click is matched against the markdown it sits in, not against ancestor elements of the surrounding page.
 4. Rendered markdown description content wraps within the task card instead of overflowing horizontally
+5. **Card containment is a guarantee, not a convention.** A task card never extends beyond the width of its board column — not its layout box, and not the pixels it paints. It holds for every task and every card state (collapsed, expanded/editing) at desktop and narrower responsive widths, whatever content the task carries: long titles, URLs, branch names, acceptance criteria and workstream text all wrap or stay contained inside the card, and the card itself never bleeds into the neighbouring lane. The guarantee is class-level: it is a property of the board's layout, never a rule keyed to one task, one title or one content length.
 5. User can navigate to a full-screen detail view via explicit action
 6. Changes persist on save
 7. An **Approvals** sub-section renders one row per required approval type for the task's type (`spec`, `tech_design`, `qa_agent`, `accepted`):
@@ -239,6 +240,7 @@ new planes is scoped separately.
 | Filter by assignee | `test/e2e/assignee-filter.spec.js` |
 | Task dependencies UI | `test/e2e/dependency-ui.spec.js` |
 | Markdown checkbox toggle + description wrapping | `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/src/utils/markdown.test.js` |
+| Task card containment (a card and its content stay inside the board column, collapsed and expanded, at desktop and narrow widths, with long content on every card surface) | `test/e2e/card-overflow.spec.js` |
 | Description hit targets (AC row toggles, modifier-click opens the URL, plain text still edits) | `apps/tasks/src/components/MarkdownContent.test.jsx`, `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/test/e2e/description-edit-targets.spec.js` |
 | Filter by priority | `test/e2e/priority-filter.spec.js` |
 | Backlog default view — no ownership filter on load; `MY GATES` / `NEEDS MY ATTENTION` apply only when explicitly selected | `apps/tasks/src/App.test.jsx` (`default backlog view`) |

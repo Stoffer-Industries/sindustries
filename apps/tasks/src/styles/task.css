@@ -4,6 +4,7 @@
   color: var(--si-color-text-primary);
   display: grid;
   gap: 12px;
+  min-width: 0;
   width: 100%;
 }
 
@@ -30,6 +31,7 @@
   font-weight: 700;
   line-height: 1.35;
   margin: 0;
+  overflow-wrap: anywhere;
   padding: 0;
   text-align: left;
   width: 100%;
@@ -46,6 +48,7 @@
   font-weight: 700;
   line-height: 1.35;
   min-height: auto;
+  min-width: 0;
   padding: 0;
 }
 
@@ -69,6 +72,14 @@
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
+}
+
+/* A tag is a single word. In a narrow column the row can be narrower than the
+   word, so the badge breaks the word rather than painting over the footer
+   meta next to it. */
+.task-card-footer-tags .si-badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .task-card-footer-meta {
@@ -162,6 +173,13 @@
   width: 100%;
 }
 
+/* Card containment chain.
+   Grid and flex items default to `min-width: auto`, which floors their used
+   width at the content's min-content size. A card carrying a long unbreakable
+   token (a branch name, a PR URL) or a wide control therefore propagates a
+   min-content width up the column and paints outside the board column. These
+   levels are explicitly allowed to shrink below their content; the surfaces
+   themselves then decide how the content fits. */
 .si-card-container--column ol {
   display: flex;
   flex-direction: column;
@@ -169,7 +187,17 @@
   gap: 8px;
   list-style: none;
   margin: 0;
+  min-width: 0;
   padding: 0;
+}
+
+.si-card-container--column ol > li {
+  min-width: 0;
+}
+
+.board-card > *,
+.task-card > * {
+  min-width: 0;
 }
 
 /* Create card */
@@ -200,7 +228,8 @@
 .editor-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
 }
 
 .editor-toggles {
