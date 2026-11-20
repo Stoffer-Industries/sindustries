@@ -37,7 +37,7 @@ Assumptions:
 In scope:
 
 - Define and commit the staging and production hostname matrix for the six public surfaces in AC1.
-- Add Fly custom domains + Let's Encrypt certs for the four staging HTTP Fly apps; document the production counterpart without applying it.
+- Add Fly custom domains + Let's Encrypt certs for the four staging HTTP Fly apps; document the production counterpart without applying it. **Superseded (2026-11-07 consolidation):** the per-service staging Fly apps this bullet names were destroyed ahead of the consolidation; the staging HTTP surfaces are now carried by the consolidated `sindustries-platform-staging` app, with the health probe keeping its own `sindustries-health-probe-staging` app. See the Routing topology and DNS plan sections below for the landed shape.
 - Add the matching custom domains to the three Vercel frontends (`apps/tasks`, `apps/gymtrack` (documented-only — see Out of scope), `apps/mission-control`); production mirrors follow the same DNS plan.
 - Update each service's `CORS_ALLOWED_ORIGINS` (or equivalent middleware) to allow the stable staging origins and (after Quinn sign-off) the production origins.
 - Update each Vercel project's build-time env vars to point at the stable API hostnames.
@@ -92,7 +92,7 @@ No service-local source of truth is appropriate. Trying to encode the hostname i
 |---|---|---|
 | `sindustries.co.nz` DNS zone | Quinn | DNS provider (TBD with Quinn; see OQ1) |
 | `staging.sindustries.co.nz` delegation | Quinn | DNS provider — apex CNAME wildcard or per-hostname records |
-| Fly app + Let's Encrypt cert binding per custom domain | Quinn (operator) / Rowan (manifest reference) | `fly certs add <hostname> --app <fly-app>` |
+| Fly app + Let's Encrypt cert binding per custom domain | Quinn (operator) / Rowan (manifest reference) | `fly certs add <hostname> --app <fly-app>` — since the 2026-11-07 consolidation the three API surfaces bind against `sindustries-platform-staging` (`sindustries-platform-production` in production) and the health probe against `sindustries-health-probe-staging` (`sindustries-health-probe-production` in production) |
 | Vercel custom domain + auto-cert | Quinn (operator) / Rowan (manifest reference) | Vercel project settings |
 | Service CORS allowlist per environment | Rowan | `CORS_ALLOWED_ORIGINS` env var in each service's deploy env |
 | Frontend build-time API base URLs | Rowan | Vercel project env vars |
@@ -121,6 +121,8 @@ client ──▶ *.sindustries.co.nz → production counterpart (Vercel + Fly, i
 auto-post worker ── (no public URL) ──▶ BullMQ / Redis ──▶ content-scheduler-api
 ```
 
+**Superseded (2026-11-07 staging consolidation; verified live 2026-11-21).** The tree above is the design-time topology. The four per-service staging Fly apps it names were destroyed ahead of the consolidation (task `219fb673`), and the three API surfaces are now children of the single `sindustries-platform-staging` app — reached on that app's host at their path prefixes (`/tasks-api`, `/budget-api`, `/content-scheduler-api`) behind the in-container nginx router — while the auto-post worker is a queue-bound child process of the same app with no public URL of its own. The health probe keeps its own `sindustries-health-probe-staging` app and is not a platform child. The provider-hostname fallback AC4 permits is therefore that platform host with its path prefixes, not the per-service `*.fly.dev` hosts: verified live 2026-11-21, `sindustries-tasks-api-staging.fly.dev`, `sindustries-budget-api-staging.fly.dev` and `sindustries-content-scheduler-api-staging.fly.dev` all answer HTTP 502 (no app behind them), while `https://sindustries-platform-staging.fly.dev/tasks-api/health`, `.../budget-api/health` and `.../content-scheduler-api/health` all answer HTTP 200. The live mapping — one hostname per surface, its CNAME target and its provider fallback — is recorded in `infra/cloud/hostname-matrix.json`, which this design's own `designDoc` field points to.
+
 The migration is additive: `*.fly.dev` and `*.vercel.app` URLs continue to serve until Quinn confirms they can be decommissioned. AC4 documents the decommission plan; it does not execute it.
 
 ## Implementation plan and file scope
@@ -136,6 +138,17 @@ The migration is additive: `*.fly.dev` and `*.vercel.app` URLs continue to serve
 3. Quinn adds each Vercel custom domain via the Vercel project settings UI or `vercel domains add <hostname> <project>`. Vercel auto-issues the cert.
 4. Production CNAMEs follow the same plan but are not created in this PR — the design records them and AC6 lists them as a remaining blocker for Quinn.
 
+**Superseded (2026-11-07 consolidation; landed 2026-11-10, verified live 2026-11-21).** Steps 1 and 2 name Fly apps that no longer exist, and the three API certificates are held by the consolidated app rather than by one app per service. The records that exist today are:
+
+- `tasks-api.staging.sindustries.co.nz` → `sindustries-platform-staging.fly.dev`
+- `budget-api.staging.sindustries.co.nz` → `sindustries-platform-staging.fly.dev`
+- `content-scheduler-api.staging.sindustries.co.nz` → `sindustries-platform-staging.fly.dev`
+- `health-probe.staging.sindustries.co.nz` → `sindustries-health-probe-staging.fly.dev`
+- `tasks-api.sindustries.co.nz` → `sindustries-platform-production.fly.dev`
+- `health-probe.sindustries.co.nz` → `sindustries-health-probe-production.fly.dev`
+
+The cert command for the three API surfaces is therefore `fly certs add <hostname> --app sindustries-platform-staging` (production: `--app sindustries-platform-production`), and for the health probe `--app sindustries-health-probe-staging` (production: `--app sindustries-health-probe-production`). The authoritative per-surface mapping lives in `infra/cloud/hostname-matrix.json`. Verified live 2026-11-21: `dig +short @1.1.1.1 <hostname> CNAME` returns exactly the targets above, and the stable hostnames answer HTTP 200 on `/health` (`/healthz` for the health probe).
+
 Rowan's PR includes a `## DNS / TLS setup` section in the PR body listing each CNAME + cert command exactly as the operator runs it, so Quinn can copy-paste; the PR diff contains zero secret values.
 
 ### 2. Repo-side manifest references (no secret values)
@@ -145,7 +158,9 @@ Rowan's PR includes a `## DNS / TLS setup` section in the PR body listing each C
   # Stable hostnames (Quinn-owned DNS):
   #   staging:    tasks-api.staging.sindustries.co.nz
   #   production: tasks-api.sindustries.co.nz
-  # Add via `fly certs add tasks-api.staging.sindustries.co.nz --app sindustries-tasks-api-staging`
+  # Add via `fly certs add tasks-api.staging.sindustries.co.nz --app sindustries-platform-staging`
+  #   (superseded: the per-service app named here was destroyed at the 2026-11-07
+  #    consolidation; the API certs are held by the consolidated platform app)
   ```
 - No code changes to the Fly toml files are required to serve traffic on a custom domain — Fly honours it once the cert is in place. The comments are the only repo-side artefact for Fly.
 
