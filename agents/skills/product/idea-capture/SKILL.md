@@ -25,7 +25,7 @@ Use at the end of a discovery/design chat to anchor the idea before it's forgott
 2. **Create a task** via the Tasks API (load the live route from the runtime environment first:
    `set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a`):
    ```
-   POST "${TASKS_API_BASE_URL}/tasks
+   POST "${TASKS_API_BASE_URL}/tasks"
    {
      "title": "<concise task title>",
      "description": "**Idea:** brain/ideas/<slug>.md\n\n<1-2 sentence summary of what this is>",
