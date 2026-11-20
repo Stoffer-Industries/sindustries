@@ -565,8 +565,8 @@ This is a staging foundation — Quinn is the single point of contact for creden
 
 | Domain             | Use                                       | Status                         |
 | ------------------ | ----------------------------------------- | ------------------------------ |
-| `sindustries.co.nz` (apex) | Production frontends + APIs (mission-control, tasks, tasks-api, budget-api, content-scheduler-api, health-probe) | Quinn-registered; matrix at `infra/cloud/hostname-matrix.json`; CNAMEs pending per task `5cb4a8fe` |
-| `staging.sindustries.co.nz` (subdomain) | Staging frontends + APIs (same six surfaces)        | Delegation pending per task `5cb4a8fe`; matrix at `infra/cloud/hostname-matrix.json` |
+| `sindustries.co.nz` (apex) | Production frontends + APIs (mission-control, tasks, tasks-api, budget-api, content-scheduler-api, health-probe) | Quinn-registered; matrix at `infra/cloud/hostname-matrix.json`; CNAMEs + certs live (task `5cb4a8fe`, verified live 2026-11-21: all six production hostnames resolve and serve HTTP 200) |
+| `staging.sindustries.co.nz` (subdomain) | Staging frontends + APIs (same six surfaces)        | Records live in the same apex zone (task `5cb4a8fe`, verified live 2026-11-21: all six staging hostnames resolve and serve HTTP 200); matrix at `infra/cloud/hostname-matrix.json` |
 | `sindustries.dev` (legacy)    | Wildcard CNAMEs to Fly app subdomains (audited historical reservation) | Superseded by `sindustries.co.nz` for staging and production per task `5cb4a8fe`; remains documented for audit only |
 
 ## Stable hostname matrix (task `5cb4a8fe`)
