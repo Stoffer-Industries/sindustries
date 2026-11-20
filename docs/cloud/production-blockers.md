@@ -61,10 +61,16 @@ still read `Pending`. See
 | Auto-post worker | _(none — no public URL)_ | n/a — the worker has no HTTP surface | — | — | Not applicable |
 
 **Notes:**
-- The DNS provider is the open question (tech design OQ2). Once chosen, the
-  apex record strategy is provider-specific: Vercel wants `A 76.76.21.21` or
-  ALIAS; Fly wants a CNAME to the app's provider host for the per-app
-  entries.
+- The DNS provider was decided and OQ2 is closed: `sindustries.co.nz` is
+  delegated to Cloudflare (`melnicoff.ns.cloudflare.com`,
+  `tegan.ns.cloudflare.com`, verified live 2026-11-21). The apex record
+  strategy is therefore Cloudflare's, not the providers': the apex is a
+  Cloudflare-proxied A record, so the proxy fronts the Vercel and Fly
+  origins and the origin behind the proxy is not recorded in this
+  repository. The per-hostname entries are CNAMEs to the provider host named
+  in the **CNAME target** column below, created at the Cloudflare DNS
+  provider: `cname.vercel-dns.com` for the two Vercel frontends, and the
+  `<app>.fly.dev` host for each Fly app.
 - The **CNAME target** column is the matrix's `cnameTargets.production`
   contract value, not an observed live value: `cname.vercel-dns.com` for the
   two Vercel frontends, and the `<app>.fly.dev` host for each Fly app. The
