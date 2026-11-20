@@ -64,15 +64,21 @@ A second, **read-scoped** operator credential closes that gap.
   reminder belongs in `brain/ops/runbooks.md` (cross-link to be added
   when that reminder is formalised).
 
-### Secret storage (one store, stated once)
+### Secret storage (stated once)
 
-Live hosted-observability credentials live in
+Live hosted-observability **provisioning** credentials live in
 **`infra/cloud/observability/.env.local`** — a gitignored file at the
 root of the observability directory. The redacted template is
 `infra/cloud/observability/env/.env.example`, and
 `bootstrap-observability.sh` reads `.env.local` for its one-time
 provisioning run. This is the repo convention documented in
 `infra/cloud/observability/README.md`.
+
+The read-scoped reader token is the one deliberate exception: it is
+exported into the operator's environment and is **not** written to
+`.env.local`, so the write-scoped and the read-scoped credential never
+share a store — see "Where it lives" above and
+`docs/runbooks/production-cloud-cutover.md` §0.1.
 
 Two other stores exist but are **not** where these keys go:
 
@@ -240,15 +246,17 @@ most of the risk cheaply.
 
 ### 2. Secret rotation and scoping
 
-Every secret in the hosted observability stack is purpose-scoped and
-lives in `infra/cloud/observability/.env.local` (gitignored) until
+Every secret in the hosted observability stack is purpose-scoped. Most
+live in `infra/cloud/observability/.env.local` (gitignored) until
 `bootstrap-observability.sh secrets` distributes the runtime copies to
-Fly app secrets:
+Fly app secrets; the read-scoped reader token is the exception — it is
+exported into the operator's environment and is not stored in
+`.env.local` (see "Where it lives" above):
 
 | Secret | Scope | Rotated via | Rotation |
 | --- | --- | --- | --- |
 | `GRAFANA_CLOUD_PROVISIONING_AUTH` | Service account: datasource read + dashboard/folder/alert-rule **write** | `.env.local` → `bootstrap-observability.sh secrets` | 90 days, paired with `GRAFANA_CLOUD_READER_AUTH` |
-| `GRAFANA_CLOUD_READER_AUTH` | Service account: `Viewer` + `metrics:read`/`logs:read`/`alerts:read` only | `.env.local` (verification use only) | 90 days, paired with the provisioning token |
+| `GRAFANA_CLOUD_READER_AUTH` | Service account: `Viewer` + `metrics:read`/`logs:read`/`alerts:read` only | operator environment (re-exported on rotation; not stored in `.env.local`) | 90 days, paired with the provisioning token |
 | `GRAFANA_CLOUD_OTLP_HEADERS` | Exporter header only (`Authorization=Basic <instance:policy-token>`); ingest path | `.env.local` → Fly app secrets | 90 days |
 | `NEON_DB_DSN` (per service) | Single-database, app role | `.env.local` → Fly app secrets | 90 days, or on staff change |
 | `UPSTASH_REDIS_URL` | Single Redis DB, restricted commands | `.env.local` → Fly app secrets | 180 days |
@@ -269,7 +277,8 @@ malformed `Authorization: Authorization=Basic ***` that Grafana Cloud
 rejects with 401.
 
 `infra/cloud/observability/.env.local` is a deliberate single-host
-store for the current deployment. Once the cloud-readiness audit's
+store for the current deployment — it holds the provisioning token, not
+the read-scoped reader token. Once the cloud-readiness audit's
 multi-host / multi-region work lands, it moves to the OpenClaw secrets
 store per the audit contract (tracked under the W42 cloud-readiness
 follow-up).
