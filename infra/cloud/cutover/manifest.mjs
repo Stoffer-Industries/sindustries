@@ -47,6 +47,36 @@ export const REQUIRED_ORIGINS = ['prodlike', 'production'];
 export const REQUIRED_FINAL_PHASE = 'acceptance_pending';
 
 /**
+ * The domain every stable production hostname sits under.
+ *
+ * The stable PRODUCTION hostnames are the bare per-service names
+ * (`tasks-api.sindustries.co.nz`); the stable STAGING hostnames are the
+ * per-service names under the environment label
+ * (`tasks-api.staging.sindustries.co.nz`). See the "Stable hostname
+ * matrix" in docs/systems/cloud-platform.md.
+ */
+export const PRODUCTION_DOMAIN = 'sindustries.co.nz';
+
+/**
+ * The environment label whose stable hostnames are NOT production
+ * hostnames.
+ *
+ * A staging rehearsal targets `<service>.staging.<production domain>`,
+ * and those hosts END WITH the production domain. A plain suffix test
+ * therefore reads the rehearsal's own target as a production hostname
+ * and refuses it, which is what happened: the guard refused every real
+ * staging host, so AC4's rehearsal could not run against the staging
+ * domain at all (task 020f423e, 2026-11-20).
+ *
+ * The exemption is scoped to the label the manifest itself declares, so
+ * `notstaging.sindustries.co.nz` and `evil-staging.sindustries.co.nz`
+ * stay production hosts, and the production environment has no
+ * exemption at all: every host under the production domain is a
+ * production host.
+ */
+const ENVIRONMENT_HOST_LABEL = { staging: 'staging' };
+
+/**
  * Credential-shaped substrings that must never appear in a tracked
  * manifest. The repo is public, so a manifest that carries a DSN, a
  * token or a password is a permanent disclosure.
@@ -574,4 +604,79 @@ export function inScopeSurfaces(manifest) {
  */
 export function rollbackSurfaces(manifest) {
   return manifest.surfaces.filter((s) => s.rollbackSurface);
+}
+
+/**
+ * Whether a hostname is a PRODUCTION hostname.
+ *
+ * A host is a production host when it IS the production domain, or when
+ * it sits under the production domain and is not the environment's own
+ * labelled surface.
+ *
+ * @param {string} host a bare hostname, no port and no path
+ * @param {string} environment the manifest's declared environment
+ * @returns {boolean}
+ */
+export function isProductionHost(host, environment) {
+  if (typeof host !== 'string' || host.length === 0) {
+    return false;
+  }
+  if (host === PRODUCTION_DOMAIN) {
+    return true;
+  }
+  if (!host.endsWith('.' + PRODUCTION_DOMAIN)) {
+    return false;
+  }
+  const label = ENVIRONMENT_HOST_LABEL[environment];
+  if (!label) {
+    // No environment label: every host under the production domain is a
+    // production host.
+    return true;
+  }
+  const environmentHost = label + '.' + PRODUCTION_DOMAIN;
+  if (host === environmentHost) {
+    return false;
+  }
+  return !host.endsWith('.' + environmentHost);
+}
+
+/**
+ * The PRODUCTION hostnames a manifest names.
+ *
+ * EVERY URL the manifest declares is checked: the two surface URLs and
+ * both caller targets, because the rehearsal SWITCHES the callers. A
+ * manifest whose caller targets production while its surfaces name
+ * staging would move a live caller to production during a staging
+ * rehearsal, which is the failure the guard exists to prevent.
+ *
+ * @param {object} manifest a loaded manifest
+ * @returns {{id: string, field: string, host: string}[]}
+ */
+export function findProductionHostnames(manifest) {
+  const offenders = [];
+  const environment = manifest?.environment;
+  const record = (id, field, url) => {
+    if (typeof url !== 'string' || url.length === 0) {
+      return;
+    }
+    let host;
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      // An unparseable URL is the validator's refusal, not this one's.
+      return;
+    }
+    if (isProductionHost(host, environment)) {
+      offenders.push({ id, field, host });
+    }
+  };
+  for (const surface of manifest?.surfaces ?? []) {
+    record(surface.id, 'productionBaseUrl', surface.productionBaseUrl);
+    record(surface.id, 'prodlikeBaseUrl', surface.prodlikeBaseUrl);
+    for (const caller of surface.callers ?? []) {
+      record(caller.id, 'productionTarget', caller.productionTarget);
+      record(caller.id, 'prodlikeTarget', caller.prodlikeTarget);
+    }
+  }
+  return offenders;
 }

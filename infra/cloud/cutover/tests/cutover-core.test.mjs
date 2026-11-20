@@ -28,7 +28,9 @@ import { fileURLToPath } from 'node:url';
 
 import {
   baseUrlFor,
+  findProductionHostnames,
   inScopeSurfaces,
+  isProductionHost,
   loadManifest,
   rollbackSurfaces,
   validateManifest,
@@ -97,6 +99,47 @@ function assertRefused(manifest, expected) {
     },
     'the manifest should have been refused',
   );
+}
+
+/**
+ * The stable STAGING hostname for a stable production hostname.
+ *
+ * @param {string} url
+ * @returns {string} the same URL with the stable staging hostname
+ */
+function toStagingUrl(url) {
+  const match = /^([a-z0-9-]+)\.sindustries\.co\.nz$/.exec(new URL(url).hostname);
+  if (!match) {
+    return url;
+  }
+  return url.replace(match[0], `${match[1]}.staging.sindustries.co.nz`);
+}
+
+/**
+ * A staging rehearsal manifest: the example manifest with its stable
+ * production hostnames rewritten to the stable STAGING hostnames
+ * (`<service>.staging.sindustries.co.nz`) and its own task id.
+ *
+ * This is the shape the rehearsal is MEANT to run against. Before
+ * 2026-11-20 no test fed this shape to the production-hostname guard,
+ * so the guard refused every real staging host and AC4's rehearsal
+ * could not run against the staging domain at all.
+ *
+ * @returns {object}
+ */
+function stagingManifest() {
+  const manifest = exampleManifest();
+  manifest.environment = 'staging';
+  manifest.taskId = '2bce2a28-7fb2-45df-b14e-e517ec956a1f';
+  for (const surface of manifest.surfaces) {
+    surface.productionBaseUrl = toStagingUrl(surface.productionBaseUrl);
+    surface.prodlikeBaseUrl = toStagingUrl(surface.prodlikeBaseUrl);
+    for (const caller of surface.callers ?? []) {
+      caller.productionTarget = toStagingUrl(caller.productionTarget);
+      caller.prodlikeTarget = toStagingUrl(caller.prodlikeTarget);
+    }
+  }
+  return manifest;
 }
 
 // ---------------------------------------------------------------------------
@@ -659,4 +702,63 @@ test('the route state round-trips through the state file', async () => {
     pollMs: 50,
   });
   assert.equal(waited.version, 4);
+});
+
+// ---------------------------------------------------------------------------
+// The production-hostname guard
+// ---------------------------------------------------------------------------
+//
+// The guard decides whether a manifest may be rehearsed: a rehearsal
+// that could reach production is not a rehearsal. Before 2026-11-20 it
+// compared the manifest's hostnames to the production domain with a
+// plain suffix test, so it read the STABLE STAGING hostnames
+// (`<service>.staging.sindustries.co.nz`, which end with the
+// production domain) as production hostnames and refused the
+// rehearsal's own target. These tests pin the rule in both directions,
+// with real hostnames.
+
+test('the production-hostname guard reads a real staging hostname as staging', () => {
+  const manifest = stagingManifest();
+  // The fixture really does carry the stable staging hostnames.
+  const hosts = manifest.surfaces.map((surface) => new URL(surface.productionBaseUrl).hostname);
+  assert.ok(hosts.includes('tasks-api.staging.sindustries.co.nz'), hosts.join(', '));
+  assert.deepEqual(
+    findProductionHostnames(manifest),
+    [],
+    'a staging manifest names no production hostname',
+  );
+});
+
+test('the production-hostname guard names the production hostnames', () => {
+  const offenders = findProductionHostnames(exampleManifest());
+  const hosts = offenders.map((offender) => offender.host);
+  assert.ok(hosts.includes('tasks-api.sindustries.co.nz'), hosts.join(', '));
+  assert.ok(hosts.includes('mission-control.sindustries.co.nz'), hosts.join(', '));
+  assert.ok(hosts.includes('tasks.sindustries.co.nz'), hosts.join(', '));
+});
+
+test('the production domain itself is a production host', () => {
+  assert.equal(isProductionHost('sindustries.co.nz', 'staging'), true);
+  assert.equal(isProductionHost('sindustries.co.nz', 'production'), true);
+});
+
+test('a host that only looks like the staging label is still a production host', () => {
+  assert.equal(isProductionHost('notstaging.sindustries.co.nz', 'staging'), true);
+  assert.equal(isProductionHost('evil-staging.sindustries.co.nz', 'staging'), true);
+  assert.equal(isProductionHost('staging.sindustries.co.nz', 'staging'), false);
+  assert.equal(isProductionHost('tasks-api.staging.sindustries.co.nz', 'staging'), false);
+});
+
+test('the production environment has no staging exemption', () => {
+  assert.equal(isProductionHost('tasks-api.staging.sindustries.co.nz', 'production'), true);
+});
+
+test('the production-hostname guard checks the caller targets too', () => {
+  const manifest = stagingManifest();
+  manifest.surfaces[0].callers[0].productionTarget = 'https://tasks-api.sindustries.co.nz/api/v1';
+  const offenders = findProductionHostnames(manifest);
+  assert.equal(offenders.length, 1);
+  assert.equal(offenders[0].id, 'openclaw-runtime-tasks-api');
+  assert.equal(offenders[0].field, 'productionTarget');
+  assert.equal(offenders[0].host, 'tasks-api.sindustries.co.nz');
 });

@@ -59,6 +59,12 @@ CUTOVER_REDACT_MODULE="$CUTOVER_REDACT_OUTPUT"
 CUTOVER_ADAPTER="$CUTOVER_REPO_ROOT/infra/cloud/cutover/traffic-route.mjs"
 CUTOVER_MANIFEST_MODULE="$CUTOVER_REPO_ROOT/infra/cloud/cutover/manifest.mjs"
 
+# The production-hostname guard. It lives with the cutover machinery, not
+# with the operator scripts, so the harness's script-directory override
+# (CUTOVER_SCRIPTS_DIR_OVERRIDE) cannot make the guard disappear.
+# shellcheck disable=SC2034 # consumed by scripts that source this file
+CUTOVER_HOSTNAME_CHECKER="$CUTOVER_REPO_ROOT/infra/cloud/cutover/check-production-hostnames.mjs"
+
 # The abort-threshold evaluator. It owns the MEANING of the manifest's
 # run.abortThresholds, so the executor and the tests cannot drift apart
 # on what "errorRate" or "p95LatencyMs" means. The module lives at

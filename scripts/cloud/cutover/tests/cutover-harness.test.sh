@@ -40,7 +40,9 @@ if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
 fi
 
 CUTOVER_DIR="$REPO_ROOT/scripts/cloud/cutover"
+CUTOVER_MODULE_DIR="$REPO_ROOT/infra/cloud/cutover"
 ADAPTER="$REPO_ROOT/infra/cloud/cutover/traffic-route.mjs"
+HOSTNAME_CHECKER="$REPO_ROOT/infra/cloud/cutover/check-production-hostnames.mjs"
 EXAMPLE="$REPO_ROOT/infra/cloud/cutover/production-manifest.example.json"
 
 # A short probe timeout and a short Tasks API timeout: the gates under
@@ -91,6 +93,22 @@ for script in "$CUTOVER_DIR"/*.sh "$REPO_ROOT/infra/cloud/bin/traffic-route"; do
   else
     printf 'FAIL %s does not parse\n' "$(basename "$script")"
     bash -n "$script" 2>&1 | sed 's/^/       /'
+    parse_failures=$((parse_failures + 1))
+  fi
+done
+
+# The node helpers in the harness are parsed the same way: a helper with
+# a syntax error exits non-zero too, so it would look exactly like a
+# refusal.
+for module in "$CUTOVER_DIR"/*.mjs "$CUTOVER_MODULE_DIR"/*.mjs; do
+  # An unmatched glob arrives as the pattern itself. Skip it rather
+  # than handing a literal path to node.
+  [[ -f "$module" ]] || continue
+  if node --check "$module" 2>/dev/null; then
+    printf 'ok   %s parses\n' "$(basename "$module")"
+  else
+    printf 'FAIL %s does not parse\n' "$(basename "$module")"
+    node --check "$module" 2>&1 | sed 's/^/       /'
     parse_failures=$((parse_failures + 1))
   fi
 done
@@ -157,6 +175,58 @@ expect_pass() {
 # ---------------------------------------------------------------------------
 expect_fail "the rehearsal refuses a production manifest" 2 "the rehearsal refuses environment" \
   bash "$CUTOVER_DIR/rehearse.sh" --manifest "$EXAMPLE"
+
+# ---------------------------------------------------------------------------
+# The production-hostname guard must not refuse its own target
+# ---------------------------------------------------------------------------
+#
+# A staging rehearsal targets the stable STAGING hostnames
+# (`<service>.staging.sindustries.co.nz`). Those hosts END WITH the
+# production domain, so a plain suffix test reads the rehearsal's own
+# target as a production hostname and refuses it: on 2026-11-20 that
+# made AC4's rehearsal impossible to run against the real staging
+# domain, and no test fed the guard a staging-shaped host, so CI never
+# caught it.
+#
+# Both halves of the rule are asserted here with REAL hostnames: the
+# guard accepts the staging surface, and it still refuses production.
+STAGING_HOST_MANIFEST="$WORK_DIR/staging-host-manifest.json"
+node -e "
+  const fs = require('node:fs');
+  const manifest = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  const toStaging = (url) => {
+    const match = /^([a-z0-9-]+)\.sindustries\.co\.nz\$/.exec(new URL(url).hostname);
+    return match ? url.replace(match[0], match[1] + '.staging.sindustries.co.nz') : url;
+  };
+  manifest.environment = 'staging';
+  manifest.taskId = '2bce2a28-7fb2-45df-b14e-e517ec956a1f';
+  for (const surface of manifest.surfaces) {
+    surface.productionBaseUrl = toStaging(surface.productionBaseUrl);
+    surface.prodlikeBaseUrl = toStaging(surface.prodlikeBaseUrl);
+    for (const caller of surface.callers ?? []) {
+      caller.productionTarget = toStaging(caller.productionTarget);
+      caller.prodlikeTarget = toStaging(caller.prodlikeTarget);
+    }
+  }
+  fs.writeFileSync(process.argv[2], JSON.stringify(manifest, null, 2));
+" "$EXAMPLE" "$STAGING_HOST_MANIFEST"
+
+expect_pass "the production-hostname guard accepts a real staging hostname" \
+  node "$HOSTNAME_CHECKER" "$STAGING_HOST_MANIFEST"
+
+expect_fail "the production-hostname guard still refuses a production hostname" 1 "the rehearsal refuses production hostnames" \
+  node "$HOSTNAME_CHECKER" "$EXAMPLE"
+
+# The guard must live in ONE place. A suffix check restated inside
+# rehearse.sh is how this defect comes back: the rehearsal and the
+# tests would then disagree about which hosts are production.
+checks=$((checks + 1))
+if grep -q "endsWith('.' + productionHost)" "$CUTOVER_DIR/rehearse.sh"; then
+  printf 'FAIL rehearse.sh restates the production-hostname rule instead of delegating it\n'
+  failures=$((failures + 1))
+else
+  printf 'ok   rehearse.sh delegates the production-hostname guard\n'
+fi
 
 # ---------------------------------------------------------------------------
 # The preflight refuses a manifest that fails validation
@@ -636,11 +706,27 @@ STAGING_MANIFEST="$WORK_DIR/staging-manifest.json"
 node -e "
   const fs = require('node:fs');
   const manifest = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  const toStaging = (url) => {
+    const match = /^([a-z0-9-]+)\.sindustries\.co\.nz\$/.exec(new URL(url).hostname);
+    return match ? url.replace(match[0], match[1] + '.staging.sindustries.co.nz') : url;
+  };
   manifest.environment = 'staging';
   manifest.taskId = '11111111-1111-4111-8111-111111111111';
   for (const surface of manifest.surfaces) {
+    // The PROBES must fail fast and offline, so the surface points at
+    // an unreachable local port.
     const url = new URL(surface.productionBaseUrl);
     surface.productionBaseUrl = 'http://127.0.0.1:9' + (url.pathname === '/' ? '' : url.pathname);
+    // The CALLERS are switched too, so a staging manifest must not
+    // leave a caller pointing at a production hostname: the rehearsal
+    // rewrites the live caller files to the manifest's production
+    // target, so a caller left on production would be moved onto
+    // production by a staging rehearsal. The caller targets carry the
+    // stable STAGING hostnames, exactly as the operator's staging
+    // manifest does.
+    for (const caller of surface.callers ?? []) {
+      caller.productionTarget = toStaging(caller.productionTarget);
+    }
   }
   fs.writeFileSync(process.argv[2], JSON.stringify(manifest, null, 2));
 " "$EXAMPLE" "$STAGING_MANIFEST"
