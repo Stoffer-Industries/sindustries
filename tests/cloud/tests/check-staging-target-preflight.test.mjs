@@ -117,10 +117,11 @@ test('a trailing path under the platform prefix is accepted', () => {
 // ---------------------------------------------------------------------
 
 test('the checker never resolves DNS', () => {
-  // The stable staging hostnames do not resolve yet (the CNAME gap on
-  // task 5cb4a8fe). They are still valid targets, so the preflight must
-  // be a pure string check. This asserts it structurally: the module
-  // must not import a resolver at all.
+  // A stable hostname that does not resolve is still a valid target, so
+  // the preflight must be a pure string check. (The stable staging
+  // hostnames do resolve now — task 5cb4a8fe created the records — but the
+  // rule is unchanged: DNS is not this check's business.) This asserts it
+  // structurally: the module must not import a resolver at all.
   const source = readFileSync(
     join(REPO_ROOT, 'tests/cloud/scripts/check-staging-target-preflight.mjs'),
     'utf8'

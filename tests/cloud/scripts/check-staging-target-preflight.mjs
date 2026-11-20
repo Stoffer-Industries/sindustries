@@ -17,9 +17,10 @@
 // from infra/cloud/hostname-matrix.json (`stagingRoutes`), so a target is
 // only accepted if its host AND its path belong to its own surface.
 //
-// It NEVER resolves DNS. The stable staging hostnames do not resolve yet
-// (the CNAME gap on task 5cb4a8fe) and must remain valid targets, so
-// this is a pure string check on the configured value.
+// It NEVER resolves DNS. A stable hostname that does not resolve is still
+// a valid target, so this is a pure string check on the configured value.
+// (The stable staging hostnames do resolve now — task 5cb4a8fe created the
+// records — but the rule is unchanged: DNS is not this check's business.)
 //
 // Usage:
 //   node tests/cloud/scripts/check-staging-target-preflight.mjs \

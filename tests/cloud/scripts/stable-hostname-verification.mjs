@@ -857,10 +857,10 @@ async function main() {
       ? [
           {
             code: 'STABLE_HOSTNAME_DRY_RUN',
-            summary: 'Dry-run mode emits skip rows because DNS is not live in this environment. Live mode runs once Quinn registers the CNAMEs and the staging GitHub environment binds the stable hostnames.',
+            summary: 'Dry-run mode emits skip rows because it never resolves DNS. Live mode is available: task 5cb4a8fe registered the staging CNAMEs and the staging GitHub environment binds the stable hostnames (STAGING_TASKS_API_URL/BUDGET/SCHEDULER env vars).',
             owner: 'Rowan',
-            rationale: 'The matrix is in place (slice 1), CORS is wired (slice 2), deploy workflow smoke loops target the stable hostnames (slice 3). The live AC5 black-box is gated on Quinn registering the staging CNAMEs + certs + setting STAGING_TASKS_API_URL/BUDGET/SCHEDULER env vars.',
-            followUp: 'task 5cb4a8fe slice 4 + slice 5 (production-blockers list); task 020f423e production cutover.',
+            rationale: 'The matrix is in place (slice 1), CORS is wired (slice 2), deploy workflow smoke loops target the stable hostnames (slice 3). The live AC5 black-box has been run against the real staging hostnames (public-internet runner, 2026-11-15) and its result is recorded in docs/systems/cloud-platform.md; this limitation records only that THIS run probed nothing.',
+            followUp: 'task 020f423e production cutover (the production counterpart is still a Quinn manual gate).',
           },
         ]
       : [],
