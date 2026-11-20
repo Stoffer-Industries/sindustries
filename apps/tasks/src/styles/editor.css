@@ -2,7 +2,93 @@
 .task-card-editor {
   display: grid;
   gap: 12px;
+  min-width: 0;
   width: 100%;
+}
+
+/* Editor containment chain.
+   The editor is a stack of grids and flex rows inside the card. Without an
+   explicit `min-width: 0`, every one of those levels floors at its content's
+   min-content size — a select's longest option, an input's default size, a
+   header's two labels side by side — so the card ends up wider than its board
+   column and the content paints over the column edge. Each level below is
+   explicitly allowed to shrink below its content; the surfaces themselves then
+   decide how the content fits (wrapping, or scrolling inside a control). */
+.task-card-editor > *,
+.task-editor-view-card > *,
+.editor-fields,
+.editor-fields > *,
+.editor-fields .si-field > *,
+.task-card-editor input,
+.task-card-editor select,
+.task-card-editor textarea,
+.task-editor-view-card input,
+.task-editor-view-card select,
+.task-editor-view-card textarea,
+.task-editor-view-card .si-input,
+.task-editor-view-card .si-select,
+.task-editor-view-card .si-textarea,
+.task-editor-title-row,
+.description-field,
+.description-field > *,
+.description-header,
+.description-header > *,
+.editor-grid > *,
+.editor-grid .si-field > *,
+.editor-actions > *,
+.editor-primary-actions > *,
+.editor-secondary-actions > *,
+.dependencies-section > *,
+.dependencies-header,
+.dependencies-list,
+.dependency-add,
+.dependency-add > *,
+.dependency-add-row,
+.dependency-confirm,
+.attention-owners-panel > *,
+.attention-owners-panel-list,
+.attention-owners-panel-row,
+.attention-owners-panel-row > *,
+.attention-owners-panel-composer,
+.attention-owners-panel-field,
+.comment-composer,
+.comment-composer > *,
+.comments-list,
+.comment-card,
+.comment-meta {
+  min-width: 0;
+}
+
+/* A form control's intrinsic width (an input's default size, a textarea's
+   column count) would otherwise floor the grid track it sits in. Controls are
+   allowed to shrink, and never exceed the width of their container. */
+.task-card-editor input,
+.task-card-editor select,
+.task-card-editor textarea,
+.task-editor-view-card input,
+.task-editor-view-card select,
+.task-editor-view-card textarea {
+  max-width: 100%;
+}
+
+/* A section header is a two-part row (title + count/actions). In a narrow
+   column the two parts do not fit side by side, so the second part wraps onto
+   its own line instead of pushing the header past the card. */
+.dependencies-header,
+.comments-header,
+.approvals-header {
+  flex-wrap: wrap;
+}
+
+/* A section heading is a single word ("Dependencies", "Approvals"). As a flex
+   item it floors at that word's min-content width, so in a narrow column the
+   heading overflows its own header instead of shrinking. The heading may
+   shrink, and the word breaks rather than painting over the count beside it. */
+.dependencies-header h4,
+.comments-header h4,
+.approvals-header h4 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .task-card-editor .si-button {
@@ -50,6 +136,7 @@
   font-weight: 400;
   line-height: 1.4285714285714286;
   min-height: 40px;
+  min-width: 0;
   padding: var(--si-space-2) var(--si-space-3);
 }
 
@@ -71,6 +158,7 @@
 .editor-fields {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 /* Editor actions */
@@ -333,8 +421,13 @@
   align-items: center;
   display: flex;
   flex: 1 1 auto;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+  min-width: 0;
+}
+
+.comments-header-actions > * {
   min-width: 0;
 }
 
@@ -466,8 +559,15 @@
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-  word-wrap: break-word;
 }
+
+/* `word-wrap` is a legacy alias of `overflow-wrap`. Declaring it after
+   `overflow-wrap: anywhere` silently overrode it with `break-word`, which
+   does NOT reduce a box's min-content contribution — only `anywhere` does.
+   The alias is gone so `overflow-wrap: anywhere` actually applies: a body
+   carrying a long unbreakable token (a branch name, a PR URL) no longer
+   reports a min-content width of the token's full length, which is what let
+   a card's content push its column wider than the board track. */
 
 .markdown-body h1,
 .markdown-body h2,
