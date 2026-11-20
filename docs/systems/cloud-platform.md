@@ -26,7 +26,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Concern                          | Choice                                                   | Owner  | Lives in                                                      |
 | -------------------------------- | -------------------------------------------------------- | ------ | ------------------------------------------------------------- |
 | Compute                          | Fly.io (managed VMs, regional)                           | Quinn  | `infra/cloud/fly/*.fly.toml`                                  |
-| Application packaging            | Dockerfiles, per service                                 | Rowan  | `infra/cloud/docker/*.Dockerfile`                             |
+| Application packaging            | One Dockerfile builds the platform image for all four processes; the four per-service Dockerfiles are RETIRED templates | Rowan  | `infra/cloud/docker/platform.Dockerfile`                             |
 | HTTP services (tasks-api, budget-api, content-scheduler-api) | One Fly app, four child processes behind the nginx router's path-prefix routes; `http_checks` on the platform app | Rowan | `infra/cloud/fly/platform.fly.toml` (+ `infra/cloud/platform/nginx.conf.template`) |
 | Long-running worker              | Child process inside the platform app (no HTTP listener) | Rowan  | `infra/cloud/platform/platform-services.mjs`                 |
 | Primary database                 | Neon managed Postgres (syd region, branch-per-env)       | Quinn  | Neon dashboard (URLs in `infra/cloud/env/*.env.example`)      |
