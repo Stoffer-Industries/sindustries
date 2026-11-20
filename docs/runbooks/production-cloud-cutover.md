@@ -174,6 +174,8 @@ scripts/cloud/cutover/rehearse.sh --manifest /tmp/cutover-staging.json
 
 The rehearsal captures the current staging route and deployment state, canaries the cloud staging runtime, runs the same continuous probes production will use, injects a safe cloud runtime failure, invokes the **real** route adapter rollback to the prodlike target, verifies that traffic, authenticated workflows, worker leadership and signals recover, then restores the initial staging route and proves cleanup and idempotence.
 
+The rehearsal also refuses a manifest that names a **production hostname**. The stable production hostnames are the bare per-service names (`tasks-api.sindustries.co.nz`); the stable staging hostnames are the per-service names under the environment label (`tasks-api.staging.sindustries.co.nz`). Only the bare names are refused — the staging surface is the rehearsal's own target, and a host that merely resembles the staging label (`notstaging.sindustries.co.nz`) is still a production host. The guard checks the **caller** targets as well as the surface URLs, because the rehearsal rewrites the live caller files to the manifest's production target: a caller left on a production hostname would be moved onto production by a staging rehearsal. `infra/cloud/cutover/check-production-hostnames.mjs` is the one implementation of that rule, and the rehearsal and its tests both call it rather than restating it.
+
 ```bash
 # 3. Prove the prodlike fallback can be rebuilt from the accepted backup.
 scripts/cloud/cutover/verify-local-recovery.sh \

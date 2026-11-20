@@ -91,24 +91,15 @@ if [[ "$(manifest_task_id)" == "020f423e-a18d-4435-98cb-664b655f675b" ]]; then
   cutover_fail "the rehearsal refuses the PRODUCTION cutover task id — use the staging rehearsal manifest" 2
 fi
 
-if node --input-type=module -e "
-  import { loadManifest } from '${CUTOVER_MANIFEST_MODULE}';
-  const manifest = loadManifest(process.argv[1]);
-  const productionHost = 'sindustries.co.nz';
-  const offenders = [];
-  for (const surface of manifest.surfaces) {
-    for (const url of [surface.productionBaseUrl, surface.prodlikeBaseUrl]) {
-      const host = new URL(url).hostname;
-      if (host === productionHost || host.endsWith('.' + productionHost)) {
-        offenders.push(surface.id + ':' + host);
-      }
-    }
-  }
-  if (offenders.length > 0) {
-    process.stderr.write('the rehearsal refuses production hostnames: ' + offenders.join(', ') + '\n');
-    process.exit(1);
-  }
-" "$MANIFEST"; then
+# The production-hostname rule lives in ONE place
+# (infra/cloud/cutover/check-production-hostnames.mjs, with the rule
+# itself in infra/cloud/cutover/manifest.mjs), so the rehearsal and
+# the harness test cannot drift apart on which hosts count as
+# production. The rule is NOT a plain suffix test: the stable staging
+# hostnames (`<service>.staging.sindustries.co.nz`) end with the
+# production domain, and refusing them made this rehearsal impossible
+# to run against the staging domain at all.
+if node "$CUTOVER_HOSTNAME_CHECKER" "$MANIFEST"; then
   cutover_info "the staging manifest names no production hostname"
 else
   cutover_fail "the rehearsal refuses a manifest that names a production hostname" 2
