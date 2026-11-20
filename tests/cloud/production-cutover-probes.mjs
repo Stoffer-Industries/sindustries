@@ -480,7 +480,7 @@ export async function checkHostedSignals(manifest) {
       ok: false,
       skipped: true,
       detail:
-        'no hosted observability credential in the environment — set GRAFANA_CLOUD_READER_AUTH (the read-scoped credential from infra/cloud/observability/.env.local) or CUTOVER_OBSERVABILITY_TOKEN; an unobserved signal is not a healthy signal',
+        'no hosted observability credential in the environment — set GRAFANA_CLOUD_READER_AUTH (the read-scoped service-account token, provisioned separately from the provisioning token) or CUTOVER_OBSERVABILITY_TOKEN; an unobserved signal is not a healthy signal',
     };
   }
 

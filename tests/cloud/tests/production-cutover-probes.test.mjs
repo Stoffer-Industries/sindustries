@@ -254,3 +254,27 @@ test('the hosted signals probe sends the read-scoped credential as a single Bear
   );
   assert.doesNotMatch(JSON.stringify(result), /reader-scoped-secret/);
 });
+
+test('the hosted signals probe names the missing credential without pointing at the provisioning store', async () => {
+  const baseUrl = await startSignalsServer('signals-no-credential', []);
+  process.env.GRAFANA_CLOUD_INSTANCE_URL = baseUrl;
+  delete process.env.GRAFANA_CLOUD_READER_AUTH;
+  delete process.env.CUTOVER_OBSERVABILITY_TOKEN;
+
+  const result = await checkHostedSignals(signalsManifest);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.skipped, true);
+  assert.match(result.detail, /GRAFANA_CLOUD_READER_AUTH/);
+  // The read-scoped credential is a separate service account from the
+  // provisioning one; `.env.local` carries the provisioning token only,
+  // so pointing an operator there sends them looking for a token that
+  // was never there.
+  assert.doesNotMatch(
+    result.detail,
+    /\.env\.local/,
+    'the missing-credential message must not point at the provisioning store',
+  );
+
+  delete process.env.GRAFANA_CLOUD_INSTANCE_URL;
+});
