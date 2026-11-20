@@ -282,6 +282,48 @@ for evidence_name in $(required_evidence); do
 done
 
 # ---------------------------------------------------------------------------
+# Gate: the hosted-observability read credential is present and read-scoped
+# ---------------------------------------------------------------------------
+#
+# The hosted-signals probe reads the active alert count from the hosted
+# Grafana stack, and it fails closed: with no credential there is no
+# signal, and an unobserved signal is not a healthy signal. So a
+# missing credential already stops the window — but it stops it inside
+# the HEALTH gate, where the result reads "the probes do not report
+# production healthy". An operator reading that looks at the service
+# first and the environment second, and the actual defect is a
+# credential nobody provisioned. This gate names the credential.
+#
+# It also refuses the substitution the runbook forbids. The
+# provisioning token can write dashboards and delete alert rules, so it
+# must never be the credential the window observes production with,
+# and it must never reach the window's evidence. The two tokens are
+# separate service accounts; the only way they can collide is an
+# operator exporting one as the other under time pressure, which is
+# exactly what this gate is here to catch.
+#
+# The variable precedence mirrors the probe exactly
+# (tests/cloud/production-cutover-probes.mjs), so the gate refuses
+# precisely when the probe would. The credential is never printed.
+hosted_observability_base="${CUTOVER_OBSERVABILITY_BASE_URL:-${GRAFANA_CLOUD_INSTANCE_URL:-}}"
+hosted_observability_credential="${CUTOVER_OBSERVABILITY_TOKEN:-${GRAFANA_CLOUD_READER_AUTH:-}}"
+hosted_observability_provisioning="${GRAFANA_CLOUD_PROVISIONING_AUTH:-}"
+
+if [[ -z "${hosted_observability_base// /}" ]]; then
+  record_gate "hosted-observability-credential" "fail" \
+    "no hosted observability endpoint in the environment — set GRAFANA_CLOUD_INSTANCE_URL (the hosted stack base URL) or CUTOVER_OBSERVABILITY_BASE_URL; an unobserved signal is not a healthy signal"
+elif [[ -z "${hosted_observability_credential// /}" ]]; then
+  record_gate "hosted-observability-credential" "fail" \
+    "no hosted observability credential in the environment — set GRAFANA_CLOUD_READER_AUTH (the read-scoped service-account token, provisioned separately from the provisioning token) or CUTOVER_OBSERVABILITY_TOKEN; an unobserved signal is not a healthy signal"
+elif [[ -n "${hosted_observability_provisioning// /}" && "${hosted_observability_credential}" == "${hosted_observability_provisioning}" ]]; then
+  record_gate "hosted-observability-credential" "fail" \
+    "the hosted-observability credential is the provisioning token — the window must be observed with the read-scoped token; the provisioning credential can write dashboards and delete alert rules and must not stand in for it"
+else
+  record_gate "hosted-observability-credential" "pass" \
+    "hosted observability read credential present and distinct from the provisioning token"
+fi
+
+# ---------------------------------------------------------------------------
 # Gate: the services are healthy on both origins
 # ---------------------------------------------------------------------------
 #

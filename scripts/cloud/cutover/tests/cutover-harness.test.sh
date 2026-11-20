@@ -350,6 +350,79 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# The preflight names the hosted-observability credential it is missing
+# ---------------------------------------------------------------------------
+#
+# The hosted-signals probe fails closed without a read-scoped credential,
+# so the window already stops — but it stops inside the HEALTH gate,
+# where the result reads "the probes do not report production healthy".
+# That sends the operator to the service instead of to the environment,
+# and the actual defect is a credential nobody provisioned.
+#
+# The gate must therefore name the credential, and it must refuse the
+# one substitution the runbook forbids: the provisioning token standing
+# in for the read-scoped credential. The provisioning token can write
+# dashboards and delete alert rules; it must never be the credential the
+# window observes production with.
+expect_observability_gate() {
+  # expect_observability_gate <name> <expected-status: pass|fail> <expected-reason> <command...>
+  local name="$1" expected_status="$2" expected_reason="$3"
+  shift 3
+  checks=$((checks + 1))
+  local output status
+  set +e
+  output="$("$@" 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    printf 'FAIL %s — the plan report exited %s\n' "$name" "$status"
+    failures=$((failures + 1))
+    return
+  fi
+  if ! printf '%s' "$output" | grep -qF "gate ${expected_status}: hosted-observability-credential"; then
+    printf 'FAIL %s — no "gate %s: hosted-observability-credential" line\n' "$name" "$expected_status"
+    printf '%s\n' "$output" | grep -i "hosted-observability" | tail -n 2 | sed 's/^/       /'
+    failures=$((failures + 1))
+    return
+  fi
+  if [[ -n "$expected_reason" ]] && ! printf '%s' "$output" | grep -qF "$expected_reason"; then
+    printf 'FAIL %s — the gate did not name "%s"\n' "$name" "$expected_reason"
+    printf '%s\n' "$output" | grep -i "hosted-observability" | tail -n 2 | sed 's/^/       /'
+    failures=$((failures + 1))
+    return
+  fi
+  printf 'ok   %s\n' "$name"
+}
+
+expect_observability_gate "the preflight names a missing hosted-observability endpoint" "FAIL" \
+  "set GRAFANA_CLOUD_INSTANCE_URL" \
+  env -u GRAFANA_CLOUD_INSTANCE_URL -u GRAFANA_CLOUD_READER_AUTH \
+      -u CUTOVER_OBSERVABILITY_BASE_URL -u CUTOVER_OBSERVABILITY_TOKEN \
+      -u GRAFANA_CLOUD_PROVISIONING_AUTH \
+      bash "$CUTOVER_DIR/preflight.sh" --manifest "$EXAMPLE" --plan
+
+expect_observability_gate "the preflight names a missing hosted-observability credential" "FAIL" \
+  "set GRAFANA_CLOUD_READER_AUTH" \
+  env -u GRAFANA_CLOUD_READER_AUTH -u CUTOVER_OBSERVABILITY_TOKEN \
+      -u CUTOVER_OBSERVABILITY_BASE_URL -u GRAFANA_CLOUD_PROVISIONING_AUTH \
+      GRAFANA_CLOUD_INSTANCE_URL="https://sindustries.grafana.net" \
+      bash "$CUTOVER_DIR/preflight.sh" --manifest "$EXAMPLE" --plan
+
+expect_observability_gate "the preflight refuses the provisioning token standing in for the read-scoped credential" "FAIL" \
+  "the hosted-observability credential is the provisioning token" \
+  env GRAFANA_CLOUD_INSTANCE_URL="https://sindustries.grafana.net" \
+      GRAFANA_CLOUD_READER_AUTH="Bearer shared-token-value" \
+      GRAFANA_CLOUD_PROVISIONING_AUTH="Bearer shared-token-value" \
+      bash "$CUTOVER_DIR/preflight.sh" --manifest "$EXAMPLE" --plan
+
+expect_observability_gate "the preflight accepts a distinct read-scoped credential" "pass" \
+  "read credential present and distinct from the provisioning token" \
+  env GRAFANA_CLOUD_INSTANCE_URL="https://sindustries.grafana.net" \
+      GRAFANA_CLOUD_READER_AUTH="Bearer reader-token-value" \
+      GRAFANA_CLOUD_PROVISIONING_AUTH="Bearer provisioning-token-value" \
+      bash "$CUTOVER_DIR/preflight.sh" --manifest "$EXAMPLE" --plan
+
+# ---------------------------------------------------------------------------
 # Durable state and resume gates fail closed
 # ---------------------------------------------------------------------------
 expect_fail "an unreadable state file is not treated as a fresh window" 2 "cannot be read as a state document" \
