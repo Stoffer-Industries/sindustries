@@ -35,11 +35,21 @@ A second, **read-scoped** operator credential closes that gap.
 - **Type:** Grafana Cloud service-account token, `Viewer` role, scoped
   to `metrics:read`, `logs:read`, and `alerts:read`. Not a
   provisioning token.
-- **Where it lives:** `infra/cloud/observability/.env.local` (the
-  gitignored repo-local store — see "Secret storage" below) as
-  `GRAFANA_CLOUD_READER_AUTH`. It is deliberately a different env-var
-  name from `GRAFANA_CLOUD_PROVISIONING_AUTH` so the two cannot be
-  substituted for each other by accident.
+- **Where it lives:** it is deliberately a different env-var name from
+  `GRAFANA_CLOUD_PROVISIONING_AUTH` so the two cannot be substituted
+  for each other by accident. The **provisioning** token lives in
+  `infra/cloud/observability/.env.local` (the gitignored repo-local
+  store — see "Secret storage" below). The **read-scoped** token is a
+  separate service account, and its value is exported into the
+  operator's environment — it is deliberately *not* written to
+  `.env.local`, so the write-scoped credential and the read-scoped one
+  do not share a store.
+- **Not provisioned yet.** As of 2026-11-20 no `GRAFANA_CLOUD_READER_AUTH`
+  exists on the operator host; `.env.local` carries
+  `GRAFANA_CLOUD_PROVISIONING_AUTH` and nothing else. Until Tom
+  provisions the service account, the production cutover window fails
+  closed at P13 rather than observing with the provisioning token — see
+  `docs/runbooks/production-cloud-cutover.md` §0.1.
 - **Why two tokens:** rotating, revoking, or scoping down the
   read-scoped token does not affect provisioning, and revoking the
   provisioning token does not blind the operator from incident
@@ -47,8 +57,8 @@ A second, **read-scoped** operator credential closes that gap.
 - **Authorisation:** Tom provisions the service account under
   **Grafana Cloud → Users and access → Service accounts**, granting
   Viewer plus the three read scopes, with a 90-day expiry. The token
-  value is written into `.env.local` once and never printed outside
-  that file.
+  value is exported into the operator's environment once and never
+  printed outside it.
 - **Rotation cadence:** every 90 days, on the same calendar as the
   provisioning token so both roll together. A `[grafana-token-rotation]`
   reminder belongs in `brain/ops/runbooks.md` (cross-link to be added
