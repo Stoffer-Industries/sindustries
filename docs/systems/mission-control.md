@@ -203,16 +203,21 @@ URL pair is stable.
   `VITE_TASKS_API_BASE_URL` and `VITE_SHELL_ORIGIN`. These are public URLs,
   never secrets.
 - **Current staging aliases (deployed 2026-09-08):**
-  `https://sindustries-mission-control-staging.vercel.app` <!-- stable-fallback: documented-migration; superseded by https://mission-control.staging.sindustries.co.nz once the stable Vercel domain lands (task 5cb4a8fe) -->
+  `https://sindustries-mission-control-staging.vercel.app` <!-- stable-fallback: documented-migration; superseded by https://mission-control.staging.sindustries.co.nz — the stable Vercel domain is live (bound and certificate verified 2026-11-13, re-verified live 2026-11-20, task 5cb4a8fe) -->
   and
-  `https://sindustries-tasks-app-staging.vercel.app` <!-- stable-fallback: documented-migration; superseded by https://tasks.staging.sindustries.co.nz once the stable Vercel domain lands (task 5cb4a8fe) -->. Root documents, SPA
+  `https://sindustries-tasks-app-staging.vercel.app` <!-- stable-fallback: documented-migration; superseded by https://tasks.staging.sindustries.co.nz — the stable Vercel domain is live (bound and certificate verified 2026-11-13, re-verified live 2026-11-20, task 5cb4a8fe) -->. Root documents, SPA
   routes, and hashed assets have been smoke-tested at HTTP 200. A second
   Mission Control release was deployed and rolled back successfully to prove
   the provider rollback path.
-- **Current blocker:** the staging Tasks API hostname is not live, so frontend
-  hosting is healthy but authenticated end-to-end task workflows are not yet
-  validated. Vercel's GitHub integration also lacks access to the private
-  repository, leaving deploys CLI-triggered until that access is granted.
+- **Current blocker:** Vercel's GitHub integration lacks access to the private
+  repository, leaving frontend deploys CLI-triggered until that access is
+  granted. The staging hostnames themselves are live: the three stable API
+  hostnames (`tasks-api`, `budget-api`, `content-scheduler-api`) each resolve
+  to the consolidated platform app and answer HTTP 200 on `/health`
+  (re-verified live 2026-11-20), and the representative authenticated staging
+  workflow passed through `tasks-api.staging.sindustries.co.nz` in the
+  2026-11-15 staging-validation run (`verdict: pass`, 15/15 checks). See
+  `docs/systems/cloud-platform.md` for the full AC5 staging evidence.
 - **Production cutover** is a separate workstream (task `020f423e`,
   spec `brain/tasks/specs/in-progress/sindustries-cloud-migration.md`).
   This ADR only commits to the staging shape; production decisions
