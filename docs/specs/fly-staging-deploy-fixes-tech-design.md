@@ -12,6 +12,8 @@ shipped_date: null
 
 **This task:** fix those three issues plus the integration test (AC4). Code task, not feature — no product spec. The design doc lives at `docs/specs/fly-staging-deploy-fixes-tech-design.md` so the canary surface is reviewable in one place.
 
+**Superseded as an operator runbook (2026-11-07 staging consolidation; verified live 2026-11-21).** This is a design-time document. The three fixes it specifies shipped in the WS1 stack (PRs #514, #527, #528, #529, #530), and the canary topology it describes no longer exists: the four per-service staging Fly apps this design deploys to were destroyed at the consolidation (task `219fb673`), and staging now runs ONE consolidated platform app (`sindustries-platform-staging`) carrying all four services as supervisor children behind the in-container nginx router. The AC4 smoke steps below are kept as the record of how the canary was verified at design time; they are not the live staging procedure. The live staging deploy path, the live health URLs and the live rollback path are recorded in `docs/systems/cloud-platform.md`, and the live hostname mapping is `infra/cloud/hostname-matrix.json`. The original design text is preserved rather than rewritten, so its history stays readable — the same pattern PR #1054 applied to the consolidation design and PR #1056 to the stable-hostname design.
+
 ## Repository
 
 - **Repo:** `Stoffer-Industries/sindustries`
@@ -24,8 +26,8 @@ shipped_date: null
 This is purely a deployment-artifact repair; no service-ownership change, no API contract change, no schema change, no new dependency. The three fixes all land inside the `infra/cloud/` directory and root `package.json`. Direct consumers:
 
 - `infra/cloud/scripts/bootstrap-staging.sh` — Quinn-owned runbook script (operational, not service code).
-- `infra/cloud/fly/{tasks-api,budget-api,auto-post-worker}.fly.toml` — Fly app specs; consumed by `fly deploy --config …` and by the GitHub Actions deploy workflows in `.github/workflows/deploy-staging-*.yml`.
-- `infra/cloud/docker/{tasks-api,budget-api,auto-post-worker}.Dockerfile` — Fly build inputs; consumed by Fly at image build time.
+- `infra/cloud/fly/{tasks-api,budget-api,auto-post-worker}.fly.toml` — Fly app specs; consumed by `fly deploy --config …` and by the GitHub Actions deploy workflows in `.github/workflows/deploy-staging-*.yml`. **Superseded (2026-11-07 consolidation; verified live 2026-11-21):** these specs configure apps that were destroyed at the cutover, so no operator surface consumes them any more — each file now carries a RETIRED banner, `infra/cloud/bin/deploy` and `infra/cloud/bin/rollback` resolve every service name to `infra/cloud/fly/platform.fly.toml`, and the four `deploy-staging-*.yml` workflows are `workflow_call`-only with no caller. The live staging deploy path is `infra/cloud/fly/platform.fly.toml` via `.github/workflows/deploy-staging-platform.yml`.
+- `infra/cloud/docker/{tasks-api,budget-api,auto-post-worker}.Dockerfile` — Fly build inputs; consumed by Fly at image build time. **Superseded (2026-11-07 consolidation; verified live 2026-11-21):** the live staging image is the single `infra/cloud/docker/platform.Dockerfile`, which builds the platform image for all four processes; these templates (with the content-scheduler one) are retained as historical templates only, and no operator surface can build them any more.
 - `package.json` (repo root) — the source of truth for the `packageManager` field that pins pnpm for both local dev and the Docker build (see AC3 below).
 
 No extraction or migration is involved. This task does not move code between workspaces.
@@ -113,6 +115,8 @@ This task ships no automated test for AC4 — it is a Quinn-owned live operation
 5. Optional: same for `budget-api.fly.toml` (HTTP 200 on `/health`).
 6. `auto-post-worker.fly.toml` has no `[http_service]` — AC4 explicitly only verifies tasks-api.
 
+**Superseded (2026-11-07 consolidation; verified live 2026-11-21).** Steps 2–6 are the design-time canary, kept as the record of how AC4 was verified; they do not describe staging today. The four per-service staging apps they target were destroyed at the cutover (task `219fb673`), so step 3 would deploy a retired spec and step 4 would curl a host with no app behind it — verified live 2026-11-21, `sindustries-tasks-api-staging.fly.dev` answers HTTP 502. `bootstrap-staging.sh` now applies every secret to the one consolidated app (`sindustries-platform-staging`) and refuses to create any per-service app. The live equivalent of steps 3–5 is `infra/cloud/bin/deploy`, which resolves every service name to `infra/cloud/fly/platform.fly.toml` and smoke-checks the platform host's path-prefix routes; the live health URLs are `https://<service>.staging.sindustries.co.nz/health` — verified live 2026-11-21, all three answer HTTP 200, with `https://sindustries-platform-staging.fly.dev/<service>/health` as the documented provider-host fallback. The auto-post worker still has no `[http_service]` and no public URL of its own; its health is read on the content-scheduler-api surface.
+
 PR body documents each step with the expected stdout so Quinn's run is unambiguous. Rowan's `[implementer-prs]` task comment will reference the runbook so Quinn can rerun on demand.
 
 ## AC verification matrix
@@ -127,6 +131,8 @@ PR body documents each step with the expected stdout so Quinn's run is unambiguo
 | AC4 | **Live smoke (Quinn-run)** | `bash infra/cloud/scripts/bootstrap-staging.sh --yes && fly deploy --config infra/cloud/fly/tasks-api.fly.toml && curl -fsS https://sindustries-tasks-api-staging.fly.dev/health` returns HTTP 200.       | Rowan does not execute this — Quinn's staging credentials required.                                                                                                  |
 
 The two shell unit tests (`test-bootstrap-staging-cli-form.sh` + `test-dockerfile-pnpm-pin.sh`) live under `infra/cloud/scripts/test-*.sh` and run in CI via the existing `shellcheck` + a new tiny shell-test workflow (or extend an existing one — will check during PR composition). They are stub-based, no live Fly / Docker daemon required, and complete in seconds.
+
+**AC4 note (superseded 2026-11-07 consolidation; verified live 2026-11-21).** The AC4 live-smoke command in the matrix above deploys and curls the per-service staging app, which was destroyed at the cutover — the retired host answers HTTP 502. The live equivalent is `infra/cloud/bin/deploy` (resolves every service name to `infra/cloud/fly/platform.fly.toml`) smoke-checking the platform host's path-prefix routes, with the stable hostnames live at `https://<service>.staging.sindustries.co.nz/health` (HTTP 200 on all three, verified live 2026-11-21). The row is kept as the record of how the canary was verified at design time; no verification method changed.
 
 ## PR stack and review surface
 
