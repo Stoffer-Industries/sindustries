@@ -133,7 +133,7 @@ existing_objects="$(
     --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
     --dbname="$DEST_DSN" \
-    --command="SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('tasks_api','budget_api','public');"
+    --command="SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('tasks_api','content_scheduler','public');"
 )"
 if [[ "${existing_objects// /}" != "0" ]]; then
   cloud_db_die \
@@ -142,11 +142,11 @@ fi
 
 # Table count is not the same as freshness. The archive is a
 # custom-format dump (`pg_dump --format=custom`) whose TOC carries
-# `tasks_api` and `budget_api` as SCHEMA entries, so pg_restore
+# `tasks_api` and `content_scheduler` as SCHEMA entries, so pg_restore
 # issues `CREATE SCHEMA <name>;` for each before any table DDL.
 # A destination where either schema EXISTS is therefore
 # incompatible with the archive even when it holds zero tables --
-# pg_restore dies on `schema "budget_api" already exists` and takes
+# pg_restore dies on `schema "content_scheduler" already exists` and takes
 # the whole drill with it.
 #
 # A prior failed restore lands in exactly that state: restore.sh
@@ -158,7 +158,7 @@ existing_schemas="$(
     --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
     --dbname="$DEST_DSN" \
-    --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','budget_api');" \
+    --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','content_scheduler');" \
   2>/dev/null | tr -d '[:space:]'
 )"
 if [[ -n "${existing_schemas:-}" ]]; then
@@ -229,12 +229,12 @@ restored_schemas="$(
     --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
     --dbname="$DEST_DSN" \
-    --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','budget_api');"
+    --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','content_scheduler');"
 )"
 
-if [[ -z "$restored_schemas" || "$restored_schemas" != *"tasks_api"* || "$restored_schemas" != *"budget_api"* ]]; then
+if [[ -z "$restored_schemas" || "$restored_schemas" != *"tasks_api"* || "$restored_schemas" != *"content_scheduler"* ]]; then
   cloud_db_die \
-    "post-restore schema check failed; expected both tasks_api and budget_api, got '$restored_schemas'"
+    "post-restore schema check failed; expected both tasks_api and content_scheduler, got '$restored_schemas'"
 fi
 
 # ---------------------------------------------------------------------------

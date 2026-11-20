@@ -18,7 +18,7 @@
 //   5. An Environment whose admins may bypass the gate fails.
 //   6. An unreadable GitHub provider fails.
 //   7. An unreadable approval gate fails.
-//   8. A Neon project with too few databases fails and names the shortfall.
+//   8. A Neon project serving no database fails, and ONE database is enough.
 //   9. An unreadable Neon provider fails.
 //   10. An incomplete Neon inventory fails rather than counting a lower bound.
 //  11. The checker's secret list matches the workflow's secret reads.
@@ -167,27 +167,50 @@ test('an unreadable approval gate fails', () => {
   assert.match(gate.reason, /could not be read/i);
 });
 
-test('a Neon project with too few databases fails and names the shortfall', () => {
-  // The live production project served ONE database on 2026-11-19: the
-  // source. The cutover needs three distinct databases — the source, a
-  // destination that is empty before the restore, and a recovery database
-  // to reconcile against. A secret can be registered against a database
-  // that does not exist, and the workflow's secret check would pass it,
-  // so the shortfall has to be caught here or the cutover fails at the
+test('a Neon project serving no database fails — the destination must exist', () => {
+  // The destination is the EXISTING production Neon database (Tom's
+  // 2026-11-19 execution decision): no new permanent production
+  // database is created for this cutover. If the production environment
+  // serves no database at all, the destination DSNs cannot point at one
+  // that exists — a secret can be registered against a database that
+  // does not exist, and the workflow's secret check would pass it, so
+  // the shortfall has to be caught here or the cutover fails at the
   // RESTORE — after the dump, with the source already quiesced.
   const state = loadFixture();
-  state.providers.neon.project.databaseCount = 1;
+  state.providers.neon.project.databaseCount = 0;
 
   const { ok, rows } = evaluateCutoverReadiness(state);
   assert.equal(ok, false);
-  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  const gate = gateFor(rows, 'neon.cutover-destination-database');
   assert.equal(gate.status, 'unmet');
-  assert.match(gate.reason, /1 distinct database\(s\)/);
-  assert.match(gate.reason, /2 more database\(s\) must be created/);
+  assert.match(gate.reason, /0 distinct database\(s\)/);
+  assert.match(gate.reason, /EXISTING production database/);
   // The reason names what does NOT count as a database, because the
   // operator's obvious move — scaling out read replicas of the branch
   // that is already there — would add addresses, not databases.
   assert.match(gate.reason, /read replica/i);
+});
+
+test('ONE existing production database is enough — the three-database rule is obsolete', () => {
+  // The live production project served ONE database on 2026-11-19. Under
+  // the old topology that was a shortfall (three distinct databases were
+  // demanded). Under the current topology the destination IS that one
+  // existing database and the recovery target is temporary, so ONE
+  // database is exactly what the cutover needs. This case pins that, so
+  // the obsolete three-database rule cannot creep back in.
+  const state = loadFixture();
+  state.providers.neon.project.databaseCount = 1;
+
+  const { ok, rows } = evaluateCutoverReadiness(state);
+  assert.equal(ok, true);
+  const gate = gateFor(rows, 'neon.cutover-destination-database');
+  assert.equal(gate.status, 'met');
+  assert.match(gate.reason, /1 distinct database\(s\)/);
+  assert.match(gate.reason, /No new permanent production database is created/);
+  // The recovery target is temporary and isolated, and its isolation is
+  // enforced in code at dispatch — the gate says so rather than implying
+  // it proved it.
+  assert.match(gate.reason, /recovery target is a temporary isolated database/);
 });
 
 test('an unreadable Neon provider fails rather than passing vacuously', () => {
@@ -196,7 +219,7 @@ test('an unreadable Neon provider fails rather than passing vacuously', () => {
 
   const { ok, rows } = evaluateCutoverReadiness(state);
   assert.equal(ok, false);
-  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  const gate = gateFor(rows, 'neon.cutover-destination-database');
   assert.equal(gate.status, 'unmet');
   assert.match(gate.reason, /could not be read/i);
 });
@@ -211,7 +234,7 @@ test('an incomplete Neon inventory fails rather than counting a lower bound', ()
 
   const { ok, rows } = evaluateCutoverReadiness(state);
   assert.equal(ok, false);
-  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  const gate = gateFor(rows, 'neon.cutover-destination-database');
   assert.equal(gate.status, 'unmet');
   assert.match(gate.reason, /LOWER BOUND/);
 });
@@ -228,7 +251,7 @@ test('an artifact captured under the endpoint-host schema cannot answer the gate
 
   const { ok, rows } = evaluateCutoverReadiness(state);
   assert.equal(ok, false);
-  const gate = gateFor(rows, 'neon.cutover-database-capacity');
+  const gate = gateFor(rows, 'neon.cutover-destination-database');
   assert.equal(gate.status, 'unmet');
   assert.match(gate.reason, /schema version 12/);
   assert.match(gate.reason, /ENDPOINT HOSTS/);

@@ -34,13 +34,19 @@
 // REGISTERED against a database that does not exist: the workflow's
 // secret check asks only whether the secret is non-empty, so a DSN
 // pointing at a database that was never created passes it and fails at
-// the RESTORE — after the dump, with the source already quiesced. The
-// cutover also needs three DISTINCT databases (the source, a destination
-// that is empty before the restore, and a recovery database the
-// destination's archive is restored into and reconciled against), and
-// the destination and the recovery database must be PRODUCTION
-// databases: the endpoint allowlist is operator-declared, so a staging
-// host that is declared passes it.
+// the RESTORE — after the dump, with the source already quiesced.
+//
+// The TOPOLOGY is Tom's 2026-11-19 execution decision: the destination
+// is the EXISTING production Neon database (its tasks_api and
+// content_scheduler schemas) and the recovery target is a TEMPORARY
+// isolated database that exists only to prove a backup restores. The
+// obsolete "three distinct production databases" requirement — which
+// asked the operator to create permanent production databases the
+// migration is explicitly forbidden from creating — is gone. What
+// remains provable here is the destination database's existence; the
+// recovery target's ISOLATION is enforced in code at dispatch (the
+// drill refuses a recovery DSN that shares a host with the source or
+// the destination).
 //
 // It fails closed. An environment that could not be read is an OPEN gate,
 // not a silent pass: "not captured" is not "fine".
@@ -71,11 +77,11 @@ import { fileURLToPath } from 'node:url';
  */
 export const CUTOVER_DSN_SECRET_NAMES = Object.freeze([
   'TASKS_API_SOURCE_DSN',
-  'BUDGET_API_SOURCE_DSN',
+  'CONTENT_SCHEDULER_API_SOURCE_DSN',
   'TASKS_API_DEST_DSN',
-  'BUDGET_API_DEST_DSN',
+  'CONTENT_SCHEDULER_API_DEST_DSN',
   'RECOVERY_TASKS_API_DSN',
-  'RECOVERY_BUDGET_API_DSN',
+  'RECOVERY_CONTENT_SCHEDULER_API_DSN',
 ]);
 
 /** The DSN secrets that must exist even for a run without --recovery. */
@@ -213,7 +219,7 @@ export function evaluateCutoverReadiness(state) {
     }
   }
 
-  // --- Gate 4: the cutover's databases exist -----------------------------
+  // --- Gate 4: the cutover's DESTINATION database exists --------------------
   //
   // Six DSN secrets can be REGISTERED against databases that do not
   // exist. The workflow only checks that the secrets are non-empty, so a
@@ -221,38 +227,55 @@ export function evaluateCutoverReadiness(state) {
   // secret check and fails at the RESTORE — after the dump, after the
   // source has been quiesced, with the operator mid-procedure.
   //
-  // The cutover needs three DISTINCT databases: the source, a
-  // destination that is empty before the restore, and a recovery
-  // database that the destination's archive is restored into and
-  // reconciled against. A recovery database that IS the destination
-  // would make the reconcile compare a database with itself: evidence
-  // that looks green and proves nothing.
+  // The TOPOLOGY changed with Tom's 2026-11-19 execution decision: the
+  // destination is the EXISTING production Neon database (its
+  // tasks_api and content_scheduler schemas), not a new permanent
+  // production database, and the recovery target is a TEMPORARY isolated
+  // database used only to prove a backup restores. The old gate demanded
+  // three distinct production databases — source, destination and
+  // recovery — and that requirement is obsolete: it asked the operator
+  // to create permanent production databases the migration is explicitly
+  // forbidden from creating.
+  //
+  // What is still provable pre-dispatch is narrower, and the gate says
+  // exactly that:
+  //
+  //   * the production Neon inventory was read COMPLETELY (a read error
+  //     is an open gate, never a count of zero), and
+  //   * it serves at least one logical database, so the existing
+  //     production database the destination points at is real.
+  //
+  // The recovery target is NOT counted here: it is temporary, it is
+  // created for the run and dropped after it, and its isolation is
+  // enforced in code at dispatch — the drill refuses a recovery DSN that
+  // shares a host with the source or the destination, and the workflow
+  // refuses a recovery_host equal to either.
   const neon = state?.providers?.neon;
-  const requiredDatabases = 3;
+  const requiredDatabases = 1;
 
   if (!neon || neon.captured !== true) {
     rows.push(
-      row('neon.cutover-database-capacity', 'unmet', {
+      row('neon.cutover-destination-database', 'unmet', {
         owner: 'Quinn (operator)',
-        label: 'The cutover\'s source, destination and recovery databases exist',
+        label: 'The cutover\'s destination database exists',
         reason:
-          'the Neon project could not be read, so the destination and recovery databases cannot be proven to exist — a cutover that restores into a database that does not exist fails after the dump, with the source already quiesced',
+          'the Neon project could not be read, so the destination database cannot be proven to exist — a cutover that restores into a database that does not exist fails after the dump, with the source already quiesced',
       }),
     );
   } else if (state?.schemaVersion !== DATABASE_IDENTITY_SCHEMA_VERSION) {
     rows.push(
-      row('neon.cutover-database-capacity', 'unmet', {
+      row('neon.cutover-destination-database', 'unmet', {
         owner: 'Quinn (operator)',
-        label: 'The cutover\'s source, destination and recovery databases exist',
+        label: 'The cutover\'s destination database exists',
         reason: `the artifact was captured under schema version ${JSON.stringify(state?.schemaVersion ?? null)}, whose \`databaseCount\` counts Neon ENDPOINT HOSTS rather than distinct databases — one branch can serve one database behind several read-replica endpoints — so its count cannot answer this gate. Re-capture the provisioning state with the current capture script`,
       }),
     );
   } else if (neon.project?.databaseCountReadError) {
     rows.push(
-      row('neon.cutover-database-capacity', 'unmet', {
+      row('neon.cutover-destination-database', 'unmet', {
         owner: 'Quinn (operator)',
-        label: 'The cutover\'s source, destination and recovery databases exist',
-        reason: `the Neon database inventory could not be read completely (${neon.project.databaseCountReadError}), so the database count is a LOWER BOUND and the destination and recovery databases cannot be proven to exist`,
+        label: 'The cutover\'s destination database exists',
+        reason: `the Neon database inventory could not be read completely (${neon.project.databaseCountReadError}), so the database count is a LOWER BOUND and the destination database cannot be proven to exist`,
       }),
     );
   } else {
@@ -262,18 +285,18 @@ export function evaluateCutoverReadiness(state) {
 
     if (databaseCount < requiredDatabases) {
       rows.push(
-        row('neon.cutover-database-capacity', 'unmet', {
+        row('neon.cutover-destination-database', 'unmet', {
           owner: 'Quinn (operator)',
-          label: 'The cutover\'s source, destination and recovery databases exist',
-          reason: `the production Neon environment serves ${databaseCount} distinct database(s); the cutover needs ${requiredDatabases} — the source, a destination that is empty before the restore, and a recovery database to reconcile against — so ${requiredDatabases - databaseCount} more database(s) must be created before the DSN secrets can point at databases that exist. A read replica of an existing branch does not count: it is another address for the SAME database. The destination and the recovery database must also sit behind an endpoint OTHER than the source's, because the dispatch refuses a destination behind the source's host (exit 10) — create a branch named \`production-*\` and put them there`,
+          label: 'The cutover\'s destination database exists',
+          reason: `the production Neon environment serves ${databaseCount} distinct database(s); the destination is the EXISTING production database, so at least ${requiredDatabases} must exist before the destination DSNs can point at a database that exists. A read replica of an existing branch does not count: it is another address for the SAME database`,
         }),
       );
     } else {
       rows.push(
-        row('neon.cutover-database-capacity', 'met', {
+        row('neon.cutover-destination-database', 'met', {
           owner: 'Quinn (operator)',
-          label: 'The cutover\'s source, destination and recovery databases exist',
-          reason: `the production Neon environment serves ${databaseCount} distinct database(s), so the source, the destination and the recovery database can be three distinct databases — the destination and the recovery database must still be behind an endpoint other than the source's, or the dispatch refuses them (exit 10)`,
+          label: 'The cutover\'s destination database exists',
+          reason: `the production Neon environment serves ${databaseCount} distinct database(s), so the destination — the EXISTING production database that hosts the tasks_api and content_scheduler schemas — can be real. No new permanent production database is created for this cutover, and the recovery target is a temporary isolated database that is not counted here: the drill refuses a recovery DSN that shares a host with the source or the destination`,
         }),
       );
     }

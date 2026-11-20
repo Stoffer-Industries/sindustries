@@ -2,7 +2,7 @@
 # scripts/cloud/database/dump.sh
 #
 # Creates a consistent custom-format PostgreSQL archive containing
-# tasks_api and budget_api schemas from a read-only source. The archive
+# tasks_api and content_scheduler schemas from a read-only source. The archive
 # is written atomically (`.partial` -> verified -> `<run-id>.dump`) and
 # refused if it cannot be parsed back with `pg_restore --list`.
 #
@@ -113,7 +113,7 @@ PGPASSWORD="" pg_dump \
   --no-owner \
   --no-acl \
   --schema=tasks_api \
-  --schema=budget_api \
+  --schema=content_scheduler \
   --no-password \
   --verbose \
   --file="$PARTIAL_PATH" \

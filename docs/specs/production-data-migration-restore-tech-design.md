@@ -8,6 +8,71 @@ shipped_date: null
 
 # Tech Design — Migrate production data with verified backup and restore
 
+## Revision — 2026-11-21 (topology and scope)
+
+Tom's execution decision of 2026-11-19 changed the shape of this
+migration, and this section records the design consequences. It is the
+operative part of this document; the sections below it are the original
+2026-08 design, kept for the reasoning behind the parts that still hold.
+
+**Service scope.** The migration moves TWO services: `tasks_api` and
+`content_scheduler`. Budget API and GymTrack MCP are deferred to a
+separate slice. The harness therefore migrates, reconciles and restores
+those two schemas and no longer the `budget_api` one — the same change
+applies to the staging rehearsal, so the rehearsal keeps rehearsing the
+production shape.
+
+**Topology.** The destination is the EXISTING production Neon database —
+its `tasks_api` and `content_scheduler` schemas. No new permanent
+production database is created for this cutover. The recovery target is
+a TEMPORARY, isolated database used only to prove that a verified backup
+restores into a usable state; it is created for the run and dropped
+after it.
+
+**What that changes in the design.**
+
+1. *The readiness gate.* The `neon.cutover-database-capacity` gate
+   (three distinct production databases) is obsolete — it demanded
+   permanent production databases the migration is forbidden from
+   creating. It is replaced by `neon.cutover-destination-database`,
+   which proves that the existing production database exists and that the
+   Neon inventory was read completely.
+2. *The recovery target becomes a first-class invariant.* Under the old
+   topology the recovery database was a third permanent production
+   database, distinguished by capacity count. Under the new topology it
+   is temporary, so nothing about its inventory can prove it is a
+   different database — only its endpoint can. `drill.sh` therefore
+   reads the host out of each recovery DSN and refuses the run when the
+   recovery target shares a host with the source (which would overwrite
+   the rollback source) or with the destination (which would reconcile
+   the destination against itself). The workflow requires a declared
+   `recovery_host` that differs from both, and adds it to the endpoint
+   allowlist.
+3. *The recovery DSNs are explicit arguments.* The drill used to derive
+   the recovery DSN paths from the destination file names
+   (`<dest-stem>-recovery.dsn`). No caller followed that convention, so
+   the recovery path failed on a missing file. The recovery DSNs are now
+   explicit arguments, which cannot drift from the caller's naming.
+4. *The migration tooling's location.* The design below says
+   `infra/migrations/`. The harness it describes was implemented at
+   `scripts/cloud/database/` under the predecessor task `d37681e1`,
+   because that is where the staging rehearsal harness already lived and
+   a second tree would have left two implementations of one procedure.
+   The behaviour the design specifies — one reusable, environment-
+   parameterised procedure, run against production with a production
+   runbook — is what shipped. The `infra/migrations/` paths in the
+   sections below are therefore historical.
+
+**AC verification matrix (current).**
+
+| AC | Verification |
+| --- | --- |
+| AC1 | `reconcile-<run-id>.json` records `verdict=PASS` for both services: the service-owned reconciliation manifests (`services/tasks-api/ops/reconciliation.sql`, `services/content-scheduler-api/ops/reconciliation.sql`) compared row counts, distinct PK counts and grouped state counts, plus a primary-key digest per table. No unexplained loss or duplication |
+| AC2 | `migrate-<run-id>.json` records a clean `prisma migrate deploy` for `tasks-api` and `content-scheduler-api` against the destination schemas, with no failed or unaccounted-pending rows in either `_prisma_migrations` table |
+| AC3 | the recovery reconcile (`reconcile-recovery-<run-id>.json`) records `verdict=PASS` against the TEMPORARY isolated recovery target, whose host the drill proved is neither the source's nor the destination's. The archive digest is sealed in `manifest-<run-id>.json` |
+| AC4 | the failure/interruption drills (`--interruption dump|restore`, `cleanup-destination` two-key auth, the recovery isolation refusal, the endpoint allowlist refusal) and the contract suites in `scripts/cloud/database/tests/` and `tests/cloud/tests/` |
+
+
 ## Links and scope
 
 - Product spec: `brain/tasks/specs/open/production-data-migration-restore.md`

@@ -16,12 +16,12 @@ The operator must hold, or have access to:
   scopes for the staging org;
 - the four required DSN secrets on the `staging` GitHub Environment:
   - `TASKS_API_SOURCE_DSN`     — read-only DSN for source `tasks_api`
-  - `BUDGET_API_SOURCE_DSN`    — read-only DSN for source `budget_api`
+  - `CONTENT_SCHEDULER_API_SOURCE_DSN`    — read-only DSN for source `content_scheduler`
   - `TASKS_API_DEST_DSN`       — owner DSN for destination `tasks_api`
-  - `BUDGET_API_DEST_DSN`      — owner DSN for destination `budget_api`
+  - `CONTENT_SCHEDULER_API_DEST_DSN`      — owner DSN for destination `content_scheduler`
 - when running with `--recovery`, the two recovery DSNs:
   - `RECOVERY_TASKS_API_DSN`   — owner DSN for recovery `tasks_api`
-  - `RECOVERY_BUDGET_API_DSN`  — owner DSN for recovery `budget_api`
+  - `RECOVERY_CONTENT_SCHEDULER_API_DSN`  — owner DSN for recovery `content_scheduler`
 
 The DSNs are written to mode-`0600` files inside the runner temp
 directory at the start of the workflow. The scripts refuse to accept
@@ -41,7 +41,7 @@ positional DSNs; only file paths.
    - `restore.sh` — restores into the destination, asserts the
      destination was empty, verifies both schemas exist post-restore.
    - `migrate.sh` — runs `prisma migrate deploy` for tasks-api and
-     budget-api in turn, asserts no failed / unaccounted migrations.
+     content-scheduler-api in turn, asserts no failed / unaccounted migrations.
    - `reconcile.mjs` — runs the service-owned reconciliation
      manifests, compares counts + distinct-PK sets + invariants,
      writes a `verdict=PASS|FAIL` envelope.

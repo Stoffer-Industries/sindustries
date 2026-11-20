@@ -438,6 +438,38 @@ cloud_db_assert_production_ack() {
 #
 # Refuses if source and destination DSNs resolve to the same target.
 # Used by dump + restore to prevent accidental in-place overwrite.
+# cloud_db_assert_recovery_isolation <source-host> <destination-host> <recovery-host> <label>
+#
+# The recovery target proves that a verified backup restores into a
+# usable state, so it must be a database of its own:
+#
+#   * NOT the destination — restoring the archive into the destination
+#     and then reconciling the destination against itself produces
+#     evidence that looks green and proves nothing.
+#   * NOT the source — the source stays authoritative until the
+#     observation period ends, and it is the rollback target. A recovery
+#     DSN that pointed at the source would write the archive back over
+#     it.
+#
+# The comparison is on the HOST, not on the DSN string: two DSNs that
+# differ only in their credentials still address the same database.
+cloud_db_assert_recovery_isolation() {
+  local source_host="$1"
+  local destination_host="$2"
+  local recovery_host="$3"
+  local label="$4"
+
+  if [[ -z "$source_host" || -z "$destination_host" || -z "$recovery_host" ]]; then
+    cloud_db_die "recovery isolation cannot be checked: a host is empty (source='$source_host' destination='$destination_host' recovery='$recovery_host')"
+  fi
+  if [[ "$recovery_host" == "$destination_host" ]]; then
+    cloud_db_die "$label recovery target host '$recovery_host' is the destination's host — the recovery restore would reconcile the destination against itself; refusing"
+  fi
+  if [[ "$recovery_host" == "$source_host" ]]; then
+    cloud_db_die "$label recovery target host '$recovery_host' is the source's host — the recovery restore would overwrite the rollback source; refusing"
+  fi
+}
+
 cloud_db_assert_inequality() {
   local label_a="$1" dsn_a="$2" label_b="$3" dsn_b="$4"
   if [[ -z "$dsn_a" || -z "$dsn_b" ]]; then
@@ -520,9 +552,8 @@ cloud_db_install_traps() {
 # Reads a secret from a mode-0600 file into a shell variable. Refuses if
 # the file is missing, has loose permissions, or is empty. The variable
 # is exported so child processes inherit it.
-cloud_db_load_secret() {
-  local var_name="$1"
-  local file_path="$2"
+cloud_db_read_secret_file() {
+  local file_path="$1"
   if [[ ! -f "$file_path" ]]; then
     cloud_db_die "secret file '$file_path' not found"
   fi
@@ -542,9 +573,27 @@ cloud_db_load_secret() {
   if [[ -z "$value" ]]; then
     cloud_db_die "secret file '$file_path' is empty"
   fi
+  printf '%s' "$value"
+}
+
+cloud_db_load_secret() {
+  local var_name="$1"
+  local file_path="$2"
+  local value
+  value="$(cloud_db_read_secret_file "$file_path")"
   printf -v "$var_name" '%s' "$value"
   # shellcheck disable=SC2163  # var_name is set by printf -v above; export intentionally takes the name.
   export "${var_name?}"
+}
+
+# cloud_db_dsn_host_from_file <path>
+#
+# Prints the host[:port] of the DSN in a mode-0600 secret file. The DSN
+# itself is never placed in a variable or exported, so a caller that only
+# needs a derived fact (which endpoint a credential points at) never has
+# to hold the credential.
+cloud_db_dsn_host_from_file() {
+  cloud_db_dsn_host "$(cloud_db_read_secret_file "$1")"
 }
 
 # ---------------------------------------------------------------------------

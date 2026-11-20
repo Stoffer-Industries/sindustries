@@ -5,8 +5,8 @@
 # The failure this guards (drill run 39583824097):
 #
 #     pg_restore: error: could not execute query:
-#     ERROR:  schema "budget_api" already exists
-#     Command was: CREATE SCHEMA budget_api;
+#     ERROR:  schema "content_scheduler" already exists
+#     Command was: CREATE SCHEMA content_scheduler;
 #
 # Two guards were blind to the same state. cleanup-destination.sh
 # decided whether to drop using information_schema.tables counts, and
@@ -87,11 +87,11 @@ case "$flat" in
       else
         printf '%s\n' "0"
       fi ;;
-  *"information_schema.schemata"*"schema_name = 'budget_api'"*)
-      _n="$(cat "$PSQL_PROBE_COUNTER_DIR/budget_api" 2>/dev/null || printf '0')"
-      _n=$((_n + 1)); printf '%s' "$_n" > "$PSQL_PROBE_COUNTER_DIR/budget_api"
+  *"information_schema.schemata"*"schema_name = 'content_scheduler'"*)
+      _n="$(cat "$PSQL_PROBE_COUNTER_DIR/content_scheduler" 2>/dev/null || printf '0')"
+      _n=$((_n + 1)); printf '%s' "$_n" > "$PSQL_PROBE_COUNTER_DIR/content_scheduler"
       if [[ "$_n" -le 1 ]]; then
-        printf '%s\n' "${PSQL_BUDGET_SCHEMA_EXISTS:-0}"
+        printf '%s\n' "${PSQL_CONTENT_SCHEDULER_SCHEMA_EXISTS:-0}"
       else
         printf '%s\n' "0"
       fi ;;
@@ -104,12 +104,12 @@ case "$flat" in
       if [[ "$_n" -eq 1 ]]; then
         printf '%s\n' "${PSQL_RESTORE_SCHEMA_LIST:-}"
       else
-        printf '%s\n' "${PSQL_RESTORE_SCHEMA_AFTER:-tasks_api,budget_api}"
+        printf '%s\n' "${PSQL_RESTORE_SCHEMA_AFTER:-tasks_api,content_scheduler}"
       fi ;;
   *"information_schema.tables"*"table_schema = 'tasks_api'"*)
       printf '%s\n' "${PSQL_TASKS_TABLE_COUNT:-0}" ;;
-  *"information_schema.tables"*"table_schema = 'budget_api'"*)
-      printf '%s\n' "${PSQL_BUDGET_TABLE_COUNT:-0}" ;;
+  *"information_schema.tables"*"table_schema = 'content_scheduler'"*)
+      printf '%s\n' "${PSQL_CONTENT_SCHEDULER_TABLE_COUNT:-0}" ;;
   *"information_schema.tables"*"table_schema IN"*)
       printf '%s\n' "${PSQL_RESTORE_TABLE_COUNT:-0}" ;;
   *"DROP SCHEMA"*)
@@ -165,8 +165,8 @@ printf 'postgres://u:p@source-host.internal:5432/sindustries_staging_source?sslm
   > "$WORK/secrets/source.dsn"
 printf 'postgres://u:p@dest-tasks.internal:5432/sindustries_staging_dest_tasks?sslmode=require\n' \
   > "$WORK/secrets/dest_tasks.dsn"
-printf 'postgres://u:p@dest-budget.internal:5432/sindustries_staging_dest_budget?sslmode=require\n' \
-  > "$WORK/secrets/dest_budget.dsn"
+printf 'postgres://u:p@dest-content-scheduler.internal:5432/sindustries_staging_dest_content_scheduler?sslmode=require\n' \
+  > "$WORK/secrets/dest_content-scheduler.dsn"
 chmod 0600 "$WORK/secrets"/*.dsn
 
 RUN_ID="20260101T000000Z-test00"
@@ -188,7 +188,7 @@ run_cleanup() {
     bash "$CLEANUP_SH" \
       --source-tasks-dsn-file "$WORK/secrets/source.dsn" \
       --dest-tasks-dsn-file "$WORK/secrets/dest_tasks.dsn" \
-      --dest-budget-dsn-file "$WORK/secrets/dest_budget.dsn" \
+      --dest-content-scheduler-dsn-file "$WORK/secrets/dest_content-scheduler.dsn" \
       --confirm "$RUN_ID" \
       --confirm-cleanup-destination ) 2>&1
 }
@@ -208,8 +208,8 @@ run_cleanup() {
 rm -f "$WORK/count"
 rm -rf "$WORK/probe_counts"
 : > "$WORK/sql.log"
-out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_BUDGET_TABLE_COUNT=0 \
-       PSQL_TASKS_SCHEMA_EXISTS=1 PSQL_BUDGET_SCHEMA_EXISTS=1 \
+out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_CONTENT_SCHEDULER_TABLE_COUNT=0 \
+       PSQL_TASKS_SCHEMA_EXISTS=1 PSQL_CONTENT_SCHEDULER_SCHEMA_EXISTS=1 \
        run_cleanup || true)"
 
 if grep -q "DROP SCHEMA" "$WORK/sql.log"; then
@@ -234,7 +234,7 @@ else
   printf '%s\n' "$out" | sed 's/^/      /'
 fi
 
-# Envelope must show recreated:[] (not the older ["tasks_api","budget_api"]
+# Envelope must show recreated:[] (not the older ["tasks_api","content_scheduler"]
 # the pre-fix version emitted), so a downstream consumer can tell that
 # cleanup did not recreate anything -- pg_restore is the only thing that
 # should land CREATE SCHEMA in the catalogue after this step.
@@ -246,7 +246,7 @@ fi
 
 # Both schemas' post-cleanup state must be ABSENT (postCleanup.schemaPresent
 # is False for both), so the next restore step sees a fresh slot.
-if [[ -n "$envelope" ]] && python3 -c "import json,sys; d=json.load(open('$envelope')); pa=d.get('postCleanup',{}).get('tasks_api',{}).get('schemaPresent'); pb=d.get('postCleanup',{}).get('budget_api',{}).get('schemaPresent'); sys.exit(0 if pa is False and pb is False else 1)" 2>/dev/null; then
+if [[ -n "$envelope" ]] && python3 -c "import json,sys; d=json.load(open('$envelope')); pa=d.get('postCleanup',{}).get('tasks_api',{}).get('schemaPresent'); pb=d.get('postCleanup',{}).get('content_scheduler',{}).get('schemaPresent'); sys.exit(0 if pa is False and pb is False else 1)" 2>/dev/null; then
   pass "envelope records both postCleanup.schemaPresent=False"
 else
   fail "envelope did not record both post-cleanup schemas as absent"
@@ -262,8 +262,8 @@ rm -f "$WORK/count"
 rm -rf "$WORK/probe_counts"
 : > "$WORK/sql.log"
 rm -f "$WORK/artifacts/cleanup-${RUN_ID}.json"
-out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_BUDGET_TABLE_COUNT=0 \
-       PSQL_TASKS_SCHEMA_EXISTS=0 PSQL_BUDGET_SCHEMA_EXISTS=0 \
+out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_CONTENT_SCHEDULER_TABLE_COUNT=0 \
+       PSQL_TASKS_SCHEMA_EXISTS=0 PSQL_CONTENT_SCHEDULER_SCHEMA_EXISTS=0 \
        run_cleanup || true)"
 
 if grep -q "DROP SCHEMA" "$WORK/sql.log"; then
@@ -281,7 +281,7 @@ else
 fi
 
 # No-op path must also record recreated=[] (not the older
-# ["tasks_api","budget_api"] the pre-fix code emitted, which lied about
+# ["tasks_api","content_scheduler"] the pre-fix code emitted, which lied about
 # what happened -- the no-op did not recreate anything).
 if [[ -n "$envelope" ]] && python3 -c "import json,sys; d=json.load(open('$envelope')); sys.exit(0 if d.get('recreated') == [] else 1)" 2>/dev/null; then
   pass "fresh-destination envelope records recreated=[] (no-op did not recreate)"
@@ -299,8 +299,8 @@ rm -f "$WORK/count"
 rm -rf "$WORK/probe_counts"
 : > "$WORK/sql.log"
 rm -f "$WORK/artifacts/cleanup-${RUN_ID}.json"
-out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_BUDGET_TABLE_COUNT=0 \
-       PSQL_TASKS_SCHEMA_EXISTS=1 PSQL_BUDGET_SCHEMA_EXISTS=0 \
+out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_CONTENT_SCHEDULER_TABLE_COUNT=0 \
+       PSQL_TASKS_SCHEMA_EXISTS=1 PSQL_CONTENT_SCHEDULER_SCHEMA_EXISTS=0 \
        run_cleanup || true)"
 
 if grep -q "DROP SCHEMA" "$WORK/sql.log"; then
@@ -346,7 +346,7 @@ restore_out="$(
   CLOUD_DB_RUN_ID="$RUN_ID" \
   ENVIRONMENT=staging \
   PSQL_RESTORE_TABLE_COUNT=0 \
-  PSQL_RESTORE_SCHEMA_LIST=budget_api \
+  PSQL_RESTORE_SCHEMA_LIST=content_scheduler \
   bash "$RESTORE_SH" \
     --source-dsn-file "$WORK/secrets/source.dsn" \
     --destination-dsn-file "$WORK/secrets/dest_tasks.dsn" \
