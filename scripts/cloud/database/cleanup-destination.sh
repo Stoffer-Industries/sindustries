@@ -3,7 +3,7 @@
 #
 # Operator-only destructive action for the cloud-staging database
 # drill (task d37681e1). Drops and recreates the two service
-# schemas (tasks_api, budget_api) in the destination database so
+# schemas (tasks_api, content_scheduler) in the destination database so
 # restore.sh can write into a fresh, empty target. This exists
 # because restore.sh explicitly refuses to overwrite a non-empty
 # destination (a safety guard), and a previous failed drill run
@@ -53,7 +53,7 @@ usage() {
 Usage: cleanup-destination.sh \
   --source-tasks-dsn-file <path> \
   --dest-tasks-dsn-file <path> \
-  --dest-budget-dsn-file <path> \
+  --dest-content-scheduler-dsn-file <path> \
   --confirm <run-id> \
   --confirm-cleanup-destination
 
@@ -63,7 +63,7 @@ Required:
                                     inequality check; no source data
                                     is read.
   --dest-tasks-dsn-file <path>      Destination tasks_api DSN file.
-  --dest-budget-dsn-file <path>     Destination budget_api DSN file.
+  --dest-content-scheduler-dsn-file <path>     Destination content_scheduler DSN file.
   --confirm <run-id>                Must match CLOUD_DB_RUN_ID.
   --confirm-cleanup-destination     Explicit two-key ack. Must be
                                     spelled exactly; refuses
@@ -87,7 +87,7 @@ USAGE
 
 SOURCE_TASKS_FILE=""
 DEST_TASKS_FILE=""
-DEST_BUDGET_FILE=""
+DEST_CONTENT_SCHEDULER_FILE=""
 CONFIRM=""
 CONFIRM_CLEANUP=0
 ENVIRONMENT="${ENVIRONMENT:-staging}"
@@ -96,7 +96,7 @@ while (( $# > 0 )); do
   case "$1" in
     --source-tasks-dsn-file)   SOURCE_TASKS_FILE="$2";  shift 2;;
     --dest-tasks-dsn-file)     DEST_TASKS_FILE="$2";    shift 2;;
-    --dest-budget-dsn-file)    DEST_BUDGET_FILE="$2";   shift 2;;
+    --dest-content-scheduler-dsn-file)    DEST_CONTENT_SCHEDULER_FILE="$2";   shift 2;;
     --confirm)                 CONFIRM="$2";            shift 2;;
     --confirm-cleanup-destination) CONFIRM_CLEANUP=1;    shift;;
     --environment)             ENVIRONMENT="$2";        shift 2;;
@@ -106,7 +106,7 @@ while (( $# > 0 )); do
   esac
 done
 
-for v in SOURCE_TASKS_FILE DEST_TASKS_FILE DEST_BUDGET_FILE CONFIRM; do
+for v in SOURCE_TASKS_FILE DEST_TASKS_FILE DEST_CONTENT_SCHEDULER_FILE CONFIRM; do
   if [[ -z "${!v}" ]]; then
     cloud_db_die "--${v,,} is required"
   fi
@@ -132,24 +132,24 @@ fi
 
 cloud_db_load_secret SOURCE_TASKS_DSN "$SOURCE_TASKS_FILE"
 cloud_db_load_secret DEST_TASKS_DSN  "$DEST_TASKS_FILE"
-cloud_db_load_secret DEST_BUDGET_DSN "$DEST_BUDGET_FILE"
+cloud_db_load_secret DEST_CONTENT_SCHEDULER_DSN "$DEST_CONTENT_SCHEDULER_FILE"
 
 # Refuse any endpoint outside the declared target set at either end of
 # the source/dest spectrum.
 cloud_db_assert_target_dsn "source"      "$SOURCE_TASKS_DSN"
 cloud_db_assert_target_dsn "destination (tasks_api)"  "$DEST_TASKS_DSN"
-cloud_db_assert_target_dsn "destination (budget_api)" "$DEST_BUDGET_DSN"
+cloud_db_assert_target_dsn "destination (content_scheduler)" "$DEST_CONTENT_SCHEDULER_DSN"
 
 # Refuse same-host source/destination (would drop schemas the source
 # still needs).
 cloud_db_assert_inequality "source" "$SOURCE_TASKS_DSN" "destination (tasks_api)"  "$DEST_TASKS_DSN"
-cloud_db_assert_inequality "source" "$SOURCE_TASKS_DSN" "destination (budget_api)" "$DEST_BUDGET_DSN"
+cloud_db_assert_inequality "source" "$SOURCE_TASKS_DSN" "destination (content_scheduler)" "$DEST_CONTENT_SCHEDULER_DSN"
 
 # Refuse any database name the active profile does not allow. The DSN
 # includes the database name as the path component; strip the userinfo
 # and query string before passing the name to the assertion.
 cloud_db_assert_database_name "$(cloud_db_dsn_database "$DEST_TASKS_DSN")"
-cloud_db_assert_database_name "$(cloud_db_dsn_database "$DEST_BUDGET_DSN")"
+cloud_db_assert_database_name "$(cloud_db_dsn_database "$DEST_CONTENT_SCHEDULER_DSN")"
 
 # ---------------------------------------------------------------------------
 # Pre-cleanup snapshot: count the pre-existing objects in each
@@ -168,24 +168,24 @@ pre_tasks_count="$(
 )"
 pre_tasks_count="${pre_tasks_count:-0}"
 
-pre_budget_count="$(
+pre_content_scheduler_count="$(
   PGPASSWORD="" psql \
     --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
-    --dbname="$DEST_BUDGET_DSN" \
-    --command="SELECT count(*) FROM information_schema.tables WHERE table_schema = 'budget_api';" \
+    --dbname="$DEST_CONTENT_SCHEDULER_DSN" \
+    --command="SELECT count(*) FROM information_schema.tables WHERE table_schema = 'content_scheduler';" \
     2>/dev/null | tr -d '[:space:]'
 )"
-pre_budget_count="${pre_budget_count:-0}"
+pre_content_scheduler_count="${pre_content_scheduler_count:-0}"
 
 # Table counts alone cannot decide whether the destination is fresh.
 # A failed pg_restore creates the schema and then dies before it
 # creates any table, leaving the schema present but EMPTY -- invisible
 # to information_schema.tables, and fatal to the next restore, because
-# the archive carries `tasks_api` and `budget_api` as SCHEMA entries in
+# the archive carries `tasks_api` and `content_scheduler` as SCHEMA entries in
 # its TOC, so pg_restore issues `CREATE SCHEMA <name>;` for each
 # before any table DDL. That is exactly how drill run 39583824097
-# died on `schema "budget_api" already exists` immediately after
+# died on `schema "content_scheduler" already exists` immediately after
 # cleanup reported "both destination schemas already empty; nothing
 # to drop".
 #
@@ -212,18 +212,18 @@ _schema_exists() {
 }
 
 pre_tasks_schema_present=false
-pre_budget_schema_present=false
+pre_content_scheduler_schema_present=false
 if _schema_exists "$DEST_TASKS_DSN" tasks_api; then pre_tasks_schema_present=true; fi
-if _schema_exists "$DEST_BUDGET_DSN" budget_api; then pre_budget_schema_present=true; fi
+if _schema_exists "$DEST_CONTENT_SCHEDULER_DSN" content_scheduler; then pre_content_scheduler_schema_present=true; fi
 
-if [[ "$pre_tasks_schema_present" == "false" && "$pre_budget_schema_present" == "false" ]]; then
+if [[ "$pre_tasks_schema_present" == "false" && "$pre_content_scheduler_schema_present" == "false" ]]; then
   cloud_db_info "cleanup: neither destination schema exists; nothing to drop"
   emitted_path="${CLOUD_DB_ARTIFACT_DIR}/cleanup-${CLOUD_DB_RUN_ID}.json"
   mkdir -p "$(dirname "$emitted_path")"
-  python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" "$pre_tasks_count" "$pre_budget_count" \
+  python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" "$pre_tasks_count" "$pre_content_scheduler_count" \
           "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
-out_path, run_id, pre_tasks, pre_budget, kind_prefix, environment = sys.argv[1:]
+out_path, run_id, pre_tasks, pre_content_scheduler, kind_prefix, environment = sys.argv[1:]
 envelope = {
   "schemaVersion": 1,
   "kind": f"{kind_prefix}-cleanup-destination",
@@ -231,16 +231,16 @@ envelope = {
   "runId": run_id,
   "preCleanup": {
     "tasks_api":  {"tableCount": int(pre_tasks), "schemaPresent": False},
-    "budget_api": {"tableCount": int(pre_budget), "schemaPresent": False},
+    "content_scheduler": {"tableCount": int(pre_content_scheduler), "schemaPresent": False},
   },
   "dropped": {
     "tasks_api":  [],
-    "budget_api": [],
+    "content_scheduler": [],
   },
   "recreated": [],
   "postCleanup": {
     "tasks_api":  {"schemaPresent": False},
-    "budget_api": {"schemaPresent": False},
+    "content_scheduler": {"schemaPresent": False},
   },
   "verdict": "SCHEMAS_ABSENT",
 }
@@ -257,7 +257,7 @@ fi
 # the drop is atomic per-schema. We do NOT recreate them here on
 # purpose: restore.sh's schema-presence guard (added in commit
 # 4d7d4cc0) refuses a destination that already holds either schema,
-# because the archive carries `tasks_api` and `budget_api` as SCHEMA
+# because the archive carries `tasks_api` and `content_scheduler` as SCHEMA
 # entries in its TOC, so pg_restore issues `CREATE SCHEMA <name>;`
 # for each before any table DDL. The guard is correct
 # for the post-failure state (where pg_restore left the schema
@@ -273,7 +273,7 @@ fi
 # make restore.sh's pre-flight pass.
 # ---------------------------------------------------------------------------
 
-cloud_db_info "cleanup: dropping tasks_api (schema present=${pre_tasks_schema_present}, pre-count=${pre_tasks_count}) and budget_api (schema present=${pre_budget_schema_present}, pre-count=${pre_budget_count})"
+cloud_db_info "cleanup: dropping tasks_api (schema present=${pre_tasks_schema_present}, pre-count=${pre_tasks_count}) and content_scheduler (schema present=${pre_content_scheduler_schema_present}, pre-count=${pre_content_scheduler_count})"
 
 drop_start_epoch="$(date +%s)"
 
@@ -285,8 +285,8 @@ PGPASSWORD="" psql \
 
 PGPASSWORD="" psql \
   --no-psqlrc --variable=ON_ERROR_STOP=1 \
-  --dbname="$DEST_BUDGET_DSN" \
-  --command="DROP SCHEMA IF EXISTS budget_api CASCADE;" \
+  --dbname="$DEST_CONTENT_SCHEDULER_DSN" \
+  --command="DROP SCHEMA IF EXISTS content_scheduler CASCADE;" \
   >/dev/null
 
 drop_end_epoch="$(date +%s)"
@@ -299,13 +299,13 @@ drop_end_epoch="$(date +%s)"
 # satisfied by a zero-table count too, so this is the only
 # assertion that distinguishes "fresh" from "present but empty".
 post_tasks_present=true
-post_budget_present=true
+post_content_scheduler_present=true
 if ! _schema_exists "$DEST_TASKS_DSN" tasks_api; then post_tasks_present=false; fi
-if ! _schema_exists "$DEST_BUDGET_DSN" budget_api; then post_budget_present=false; fi
+if ! _schema_exists "$DEST_CONTENT_SCHEDULER_DSN" content_scheduler; then post_content_scheduler_present=false; fi
 
-if [[ "$post_tasks_present" != "false" || "$post_budget_present" != "false" ]]; then
+if [[ "$post_tasks_present" != "false" || "$post_content_scheduler_present" != "false" ]]; then
   cloud_db_die \
-    "post-cleanup assertion failed: tasks_api present=${post_tasks_present}, budget_api present=${post_budget_present}; both must be ABSENT before restore runs. Refusing to proceed -- the previous behavior of leaving present-but-empty would trip restore.sh's schema-presence guard."
+    "post-cleanup assertion failed: tasks_api present=${post_tasks_present}, content_scheduler present=${post_content_scheduler_present}; both must be ABSENT before restore runs. Refusing to proceed -- the previous behavior of leaving present-but-empty would trip restore.sh's schema-presence guard."
 fi
 
 # ---------------------------------------------------------------------------
@@ -320,8 +320,8 @@ emitted_path="${CLOUD_DB_ARTIFACT_DIR}/cleanup-${CLOUD_DB_RUN_ID}.json"
 mkdir -p "$(dirname "$emitted_path")"
 
 python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" \
-        "$pre_tasks_count" "$pre_budget_count" \
-        "$pre_tasks_schema_present" "$pre_budget_schema_present" \
+        "$pre_tasks_count" "$pre_content_scheduler_count" \
+        "$pre_tasks_schema_present" "$pre_content_scheduler_schema_present" \
         "$drop_start_epoch" "$drop_end_epoch" \
         "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
@@ -333,16 +333,16 @@ envelope = {
   "runId": run_id,
   "preCleanup": {
     "tasks_api":  {"tableCount": int(pre_t), "schemaPresent": pre_t_present == "true"},
-    "budget_api": {"tableCount": int(pre_b), "schemaPresent": pre_b_present == "true"},
+    "content_scheduler": {"tableCount": int(pre_b), "schemaPresent": pre_b_present == "true"},
   },
   "dropped": {
     "tasks_api":  ["CASCADE"],
-    "budget_api": ["CASCADE"],
+    "content_scheduler": ["CASCADE"],
   },
   "recreated": [],
   "postCleanup": {
     "tasks_api":  {"schemaPresent": False},
-    "budget_api": {"schemaPresent": False},
+    "content_scheduler": {"schemaPresent": False},
   },
   "startEpoch": int(start),
   "endEpoch":   int(end),
@@ -354,5 +354,5 @@ with open(out_path, "w", encoding="utf-8") as fh:
   fh.write("\n")
 PY
 
-cloud_db_info "cleanup: dropped tasks_api (${pre_tasks_count} tables) + budget_api (${pre_budget_count} tables); schemas now absent"
+cloud_db_info "cleanup: dropped tasks_api (${pre_tasks_count} tables) + content_scheduler (${pre_content_scheduler_count} tables); schemas now absent"
 printf '%s\n' "$emitted_path"

@@ -7,9 +7,9 @@
 //
 // Inputs (mode-0600 DSN files):
 //   --source-tasks-dsn-file <path>     tasks_api source DSN
-//   --source-budget-dsn-file <path>    budget_api source DSN
+//   --source-content-scheduler-dsn-file <path>    content_scheduler source DSN
 //   --dest-tasks-dsn-file <path>       tasks_api destination DSN
-//   --dest-budget-dsn-file <path>      budget_api destination DSN
+//   --dest-content-scheduler-dsn-file <path>      content_scheduler destination DSN
 //
 // Optional:
 //   --environment <staging|production> default: staging (or the ENVIRONMENT
@@ -24,7 +24,7 @@
 //     "runId": "<id>",
 //     "services": {
 //       "tasks-api":  { "checks": [...], "allMatch": true|false, "digestMatch": true|false },
-//       "budget-api": { "checks": [...], "allMatch": true|false, "digestMatch": true|false }
+//       "content-scheduler-api": { "checks": [...], "allMatch": true|false, "digestMatch": true|false }
 //     },
 //     "verdict": "PASS|FAIL"
 //   }
@@ -47,7 +47,7 @@ const REPO_ROOT = join(__dirname, '..', '..', '..');
 
 const SERVICES = [
   { name: 'tasks-api',  schema: 'tasks_api',  manifest: join(REPO_ROOT, 'services/tasks-api/ops/reconciliation.sql') },
-  { name: 'budget-api', schema: 'budget_api', manifest: join(REPO_ROOT, 'services/budget-api/ops/reconciliation.sql') },
+  { name: 'content-scheduler-api', schema: 'content_scheduler', manifest: join(REPO_ROOT, 'services/content-scheduler-api/ops/reconciliation.sql') },
 ];
 
 // ----- arg parsing ---------------------------------------------------------
@@ -55,9 +55,9 @@ const SERVICES = [
 function parseArgs(argv) {
   const args = {
     sourceTasks: '',
-    sourceBudget: '',
+    sourceContentScheduler: '',
     destTasks: '',
-    destBudget: '',
+    destContentScheduler: '',
     output: '',
     environment: process.env.ENVIRONMENT || 'staging',
   };
@@ -66,15 +66,15 @@ function parseArgs(argv) {
     const value = argv[i + 1];
     switch (flag) {
       case '--source-tasks-dsn-file':  args.sourceTasks  = value; i++; break;
-      case '--source-budget-dsn-file': args.sourceBudget = value; i++; break;
+      case '--source-content-scheduler-dsn-file': args.sourceContentScheduler = value; i++; break;
       case '--dest-tasks-dsn-file':    args.destTasks    = value; i++; break;
-      case '--dest-budget-dsn-file':   args.destBudget   = value; i++; break;
+      case '--dest-content-scheduler-dsn-file':   args.destContentScheduler   = value; i++; break;
       case '--environment':            args.environment  = value; i++; break;
       case '--output':                 args.output       = value; i++; break;
       case '--help': case '-h':
         process.stderr.write([
-          'Usage: reconcile.mjs --source-tasks-dsn-file <path> --source-budget-dsn-file <path>',
-          '                 --dest-tasks-dsn-file <path>   --dest-budget-dsn-file <path>',
+          'Usage: reconcile.mjs --source-tasks-dsn-file <path> --source-content-scheduler-dsn-file <path>',
+          '                 --dest-tasks-dsn-file <path>   --dest-content-scheduler-dsn-file <path>',
           '                 [--environment <staging|production>] [--output <path>]',
           '',
         ].join('\n'));
@@ -132,7 +132,7 @@ async function withClient(dsn, schemaName, fn) {
   const client = buildClient(dsn);
   await client.connect();
   try {
-    if (!['tasks_api', 'budget_api'].includes(schemaName)) {
+    if (!['tasks_api', 'content_scheduler'].includes(schemaName)) {
       throw new Error(`unsupported reconciliation schema: ${schemaName}`);
     }
     await client.query(`SET search_path TO "${schemaName}", public`);
@@ -220,19 +220,15 @@ const TASKS_API_TABLES = [
   { table: 'TaskAttentionOwner', columns: ['id'] },
 ];
 
-const BUDGET_API_TABLES = [
-  { table: 'LinkedCard', columns: ['id'] },
-  { table: 'Transaction', columns: ['id'] },
-  { table: 'AkahuConnection', columns: ['id'] },
-  { table: 'AccountBalanceSnapshot', columns: ['id'] },
-  { table: 'CardMonthlyBudget', columns: ['id'] },
-  { table: 'CategorizationFeedback', columns: ['id'] },
-  { table: 'BalanceAlertConfig', columns: ['id'] },
-  { table: 'NotificationEvent', columns: ['id'] },
+const CONTENT_SCHEDULER_API_TABLES = [
+  { table: 'ContentSchedulerItem', columns: ['id'] },
+  { table: 'ContentSchedulerThreadPart', columns: ['id'] },
+  { table: 'ContentSchedulerPublishAttempt', columns: ['id'] },
+  { table: 'ContentSchedulerAttemptTweet', columns: ['id'] },
 ];
 
 function tableSetForService(serviceName) {
-  return serviceName === 'tasks-api' ? TASKS_API_TABLES : BUDGET_API_TABLES;
+  return serviceName === 'tasks-api' ? TASKS_API_TABLES : CONTENT_SCHEDULER_API_TABLES;
 }
 
 async function pkDigest(client, serviceName) {
@@ -264,19 +260,19 @@ async function main() {
   const outputPath = args.output || `./artifacts/cloud-${args.environment}/reconcile-${runId}.json`;
 
   const sourceTasks  = await readSecret(args.sourceTasks);
-  const sourceBudget = await readSecret(args.sourceBudget);
+  const sourceContentScheduler = await readSecret(args.sourceContentScheduler);
   const destTasks    = await readSecret(args.destTasks);
-  const destBudget   = await readSecret(args.destBudget);
+  const destContentScheduler   = await readSecret(args.destContentScheduler);
 
   // Same-DSN safety (defence in depth — caller already checked this).
-  if (sourceTasks === destTasks || sourceBudget === destBudget) {
+  if (sourceTasks === destTasks || sourceContentScheduler === destContentScheduler) {
     process.stderr.write('source and destination DSNs are identical; refusing\n');
     process.exit(3);
   }
 
   const dsnByService = {
     'tasks-api':  { source: sourceTasks,  dest: destTasks  },
-    'budget-api': { source: sourceBudget, dest: destBudget },
+    'content-scheduler-api': { source: sourceContentScheduler, dest: destContentScheduler },
   };
 
   const envelope = {

@@ -22,12 +22,12 @@ usage() {
   cat <<'USAGE'
 Usage: migrate.sh \
   --tasks-dsn-file <path> \
-  --budget-dsn-file <path> \
+  --content-scheduler-dsn-file <path> \
   [--result-dir <path>]
 
 Required:
   --tasks-dsn-file <path>   Mode-0600 direct DSN for the destination database.
-  --budget-dsn-file <path>  Mode-0600 direct DSN for the destination database.
+  --content-scheduler-dsn-file <path>  Mode-0600 direct DSN for the destination database.
 
 Optional:
   --result-dir <path>       Directory for redacted migration results/logs.
@@ -48,14 +48,14 @@ USAGE
 }
 
 TASKS_DSN_FILE=""
-BUDGET_DSN_FILE=""
+CONTENT_SCHEDULER_DSN_FILE=""
 RESULT_DIR=""
 ENVIRONMENT="${ENVIRONMENT:-staging}"
 
 while (( $# > 0 )); do
   case "$1" in
     --tasks-dsn-file)  TASKS_DSN_FILE="$2"; shift 2;;
-    --budget-dsn-file) BUDGET_DSN_FILE="$2"; shift 2;;
+    --content-scheduler-dsn-file) CONTENT_SCHEDULER_DSN_FILE="$2"; shift 2;;
     --result-dir)      RESULT_DIR="$2"; shift 2;;
     --environment)     ENVIRONMENT="$2"; shift 2;;
     --expected-host)   cloud_db_add_expected_host "$2"; shift 2;;
@@ -64,8 +64,8 @@ while (( $# > 0 )); do
   esac
 done
 
-if [[ -z "$TASKS_DSN_FILE" || -z "$BUDGET_DSN_FILE" ]]; then
-  cloud_db_die "both --tasks-dsn-file and --budget-dsn-file are required"
+if [[ -z "$TASKS_DSN_FILE" || -z "$CONTENT_SCHEDULER_DSN_FILE" ]]; then
+  cloud_db_die "both --tasks-dsn-file and --content-scheduler-dsn-file are required"
 fi
 
 cloud_db_set_environment "$ENVIRONMENT"
@@ -75,9 +75,9 @@ cloud_db_assert_production_ack
 RESULT_DIR="${RESULT_DIR:-$CLOUD_DB_ARTIFACT_DIR}"
 
 cloud_db_load_secret TASKS_DSN "$TASKS_DSN_FILE"
-cloud_db_load_secret BUDGET_DSN "$BUDGET_DSN_FILE"
+cloud_db_load_secret CONTENT_SCHEDULER_DSN "$CONTENT_SCHEDULER_DSN_FILE"
 cloud_db_assert_target_dsn "tasks" "$TASKS_DSN"
-cloud_db_assert_target_dsn "budget" "$BUDGET_DSN"
+cloud_db_assert_target_dsn "content-scheduler" "$CONTENT_SCHEDULER_DSN"
 
 # ---------------------------------------------------------------------------
 # Resolve per-service Prisma schema directory
@@ -87,10 +87,10 @@ REPO_ROOT_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 REPO_ROOT="${REPO_ROOT:-$REPO_ROOT_DEFAULT}"
 
 TASKS_PRISMA_DIR="${REPO_ROOT}/services/tasks-api/prisma"
-BUDGET_PRISMA_DIR="${REPO_ROOT}/services/budget-api/prisma"
+CONTENT_SCHEDULER_PRISMA_DIR="${REPO_ROOT}/services/content-scheduler-api/prisma"
 
 [[ -f "$TASKS_PRISMA_DIR/schema.prisma" ]]  || cloud_db_die "missing tasks-api prisma schema"
-[[ -f "$BUDGET_PRISMA_DIR/schema.prisma" ]] || cloud_db_die "missing budget-api prisma schema"
+[[ -f "$CONTENT_SCHEDULER_PRISMA_DIR/schema.prisma" ]] || cloud_db_die "missing content-scheduler-api prisma schema"
 
 mkdir -p "$RESULT_DIR"
 
@@ -105,7 +105,7 @@ prisma_migration_state() {
   local migration_table
 
   case "$schema_name" in
-    tasks_api|budget_api) migration_table="\"${schema_name}\".\"_prisma_migrations\"" ;;
+    tasks_api|content_scheduler) migration_table="\"${schema_name}\".\"_prisma_migrations\"" ;;
     *) cloud_db_die "unsupported migration schema '$schema_name'" ;;
   esac
 
@@ -179,7 +179,7 @@ PY
 }
 
 run_service_migration "tasks-api"  "$TASKS_PRISMA_DIR"  "$TASKS_DSN"  tasks_api
-run_service_migration "budget-api" "$BUDGET_PRISMA_DIR" "$BUDGET_DSN" budget_api
+run_service_migration "content-scheduler-api" "$CONTENT_SCHEDULER_PRISMA_DIR" "$CONTENT_SCHEDULER_DSN" content_scheduler
 
 # ---------------------------------------------------------------------------
 # Emit result envelope
@@ -187,12 +187,12 @@ run_service_migration "budget-api" "$BUDGET_PRISMA_DIR" "$BUDGET_DSN" budget_api
 
 RESULT_PATH="${RESULT_DIR}/migrate-${CLOUD_DB_RUN_ID}.json"
 
-python3 - "$RESULT_PATH" "$CLOUD_DB_RUN_ID" "$TASKS_DSN_FILE" "$BUDGET_DSN_FILE" \
-        "${SERVICE_RESULTS[tasks-api]}" "${SERVICE_RESULTS[budget-api]}" \
+python3 - "$RESULT_PATH" "$CLOUD_DB_RUN_ID" "$TASKS_DSN_FILE" "$CONTENT_SCHEDULER_DSN_FILE" \
+        "${SERVICE_RESULTS[tasks-api]}" "${SERVICE_RESULTS[content-scheduler-api]}" \
         "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
 import json, sys
 
-out_path, run_id, tasks_dsn_file, budget_dsn_file, tasks_state, budget_state, kind_prefix, environment = sys.argv[1:]
+out_path, run_id, tasks_dsn_file, content_scheduler_dsn_file, tasks_state, content_scheduler_state, kind_prefix, environment = sys.argv[1:]
 
 envelope = {
   "schemaVersion": 1,
@@ -203,9 +203,9 @@ envelope = {
     "dsnFile": tasks_dsn_file,
     "state": json.loads(tasks_state),
   },
-  "budget": {
-    "dsnFile": budget_dsn_file,
-    "state": json.loads(budget_state),
+  "contentScheduler": {
+    "dsnFile": content_scheduler_dsn_file,
+    "state": json.loads(content_scheduler_state),
   },
 }
 with open(out_path, "w", encoding="utf-8") as fh:

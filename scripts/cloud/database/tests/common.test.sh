@@ -250,7 +250,28 @@ if [[ ! -s "$TMP/early.txt" ]] || [[ ! -s "$TMP/survive.txt" ]]; then
   echo "FAIL: hooks before and after the failing one should still run" >&2; cat "$LOG" >&2; exit 1
 fi
 
-# 9. Bash version assertion
+# 9. Recovery-target isolation
+echo "test: assert_recovery_isolation accepts a distinct recovery host"
+LOG="$TMP/recovery-ok.log"
+run_capture "$LOG" bash -c 'source "'"$SCRIPT"'"; cloud_db_assert_recovery_isolation "source.internal:5432" "prod.internal:5432" "recovery.internal:5432" "tasks_api"'
+assert_succeeds "distinct recovery host accepted" "$LOG"
+
+echo "test: assert_recovery_isolation refuses a recovery target that is the destination"
+LOG="$TMP/recovery-dest.log"
+run_capture "$LOG" bash -c 'source "'"$SCRIPT"'"; cloud_db_assert_recovery_isolation "source.internal:5432" "prod.internal:5432" "prod.internal:5432" "tasks_api"'
+assert_dies_with "recovery-as-destination refusal" "is the destination's host" "$LOG"
+
+echo "test: assert_recovery_isolation refuses a recovery target that is the source"
+LOG="$TMP/recovery-source.log"
+run_capture "$LOG" bash -c 'source "'"$SCRIPT"'"; cloud_db_assert_recovery_isolation "source.internal:5432" "prod.internal:5432" "source.internal:5432" "tasks_api"'
+assert_dies_with "recovery-as-source refusal" "is the source's host" "$LOG"
+
+echo "test: assert_recovery_isolation refuses an empty host rather than passing"
+LOG="$TMP/recovery-empty.log"
+run_capture "$LOG" bash -c 'source "'"$SCRIPT"'"; cloud_db_assert_recovery_isolation "source.internal:5432" "prod.internal:5432" "" "tasks_api"'
+assert_dies_with "empty recovery host refusal" "a host is empty" "$LOG"
+
+# 10. Bash version assertion
 echo "test: bash version assertion refuses bash 3"
 LOG="$TMP/bash.log"
 if ! command -v bash-3 >/dev/null 2>&1; then

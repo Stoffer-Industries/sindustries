@@ -5,12 +5,12 @@
 #
 # Required secrets (configured on the staging GitHub Environment):
 #   * TASKS_API_SOURCE_DSN            — read-only DSN for source tasks_api
-#   * BUDGET_API_SOURCE_DSN           — read-only DSN for source budget_api
+#   * CONTENT_SCHEDULER_API_SOURCE_DSN           — read-only DSN for source content_scheduler
 #   * TASKS_API_DEST_DSN              — owner DSN for destination tasks_api
-#   * BUDGET_API_DEST_DSN             — owner DSN for destination budget_api
+#   * CONTENT_SCHEDULER_API_DEST_DSN             — owner DSN for destination content_scheduler
 #   * RECOVERY_TASKS_API_DSN          — owner DSN for recovery tasks_api
 #                                       (only required when --recovery)
-#   * RECOVERY_BUDGET_API_DSN         — owner DSN for recovery budget_api
+#   * RECOVERY_CONTENT_SCHEDULER_API_DSN         — owner DSN for recovery content_scheduler
 #                                       (only required when --recovery)
 #
 # Required environment variables (configured on the staging GitHub Environment):
@@ -33,7 +33,7 @@ on:
         type: string
         default: 'none'
       cleanup_destination:
-        description: 'DESTRUCTIVE: before restore, drop the tasks_api and budget_api schemas in the destination database (pg_restore will recreate them). Use only when a previous failed drill left pre-existing schemas in the destination. Two-key auth: the workflow sets CLEANUP_DESTINATION=1 only when this is true, and the drill script also requires --cleanup-destination.'
+        description: 'DESTRUCTIVE: before restore, drop the tasks_api and content_scheduler schemas in the destination database (pg_restore will recreate them). Use only when a previous failed drill left pre-existing schemas in the destination. Two-key auth: the workflow sets CLEANUP_DESTINATION=1 only when this is true, and the drill script also requires --cleanup-destination.'
         required: false
         type: boolean
         default: false
@@ -82,16 +82,16 @@ jobs:
       - name: Write DSNs to mode-0600 files
         env:
           TASKS_SOURCE: ${{ secrets.TASKS_API_SOURCE_DSN }}
-          BUDGET_SOURCE: ${{ secrets.BUDGET_API_SOURCE_DSN }}
+          CONTENT_SCHEDULER_SOURCE: ${{ secrets.CONTENT_SCHEDULER_API_SOURCE_DSN }}
           TASKS_DEST: ${{ secrets.TASKS_API_DEST_DSN }}
-          BUDGET_DEST: ${{ secrets.BUDGET_API_DEST_DSN }}
+          CONTENT_SCHEDULER_DEST: ${{ secrets.CONTENT_SCHEDULER_API_DEST_DSN }}
           TASKS_RECOVERY: ${{ secrets.RECOVERY_TASKS_API_DSN }}
-          BUDGET_RECOVERY: ${{ secrets.RECOVERY_BUDGET_API_DSN }}
+          CONTENT_SCHEDULER_RECOVERY: ${{ secrets.RECOVERY_CONTENT_SCHEDULER_API_DSN }}
         run: |
           set -euo pipefail
-          required=(TASKS_SOURCE BUDGET_SOURCE TASKS_DEST BUDGET_DEST)
+          required=(TASKS_SOURCE CONTENT_SCHEDULER_SOURCE TASKS_DEST CONTENT_SCHEDULER_DEST)
           if [[ "${{ inputs.recovery }}" == "true" ]]; then
-            required+=(TASKS_RECOVERY BUDGET_RECOVERY)
+            required+=(TASKS_RECOVERY CONTENT_SCHEDULER_RECOVERY)
           fi
           for name in "${required[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -103,9 +103,9 @@ jobs:
           chmod 0700 "$RUNNER_TEMP/cloud-staging-secrets"
           for pair in \
               "tasks-source:tasks.dsn:$TASKS_SOURCE" \
-              "budget-source:budget.dsn:$BUDGET_SOURCE" \
+              "content-scheduler-source:content-scheduler.dsn:$CONTENT_SCHEDULER_SOURCE" \
               "tasks-dest:tasks-dest.dsn:$TASKS_DEST" \
-              "budget-dest:budget-dest.dsn:$BUDGET_DEST"; do
+              "content-scheduler-dest:content-scheduler-dest.dsn:$CONTENT_SCHEDULER_DEST"; do
             name="${pair%%:*}"
             rest="${pair#*:}"
             file="${rest%%:*}"
@@ -118,8 +118,8 @@ jobs:
           if [[ "${{ inputs.recovery }}" == "true" ]]; then
             printf '%s' "$TASKS_RECOVERY"  > "$RUNNER_TEMP/cloud-staging-secrets/tasks-recovery.dsn"
             chmod 0600 "$RUNNER_TEMP/cloud-staging-secrets/tasks-recovery.dsn"
-            printf '%s' "$BUDGET_RECOVERY" > "$RUNNER_TEMP/cloud-staging-secrets/budget-recovery.dsn"
-            chmod 0600 "$RUNNER_TEMP/cloud-staging-secrets/budget-recovery.dsn"
+            printf '%s' "$CONTENT_SCHEDULER_RECOVERY" > "$RUNNER_TEMP/cloud-staging-secrets/content-scheduler-recovery.dsn"
+            chmod 0600 "$RUNNER_TEMP/cloud-staging-secrets/content-scheduler-recovery.dsn"
           fi
 
       - name: Pre-flight safety checks
@@ -154,16 +154,24 @@ jobs:
           if [[ "${{ inputs.cleanup_destination }}" == "true" ]]; then
             CLEANUP_FLAG="--cleanup-destination"
           fi
+          RECOVERY_ARGS=()
+          if [[ "${{ inputs.recovery }}" == "true" ]]; then
+            RECOVERY_ARGS=(
+              --recovery-tasks-dsn-file "$SEC/tasks-recovery.dsn"
+              --recovery-content-scheduler-dsn-file "$SEC/content-scheduler-recovery.dsn"
+            )
+          fi
           RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 3)"
           export CLOUD_DB_RUN_ID="$RUN_ID"
           ./scripts/cloud/database/drill.sh \
             --source-tasks-dsn-file  "$SEC/tasks-source-tasks.dsn" \
-            --source-budget-dsn-file "$SEC/budget-source-budget.dsn" \
+            --source-content-scheduler-dsn-file "$SEC/content-scheduler-source-content-scheduler.dsn" \
             --dest-tasks-dsn-file    "$SEC/tasks-dest-tasks-dest.dsn" \
-            --dest-budget-dsn-file   "$SEC/budget-dest-budget-dest.dsn" \
+            --dest-content-scheduler-dsn-file   "$SEC/content-scheduler-dest-content-scheduler-dest.dsn" \
             --confirm "$RUN_ID" \
             --interruption "${{ inputs.interruption }}" \
             $RECOVERY_FLAG \
+            "${RECOVERY_ARGS[@]}" \
             $CLEANUP_FLAG \
             --archive-dir "$RUNNER_TEMP/cloud-staging-artifacts" \
             --output      "$RUNNER_TEMP/cloud-staging-artifacts/drill-final.json"

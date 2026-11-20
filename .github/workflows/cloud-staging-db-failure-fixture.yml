@@ -13,7 +13,8 @@ name: cloud-staging-db-failure-fixture
 #   - read or write the live sindustries staging Environment
 #   - read or write the cloud-staging-database concurrency group
 #   - read or write any of the 4 DSN secrets (TASKS_API_SOURCE_DSN,
-#     BUDGET_API_SOURCE_DSN, TASKS_API_DEST_DSN, BUDGET_API_DEST_DSN)
+#     CONTENT_SCHEDULER_API_SOURCE_DSN, TASKS_API_DEST_DSN,
+#     CONTENT_SCHEDULER_API_DEST_DSN)
 #   - mutate any production prisma/migrations/ directory
 
 on:

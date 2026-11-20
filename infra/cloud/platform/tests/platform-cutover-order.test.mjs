@@ -194,7 +194,7 @@ describe('platform deploy gate', () => {
       'the platform must not be provisioned from the read-only drill source DSN'
     );
     assert.ok(
-      !workflow.includes('secrets.BUDGET_API_SOURCE_DSN'),
+      !workflow.includes('secrets.CONTENT_SCHEDULER_API_SOURCE_DSN'),
       'the platform must not be provisioned from the read-only drill source DSN'
     );
   });

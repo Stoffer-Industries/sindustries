@@ -115,15 +115,32 @@ gate is unmet, naming the owner of each unmet gate. Its gates are:
 | `github.production-environment-captured` | the `production` Environment could be read at all — an unreadable provider is an OPEN gate, not a pass |
 | `github.cutover-dsn-secrets` | all six DSN secrets below are registered on the Environment |
 | `github.production-approval-gate` | the Environment has at least one required reviewer and admins cannot bypass the gate |
-| `neon.cutover-database-capacity` | the production Neon environment serves at least three distinct databases — the source, a destination that is empty before the restore, and a recovery database to reconcile against. The count is over DATABASES (a branch and a database name), not over endpoint hosts: a read replica is another address for the same database, so scaling out replicas does not create a database to restore into |
+| `neon.cutover-destination-database` | the production Neon environment serves at least one logical database, so the destination — the EXISTING production database that hosts the `tasks_api` and `content_scheduler` schemas — is real. The count is over DATABASES (a branch and a database name), not over endpoint hosts: a read replica is another address for the same database |
 
 The last gate exists because a secret can be REGISTERED against a
 database that does not exist. The workflow's secret check only asks
 whether the secret is non-empty, so a DSN pointing at a database that was
 never created passes that check and fails at the RESTORE — after the
-dump, with the source already quiesced. The destination and recovery
-databases must also be PRODUCTION databases: the endpoint allowlist is
-operator-declared, so a staging host that is declared passes it.
+dump, with the source already quiesced.
+
+**The topology (Tom's execution decision, 2026-11-19).** The destination
+is the EXISTING production Neon database — its `tasks_api` and
+`content_scheduler` schemas — and no new permanent production database
+is created for this cutover. The recovery target is a TEMPORARY,
+isolated database used only to prove that a verified backup restores; it
+is created for the run and dropped after it, and it is not counted by
+the gate above. The obsolete "three distinct production databases"
+requirement is gone: it asked the operator to create permanent
+production databases the migration is explicitly forbidden from creating.
+
+**The recovery target's isolation is enforced in code, not in prose.**
+`drill.sh` reads the host out of each recovery DSN and refuses the run
+when the recovery target shares a host with the source (which would
+overwrite the rollback source) or with the destination (which would
+reconcile the destination against itself). The workflow refuses a
+`recovery_host` equal to the source or destination host, and requires it
+to be declared: an undeclared recovery endpoint fails the run, so a
+recovery target can never be an endpoint the operator did not name.
 
 Two things about that gate decide how the operator closes it. The count
 is over DATABASES, not over endpoint hosts: a Neon branch can carry a
@@ -148,11 +165,11 @@ capture can never read as "ready".
 | Secret | Purpose |
 |---|---|
 | `TASKS_API_SOURCE_DSN` | read-only DSN for source `tasks_api` |
-| `BUDGET_API_SOURCE_DSN` | read-only DSN for source `budget_api` |
+| `CONTENT_SCHEDULER_API_SOURCE_DSN` | read-only DSN for source `content_scheduler` |
 | `TASKS_API_DEST_DSN` | owner DSN for destination `tasks_api` |
-| `BUDGET_API_DEST_DSN` | owner DSN for destination `budget_api` |
+| `CONTENT_SCHEDULER_API_DEST_DSN` | owner DSN for destination `content_scheduler` |
 | `RECOVERY_TASKS_API_DSN` | owner DSN for the recovery database (only with `recovery=true`) |
-| `RECOVERY_BUDGET_API_DSN` | owner DSN for the recovery database (only with `recovery=true`) |
+| `RECOVERY_CONTENT_SCHEDULER_API_DSN` | owner DSN for the recovery target's `content_scheduler` schema (only with `recovery=true`) |
 
 The workflow writes each DSN to a mode-`0600` file in the runner's temp
 directory before the scripts run. The scripts accept file paths only —
@@ -172,6 +189,10 @@ byte.
    - `destination_host` = the destination endpoint's `host[:port]`
    - `recovery` = `true` when AC3 backup evidence is being captured in
      the same window
+   - `recovery_host` = the recovery target's `host[:port]`, required when
+     `recovery` is `true`. It must differ from `source_host` and
+     `destination_host` — the workflow and the drill both refuse a
+     recovery target that shares a host with either
    - `interruption` = `none`
    - `cleanup_destination` = `false` unless a previous failed run left
      schemas behind in the destination
@@ -184,7 +205,7 @@ byte.
    - `restore.sh` — restores into the destination, refuses a
      non-empty destination, verifies both schemas exist afterwards;
    - `migrate.sh` — `prisma migrate deploy` for `tasks-api` and
-     `budget-api`, refusing to run over failed migrations;
+     `content-scheduler-api`, refusing to run over failed migrations;
    - `reconcile.mjs` — service-owned reconciliation manifests, count
      comparison, primary-key digest comparison, `verdict=PASS|FAIL`;
    - `manifest.sh` — the evidence manifest (step 8 in `drill.sh`).

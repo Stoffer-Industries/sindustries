@@ -76,7 +76,7 @@
  * migrations skipped the service could not perform a normal write.
  *
  * That rules out the database drill's `TASKS_API_SOURCE_DSN` and
- * `BUDGET_API_SOURCE_DSN`: those are the drill's READ-ONLY source DSNs
+ * `CONTENT_SCHEDULER_API_SOURCE_DSN`: those are the drill's READ-ONLY source DSNs
  * (.github/workflows/cloud-staging-db-drill.yml and
  * docs/runbooks/staging-database-migration-restore.md §1), and using them
  * here would discover the read-only role only on the first live deploy.
@@ -841,7 +841,7 @@ export function main(argv = process.argv.slice(2), overrides = {}) {
         `(Settings > Environments > ${environment.githubEnvironment} > Environment secrets). ` +
         `The database sources (${requiredDatabaseSourceNames(environment).join(', ')}) must be WRITE-CAPABLE: the platform runs ` +
         'prisma migrate deploy in its release command and the services write normally. The database drill\'s ' +
-        'read-only source DSNs (TASKS_API_SOURCE_DSN, BUDGET_API_SOURCE_DSN) are not valid sources for this app.'
+        'read-only source DSNs (TASKS_API_SOURCE_DSN, CONTENT_SCHEDULER_API_SOURCE_DSN) are not valid sources for this app.'
     );
     return 1;
   }

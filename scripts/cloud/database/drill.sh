@@ -8,7 +8,7 @@
 #   1. inventory source
 #   2. dump source to a verified custom archive
 #   3. restore archive into a fresh destination
-#   4. run prisma migrate deploy for tasks-api + budget-api
+#   4. run prisma migrate deploy for tasks-api + content-scheduler-api
 #   5. reconcile source vs destination (no row data, no IDs, no DSNs)
 #   6. (optional) dump the destination, restore into a recovery DB,
 #      run migrations + reconciliation again
@@ -27,17 +27,17 @@ cloud_db_assign_run_id
 usage() {
   cat <<'USAGE'
 Usage: drill.sh \
-  --source-tasks-dsn-file <path> --source-budget-dsn-file <path> \
-  --dest-tasks-dsn-file <path>   --dest-budget-dsn-file <path> \
+  --source-tasks-dsn-file <path> --source-content-scheduler-dsn-file <path> \
+  --dest-tasks-dsn-file <path>   --dest-content-scheduler-dsn-file <path> \
   --confirm <run-id> \
   [--archive-dir <path>] [--recovery] [--interruption <dump|restore|none>] \
   [--cleanup-destination]
 
 Required:
   --source-tasks-dsn-file <path>     Source tasks_api DSN file.
-  --source-budget-dsn-file <path>    Source budget_api DSN file.
+  --source-content-scheduler-dsn-file <path>    Source content_scheduler DSN file.
   --dest-tasks-dsn-file <path>       Destination tasks_api DSN file.
-  --dest-budget-dsn-file <path>      Destination budget_api DSN file.
+  --dest-content-scheduler-dsn-file <path>      Destination content_scheduler DSN file.
   --confirm <run-id>                 Must match CLOUD_DB_RUN_ID.
 
 Optional:
@@ -54,14 +54,23 @@ Optional:
                                      MUST declare every endpoint it
                                      touches.
   --recovery                         Also restore into a recovery DB and
-                                     re-reconcile.
+                                     re-reconcile. The recovery target
+                                     must be its own endpoint: the drill
+                                     refuses a recovery DSN that shares a
+                                     host with the source or the
+                                     destination.
+  --recovery-tasks-dsn-file <path>    Recovery tasks_api DSN file.
+                                     Required with --recovery.
+  --recovery-content-scheduler-dsn-file <path>
+                                     Recovery content_scheduler DSN file.
+                                     Required with --recovery.
   --interruption <kind>              Run a single interruption drill:
                                      "dump" (interrupt pg_dump),
                                      "restore" (interrupt pg_restore),
                                      or "none" (default: none).
   --cleanup-destination              Operator-only. Before restore,
                                      drop and recreate the
-                                     tasks_api and budget_api schemas
+                                     tasks_api and content_scheduler schemas
                                      in the destination database so
                                      the restore target is empty.
                                      Requires CLEANUP_DESTINATION=1 in
@@ -72,8 +81,9 @@ Optional:
 USAGE
 }
 
-SRC_TASKS_FILE="" SRC_BUDGET_FILE=""
-DEST_TASKS_FILE="" DEST_BUDGET_FILE=""
+SRC_TASKS_FILE="" SRC_CONTENT_SCHEDULER_FILE=""
+DEST_TASKS_FILE="" DEST_CONTENT_SCHEDULER_FILE=""
+RECOVERY_TASKS_FILE="" RECOVERY_CONTENT_SCHEDULER_FILE=""
 ARCHIVE_DIR=""
 RECOVERY=0
 INTERRUPTION="none"
@@ -84,13 +94,15 @@ ENVIRONMENT="${ENVIRONMENT:-staging}"
 while (( $# > 0 )); do
   case "$1" in
     --source-tasks-dsn-file)  SRC_TASKS_FILE="$2";  shift 2;;
-    --source-budget-dsn-file) SRC_BUDGET_FILE="$2"; shift 2;;
+    --source-content-scheduler-dsn-file) SRC_CONTENT_SCHEDULER_FILE="$2"; shift 2;;
     --dest-tasks-dsn-file)    DEST_TASKS_FILE="$2";  shift 2;;
-    --dest-budget-dsn-file)   DEST_BUDGET_FILE="$2"; shift 2;;
+    --dest-content-scheduler-dsn-file)   DEST_CONTENT_SCHEDULER_FILE="$2"; shift 2;;
     --archive-dir)            ARCHIVE_DIR="$2";      shift 2;;
     --environment)            ENVIRONMENT="$2";      shift 2;;
     --expected-host)          cloud_db_add_expected_host "$2"; shift 2;;
     --recovery)               RECOVERY=1;            shift;;
+    --recovery-tasks-dsn-file)         RECOVERY_TASKS_FILE="$2"; shift 2;;
+    --recovery-content-scheduler-dsn-file) RECOVERY_CONTENT_SCHEDULER_FILE="$2"; shift 2;;
     --interruption)           INTERRUPTION="$2";     shift 2;;
     --cleanup-destination)    CLEANUP_DESTINATION_FLAG=1; shift;;
     --confirm)                CONFIRM="$2";          shift 2;;
@@ -112,7 +124,7 @@ for host in "${CLOUD_DB_TARGET_HOSTS[@]}"; do
   EXPECTED_HOST_FLAGS+=(--expected-host "$host")
 done
 
-for v in SRC_TASKS_FILE SRC_BUDGET_FILE DEST_TASKS_FILE DEST_BUDGET_FILE CONFIRM; do
+for v in SRC_TASKS_FILE SRC_CONTENT_SCHEDULER_FILE DEST_TASKS_FILE DEST_CONTENT_SCHEDULER_FILE CONFIRM; do
   if [[ -z "${!v}" ]]; then
     cloud_db_die "--${v,,} is required"
   fi
@@ -180,7 +192,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 2.5: optional destination cleanup (operator only). The
-# cleanup-destination.sh script drops the tasks_api and budget_api
+# cleanup-destination.sh script drops the tasks_api and content_scheduler
 # schemas and leaves them absent; pg_restore recreates them as part
 # of its own DDL during the restore step. The two-key auth (CLI
 # flag + env var) is enforced in cleanup-destination.sh itself;
@@ -193,7 +205,7 @@ if [[ "$CLEANUP_DESTINATION_FLAG" -eq 1 ]]; then
     "$(dirname "${BASH_SOURCE[0]}")/cleanup-destination.sh" \
       --source-tasks-dsn-file "$SRC_TASKS_FILE" \
       --dest-tasks-dsn-file   "$DEST_TASKS_FILE" \
-      --dest-budget-dsn-file  "$DEST_BUDGET_FILE" \
+      --dest-content-scheduler-dsn-file  "$DEST_CONTENT_SCHEDULER_FILE" \
       --confirm "$CONFIRM" \
       --confirm-cleanup-destination \
       --environment "$ENVIRONMENT" \
@@ -234,7 +246,7 @@ cloud_db_info "step 3 restore complete"
 
 MIGRATE_OUT="$("$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
   --tasks-dsn-file "$DEST_TASKS_FILE" \
-  --budget-dsn-file "$DEST_BUDGET_FILE" \
+  --content-scheduler-dsn-file "$DEST_CONTENT_SCHEDULER_FILE" \
   --result-dir "$ARCHIVE_DIR" \
   --environment "$ENVIRONMENT" \
   "${EXPECTED_HOST_FLAGS[@]}")"
@@ -249,9 +261,9 @@ RECONCILE_OUT="${ARCHIVE_DIR}/reconcile-${CLOUD_DB_RUN_ID}.json"
 RECONCILE_EXIT=0
 "$(dirname "${BASH_SOURCE[0]}")/reconcile.mjs" \
   --source-tasks-dsn-file  "$SRC_TASKS_FILE" \
-  --source-budget-dsn-file "$SRC_BUDGET_FILE" \
+  --source-content-scheduler-dsn-file "$SRC_CONTENT_SCHEDULER_FILE" \
   --dest-tasks-dsn-file    "$DEST_TASKS_FILE" \
-  --dest-budget-dsn-file   "$DEST_BUDGET_FILE" \
+  --dest-content-scheduler-dsn-file   "$DEST_CONTENT_SCHEDULER_FILE" \
   --environment "$ENVIRONMENT" \
   --output "$RECONCILE_OUT" || RECONCILE_EXIT=$?
 
@@ -266,25 +278,45 @@ cloud_db_info "step 5 reconcile complete"
 
 RECOVERY_OUT=""
 if (( RECOVERY )); then
-  # The recovery DSN files are expected to be named `<dest-stem>-recovery.dsn`,
-  # where `<dest-stem>` is the destination file path with the `.dsn` suffix
-  # stripped. This is the convention documented in the runbook; refuse any
-  # future caller that violates it instead of silently reading the wrong
-  # file.
-  case "$DEST_TASKS_FILE" in
-    *.dsn) ;;
-    *) cloud_db_die "destination DSN file '$DEST_TASKS_FILE' must end in .dsn (runbook convention)" ;;
-  esac
-  case "$DEST_BUDGET_FILE" in
-    *.dsn) ;;
-    *) cloud_db_die "destination DSN file '$DEST_BUDGET_FILE' must end in .dsn (runbook convention)" ;;
-  esac
-  RECOVERY_TASKS_FILE="${DEST_TASKS_FILE%.dsn}-recovery.dsn"
-  RECOVERY_BUDGET_FILE="${DEST_BUDGET_FILE%.dsn}-recovery.dsn"
-  if [[ ! -f "$RECOVERY_TASKS_FILE" || ! -f "$RECOVERY_BUDGET_FILE" ]]; then
+  # The recovery target is an EXPLICIT pair of DSN files. It used to be
+  # derived from the destination file names (`<dest-stem>-recovery.dsn`),
+  # which was a convention the workflows did not actually follow: the
+  # production and staging workflows both wrote `tasks-recovery.dsn`
+  # while the drill looked for `tasks-dest-tasks-dest-recovery.dsn`, so
+  # the recovery path failed on a missing file. An explicit argument
+  # cannot drift from the caller's naming.
+  if [[ -z "$RECOVERY_TASKS_FILE" || -z "$RECOVERY_CONTENT_SCHEDULER_FILE" ]]; then
     cloud_db_die \
-      "recovery requested but ${RECOVERY_TASKS_FILE} or ${RECOVERY_BUDGET_FILE} is missing"
+      "recovery requested but --recovery-tasks-dsn-file / --recovery-content-scheduler-dsn-file were not provided"
   fi
+
+  # ISOLATION. The recovery target proves that a verified backup restores
+  # into a usable state, so it must be a database of its own:
+  #   * NOT the destination — restoring the archive into the destination
+  #     and then reconciling the destination against itself produces
+  #     evidence that looks green and proves nothing.
+  #   * NOT the source — the source stays authoritative until the
+  #     observation period ends, and it is the rollback target. A
+  #     recovery DSN that pointed at the source would write the archive
+  #     back over it.
+  # The host is read straight out of the DSN file, so the credential
+  # never enters the environment of the drill.
+  recovery_tasks_host="$(cloud_db_dsn_host_from_file "$RECOVERY_TASKS_FILE")"
+  recovery_content_scheduler_host="$(cloud_db_dsn_host_from_file "$RECOVERY_CONTENT_SCHEDULER_FILE")"
+  destination_tasks_host="$(cloud_db_dsn_host_from_file "$DEST_TASKS_FILE")"
+  destination_content_scheduler_host="$(cloud_db_dsn_host_from_file "$DEST_CONTENT_SCHEDULER_FILE")"
+  source_tasks_host="$(cloud_db_dsn_host_from_file "$SRC_TASKS_FILE")"
+
+  cloud_db_assert_recovery_isolation \
+    "$source_tasks_host" \
+    "$destination_tasks_host" \
+    "$recovery_tasks_host" \
+    "tasks_api"
+  cloud_db_assert_recovery_isolation \
+    "$source_tasks_host" \
+    "$destination_content_scheduler_host" \
+    "$recovery_content_scheduler_host" \
+    "content_scheduler"
 
   DUMP2_OUT="$(
     "$(dirname "${BASH_SOURCE[0]}")/dump.sh" \
@@ -307,7 +339,7 @@ if (( RECOVERY )); then
 
   "$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
     --tasks-dsn-file "$RECOVERY_TASKS_FILE" \
-    --budget-dsn-file "$RECOVERY_BUDGET_FILE" \
+    --content-scheduler-dsn-file "$RECOVERY_CONTENT_SCHEDULER_FILE" \
     --result-dir "$ARCHIVE_DIR" \
     --environment "$ENVIRONMENT" \
     "${EXPECTED_HOST_FLAGS[@]}" >/dev/null
@@ -315,9 +347,9 @@ if (( RECOVERY )); then
   RECOVERY_OUT="${ARCHIVE_DIR}/reconcile-recovery-${CLOUD_DB_RUN_ID}.json"
   "$(dirname "${BASH_SOURCE[0]}")/reconcile.mjs" \
     --source-tasks-dsn-file  "$DEST_TASKS_FILE" \
-    --source-budget-dsn-file "$DEST_BUDGET_FILE" \
+    --source-content-scheduler-dsn-file "$DEST_CONTENT_SCHEDULER_FILE" \
     --dest-tasks-dsn-file    "$RECOVERY_TASKS_FILE" \
-    --dest-budget-dsn-file   "$RECOVERY_BUDGET_FILE" \
+    --dest-content-scheduler-dsn-file   "$RECOVERY_CONTENT_SCHEDULER_FILE" \
     --environment "$ENVIRONMENT" \
     --output "$RECOVERY_OUT" || cloud_db_die "recovery reconcile FAILED; see ${RECOVERY_OUT}"
 

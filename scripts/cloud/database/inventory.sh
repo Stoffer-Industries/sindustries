@@ -104,7 +104,7 @@ schemas_json="$(
     --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
     --dbname="$SOURCE_DSN" \
-    --command="SELECT json_agg(json_build_object('name', schema_name) ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','budget_api','public');"
+    --command="SELECT json_agg(json_build_object('name', schema_name) ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','content_scheduler','public');"
 )"
 
 extensions_json="$(
@@ -132,7 +132,7 @@ relation_counts_json="$(
         FROM information_schema.tables t
         JOIN pg_class c ON c.relname = t.table_name
         JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.table_schema
-        WHERE table_schema IN ('tasks_api','budget_api')
+        WHERE table_schema IN ('tasks_api','content_scheduler')
           AND table_type = 'BASE TABLE'
       ) t;"
 )"

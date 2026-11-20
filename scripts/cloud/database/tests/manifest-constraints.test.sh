@@ -26,7 +26,7 @@ fi
 
 MANIFESTS=(
   "$REPO_ROOT/services/tasks-api/ops/reconciliation.sql"
-  "$REPO_ROOT/services/budget-api/ops/reconciliation.sql"
+  "$REPO_ROOT/services/content-scheduler-api/ops/reconciliation.sql"
 )
 
 # Patterns are intentionally grep -E extended regexes; the test reports
