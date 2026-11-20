@@ -166,7 +166,11 @@ http {
     }
 
     # ------------------------------------------------------------------
-    # Provider hostname — path-prefix fallback while DNS is blocked.
+    # Provider hostname — path-prefix fallback on the provider host.
+    #
+    # The stable hostnames are live (CNAME + cert landed 2026-11-10, task
+    # 5cb4a8fe; verified live 2026-11-21), so the provider host's
+    # path-prefix routes are the documented fallback and the proof path.
     #
     #   /tasks-api/*            -> 127.0.0.1:4001/*
     #   /budget-api/*           -> 127.0.0.1:4002/*

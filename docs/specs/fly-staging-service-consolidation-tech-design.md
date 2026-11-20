@@ -91,10 +91,13 @@ Facts that constrain the design (all verified in this repo, 2026-11-06):
 6. **tasks-api asserts its API-port/DB-port pairing** at boot
    (`services/tasks-api/src/server.ts:15-44`), with `ALLOW_PORT_DB_MISMATCH=1` as the
    documented escape hatch. Its `PORT=4001` must not change.
-7. **The stable staging hostnames do not currently resolve.** All three service hostnames
-   return NXDOMAIN on 1.1.1.1 and 8.8.8.8 (confirmed 2026-11-05, CI run `42001867228`;
-   tracked by task `5cb4a8fe`, `attentionOwners: ['Tom']`). The blocker is a Cloudflare
-   token with `Zone:DNS:Edit` that Tom owns; the agent token is read-only.
+7. **The stable staging hostnames did not resolve when this design was written.** All three
+   service hostnames returned NXDOMAIN on 1.1.1.1 and 8.8.8.8 (confirmed 2026-11-05, CI run
+   `42001867228`; tracked by task `5cb4a8fe`). The blocker was a Cloudflare token with
+   `Zone:DNS:Edit` that Tom owns; the agent token is read-only. **Superseded:** task
+   `5cb4a8fe` landed the three records on 2026-11-10 and the certificates are issued and
+   live — verified live 2026-11-21, all three hostnames resolve to
+   `sindustries-platform-staging.fly.dev` and answer HTTP 200 on `/health`.
 
 ---
 
@@ -145,10 +148,12 @@ infra (nginx), needs no application-code change, and keeps the public URLs ident
 today, which is what AC2 requires ("remain reachable on their existing routes").
 
 The router also needs a **path-prefix** fallback for the provider hostname
-(`sindustries-platform-staging.fly.dev`) because the stable hostnames do not resolve yet
-(§2 fact 7): `/tasks-api/*`, `/budget-api/*`, `/content-scheduler-api/*` on the single
-provider hostname. That keeps staging usable while the DNS blocker is open, and it means
-the consolidation does not have to wait on Tom's Cloudflare token to be built and tested.
+(`sindustries-platform-staging.fly.dev`) because the stable hostnames did not resolve when
+this design was written (§2 fact 7): `/tasks-api/*`, `/budget-api/*`,
+`/content-scheduler-api/*` on the single provider hostname. That kept staging usable while
+the DNS blocker was open, and it meant the consolidation did not have to wait on Tom's
+Cloudflare token to be built and tested. The fallback is still the documented route to the
+provider host; the stable hostnames have since resolved (§2 fact 7).
 
 ### 3.3 Per-service environment inside one Machine
 
@@ -358,7 +363,7 @@ API resource, not a shared application package.
 | AC | Verification | Layer | Notes |
 | --- | --- | --- | --- |
 | AC1 | `fly machine list --app sindustries-platform-staging` shows **one** Machine; `fly status` shows one process group; the supervisor's `/status` shows four children with the expected commands; `fly logs` shows each child's structured startup line. | integration (live staging) + unit for the supervisor | Supervisor unit tests: child env mapping, restart-on-exit with backoff, SIGTERM propagation, status payload shape. No E2E browser test is applicable (no user-visible app flow changes). |
-| AC2 | `curl -fsS https://tasks-api.staging.sindustries.co.nz/health` → 200; same for `budget-api` and `content-scheduler-api`; `curl -fsS https://sindustries-platform-staging.fly.dev/tasks-api/health` → 200; the auto-post worker has **no** route: `curl` against any worker path returns 404/502 and the worker appears in `/status` as a child with no listener. | integration (live staging) | Provider-hostname path routes are the interim proof while DNS is blocked. |
+| AC2 | `curl -fsS https://tasks-api.staging.sindustries.co.nz/health` → 200; same for `budget-api` and `content-scheduler-api`; `curl -fsS https://sindustries-platform-staging.fly.dev/tasks-api/health` → 200; the auto-post worker has **no** route: `curl` against any worker path returns 404/502 and the worker appears in `/status` as a child with no listener. | integration (live staging) | Provider-hostname path routes were the interim proof while DNS was blocked; they are now the documented fallback route. |
 | AC3 | `health-probe` emits the same metric names/labels as before (target labels `tasks-api`, `budget-api`, `content-scheduler-api`); probe's own unit tests unchanged and green; a live probe pass shows all three HTTP targets healthy. | unit (existing probe tests) + integration (live probe) | The probe's *secrets* are re-pointed by Quinn; the probe's code and metric contract are untouched, which is what AC3 asks. |
 | AC4 | Before/after `fly machine list` captures attached to the task; computed monthly figure; assert consolidated monthly cost < four-machine monthly cost. | integration (live Fly API) | Baseline re-derived from the live billing API, not from the spec's prose (§4 AC4). |
 | AC5 | `docs/systems/cloud-platform.md` contains the shared-fate subsection; `infra/cloud/README.md` points at it; the runbook states the cutover + backout; a reviewer other than the author confirms each of the four claims is stated where an operator would look. | manual review | No user-visible app flow changes → no app `SPEC.md` change needed; `docs/systems/` is the right surface per `docs/CONVENTIONS.md` consolidation bias. |
@@ -378,9 +383,10 @@ plus the `infra/cloud` contract-test job for the `bin/` script changes.
    service entry.
 2. DNS: the three stable hostnames must resolve to the consolidated app's
    `*.fly.dev` name, and `fly certs add <hostname> --app sindustries-platform-staging`
-   per hostname. **Blocked today** on Tom's Cloudflare `Zone:DNS:Edit` token (task
-   `5cb4a8fe`). The interim provider-hostname path routes let the build and most of the
-   verification proceed without it.
+   per hostname. **Blocked at design time** on Tom's Cloudflare `Zone:DNS:Edit` token (task
+   `5cb4a8fe`); the task has since landed the records and the certificates (2026-11-10,
+   verified live 2026-11-21). The interim provider-hostname path routes let the build and
+   most of the verification proceed without it.
 3. The `content-scheduler` BullMQ queue and its worker must not be double-running: the
    old worker app must be scaled to zero **before** the consolidated app starts its
    worker child, and the old apps must be scaled to zero before the CNAMEs move.
@@ -414,7 +420,9 @@ bootstrap script.
 
 **Q3 (needs Tom/Quinn):** the `Zone:DNS:Edit` Cloudflare token. Without it the cutover
 cannot move the CNAMEs, so the consolidation can be built and verified on the provider
-hostname but not fully landed on the stable routes.
+hostname but not fully landed on the stable routes. **Answered:** Cloudflare is the DNS
+provider, the token was provisioned, and task `5cb4a8fe` landed the records on 2026-11-10
+(verified live 2026-11-21).
 
 **Risks:**
 
