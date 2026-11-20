@@ -85,14 +85,15 @@ staging footprint is replaced by one.
    fly certs add content-scheduler-api.staging.sindustries.co.nz --app sindustries-platform-staging
    ```
 
-   **This is blocked today.** It needs a Cloudflare token with
-   `Zone:DNS:Edit` on `sindustries.co.nz` (zone id
-   `0f39d3030163fed274d76185b71b21d4`), which only Tom holds — the token on
-   this machine is read-only. Tracked by task `5cb4a8fe`, with Tom at
-   `attentionOwners[0]`.
+   **Done.** The records and the certificates landed on 2026-11-10 (task
+   `5cb4a8fe`; Cloudflare is the DNS provider for `sindustries.co.nz`, zone id
+   `0f39d3030163fed274d76185b71b21d4`). Verified live 2026-11-21: all three
+   stable staging hostnames resolve to `sindustries-platform-staging.fly.dev`
+   and answer HTTP 200 on `/health` with a live Let's Encrypt certificate. The
+   commands above are recorded as the procedure, not as outstanding work.
 
-   Until DNS lands, the platform is still fully usable through the
-   provider hostname's path-prefix routes:
+   The provider hostname's path-prefix routes remain the documented fallback
+   and the proof path:
 
    ```
    https://sindustries-platform-staging.fly.dev/tasks-api/health
@@ -166,8 +167,8 @@ restart count, last exit code, RSS and heartbeat.
 ### Step 3 — move the CNAMEs
 
 Point `tasks-api`, `budget-api` and `content-scheduler-api` CNAMEs at
-`sindustries-platform-staging.fly.dev`. This is the Cloudflare step that is
-blocked on Tom's token.
+`sindustries-platform-staging.fly.dev`. This is the Cloudflare step, and it has
+since been done (see the note below).
 
 > **Done, out of band.** This step did not run on 2026-11-07, but task
 > `5cb4a8fe` created the three records afterwards (verified 2026-11-19: all
