@@ -15,7 +15,9 @@
 #   production: tasks-api.sindustries.co.nz
 # The staging certificate is added to the consolidated platform app instead:
 # `fly certs add tasks-api.staging.sindustries.co.nz --app sindustries-platform-staging`
-# (Quinn-owned operator step; the cert is auto-issued by Let's Encrypt once the CNAME lands).
+# (Quinn-owned operator step — done: the CNAME landed 2026-11-10 and the
+# certificate is issued and live; verified live 2026-11-21, the stable staging
+# hostname answers HTTP 200).
 #
 # Mirror of services/gymtrack-mcp/fly.toml with the staging-specific app name,
 # primary_region kept at 'syd' (matches the existing gymtrack-mcp precedent and
