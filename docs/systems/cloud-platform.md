@@ -575,7 +575,7 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 
 - Six public surfaces: mission-control, tasks-app, tasks-api, budget-api, content-scheduler-api, health-probe.
 - The auto-post worker row with `staging: null`, `production: null`, and `publicUrl: false` — the explicit non-public nature is auditable from the matrix and from the per-hostname comment block at the top of `infra/cloud/fly/auto-post-worker.fly.toml`.
-- A `providerFallback` per public surface (the `*.fly.dev` / `*.vercel.app` URL the design records as the migration path until the stable CNAMEs + certs land).
+- A `providerFallback` per public surface (the `*.fly.dev` / `*.vercel.app` URL the design records as the migration path). The stable CNAMEs + certs have landed since — task `5cb4a8fe` created the records (verified live 2026-11-21) — so the provider URL is the documented fallback rather than the only route.
 - A `cnameTargets` per public surface (the DNS target each stable hostname's CNAME must resolve to, per environment).
 - A `vercelProject` per frontend surface (the production Vercel project that owns the production stable hostname) and a `vercelStagingProject` (the staging Vercel project that owns the staging stable hostname).
 

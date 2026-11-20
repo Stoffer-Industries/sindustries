@@ -624,8 +624,8 @@ App:
   platform:            https://${FLY_APP_PLATFORM}.fly.dev
   health probe:        $HEALTH_PROBE_APP
 
-Service routes (path-prefix on the platform host until the stable hostnames
-resolve — task 5cb4a8fe):
+Service routes (path-prefix on the platform host; the stable hostnames are
+live — task 5cb4a8fe):
   tasks-api:           https://${FLY_APP_PLATFORM}.fly.dev/tasks-api/health
   budget-api:          https://${FLY_APP_PLATFORM}.fly.dev/budget-api/health
   content-scheduler:   https://${FLY_APP_PLATFORM}.fly.dev/content-scheduler-api/health
