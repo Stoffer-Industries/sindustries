@@ -174,7 +174,7 @@ Do NOT commit any live exporter or provisioning credential. The redacted `.env.e
 - **Alertmanager** — Grafana Cloud's built-in alerting is sufficient. Adding Alertmanager would add another Fly app to operate.
 - **Drift detection cron** — the existing drift detection workstream (separate task) covers the observability stack as one of its targets.
 - **Product analytics** — out of scope per the spec's non-goals.
-- **A `*.sindustries.dev` Grafana subdomain** — owned by Grafana Cloud; future UX improvement, not a foundation requirement.
+- **A first-party Grafana subdomain** — owned by Grafana Cloud; future UX improvement, not a foundation requirement (the live zone is `sindustries.co.nz`; the `sindustries.dev` reservation was never provisioned).
 
 ---
 

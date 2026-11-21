@@ -553,7 +553,7 @@ platform app's provider hostname and answers HTTP 200 on `/health`
 | Fly.io organisation `personal`       | Quinn  | Quinn's personal card; will move to SIndustries billing once that's a legal entity |
 | Neon account + projects              | Quinn  | Same                                         |
 | Fly-managed Redis add-ons            | Quinn  | Billed through the `personal` Fly organization |
-| `sindustries.dev` domain             | Quinn  | Same                                         |
+| `sindustries.co.nz` domain           | Quinn  | Same                                         |
 | GH repo secrets (`FLY_API_TOKEN`)    | Quinn  | n/a (no cost)                                |
 | GH Actions minutes                   | GitHub | Within the org's plan                        |
 

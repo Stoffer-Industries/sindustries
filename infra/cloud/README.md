@@ -101,7 +101,7 @@ The auto-post-worker source lives in `services/content-scheduler-api/` after the
 | ------ | ---------------------------------------------------------------------------------------------------------------------- |
 | Quinn  | Fly.io API token, Neon connection string + DIRECT_URL, Fly-managed Upstash connection URLs, DNS provider token.       |
 | Quinn  | First-time execution of `bootstrap-staging.sh` (requires live secrets; never runs in CI).                              |
-| Quinn  | DNS record creation (CNAMEs for `*.sindustries.dev`).                                                                   |
+| Quinn  | DNS record creation (CNAMEs for the `*.staging.sindustries.co.nz` / `*.sindustries.co.nz` names; Cloudflare DNS — live since 2026-11-10).                                                                   |
 | Rowan  | All artefacts under `infra/cloud/` and `.github/workflows/deploy-staging-*.yml`.                                       |
 | Rowan  | PR reviewable surface for the deploy topology itself.                                                                  |
 | Shared | GitHub Actions repo secrets: `FLY_API_TOKEN` (Quinn registers once; Rowan references by name only).                    |

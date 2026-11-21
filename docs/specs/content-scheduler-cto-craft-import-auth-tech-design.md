@@ -269,6 +269,15 @@ API base URL.
    `api.sindustries.dev`. This is **OQ1 from the W34 audit, still
    open.**
 
+   **Superseded premise (verified live 2026-11-21).** `api.sindustries.dev`
+   is on `sindustries.dev`, which was never registered — the zone carries no
+   NS record, so no host under it has ever resolved, and the cron therefore
+   cannot be running against `api.sindustries.dev`. The CTO-Craft workflow
+   talks to the Content Scheduler API (`CONTENT_SCHEDULER_BASE_URL`, see
+   `agents/workflows/cto-craft-tweet-drafts`), whose live hostnames are in
+   `infra/cloud/hostname-matrix.json`. What the cron does run against is
+   unchanged, and this OQ is still open.
+
 2. **Should the existing `authedRequest(app)`-using import tests be
    rewritten to use plain `request(app)`?** No — they validate the
    route-local ingest-secret logic regardless of auth state and are a
