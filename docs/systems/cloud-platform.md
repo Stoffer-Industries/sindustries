@@ -61,8 +61,8 @@ All env-var **names** referenced by deploy workflows are reviewable in the repo.
 
 ### Fly.io
 
-- **Pros.** Fast deploys from a Dockerfile (no platform-specific buildpack). Built-in canary deploys + releases history. Generous free tier + simple shared-cpu pricing. Sydney region available (matches Tom/Quinn geography + Akahu/NZ latency profile). Process-group isolation matches our `gymtrack-mcp` precedent (one Fly app per service). No VPC/networking setup required to start.
-- **Cons.** Tied to Fly's machine image + supervisor model. The Redis add-on is Upstash operated through Fly rather than a native Fly data service. VM-only — no scale-to-zero for HTTP services without `auto_stop_machines=stop`, which we use for staging cost control.
+- **Pros.** Fast deploys from a Dockerfile (no platform-specific buildpack). Built-in canary deploys + releases history. Generous free tier + simple shared-cpu pricing. Sydney region available (matches Tom/Quinn geography + Akahu/NZ latency profile). Process-group isolation matched our `gymtrack-mcp` precedent (one Fly app per service) at the foundation milestone — the 2026-11-07 consolidation deliberately traded that isolation for shared fate, so staging is now one Fly app carrying all four services as child processes (see "Consolidated platform (task `219fb673`)"). No VPC/networking setup required to start.
+- **Cons.** Tied to Fly's machine image + supervisor model. The Redis add-on is Upstash operated through Fly rather than a native Fly data service. VM-only — no scale-to-zero for HTTP services without `auto_stop_machines=stop`, which we use for staging cost control. Since the consolidation that lever is app-wide rather than per-service: the one platform app carries all four processes, so stopping it for cost stops every service with it — and it cannot be used for a service-scoped drill at all, because scaling the platform to zero is a full-platform outage wearing a service-scoped label (`infra/cloud/observability/failure-inject.sh` refuses for exactly that reason).
 - **Alternatives considered.**
   - **Render** — easy deploys but no canary strategy out of the box; the team has no operational history with Render.
   - **Railway** — opinionated runtime; would constrain the Dockerfile-based build pattern; no canary.
@@ -96,7 +96,7 @@ All four staging services run in **`syd` (Sydney, Australia)**. Reasoning:
 3. Twitter/X API has no regional preference, so region is irrelevant for `services/tasks-api` and `services/content-scheduler-api`.
 4. Closest Fly.io region to the Auckland-based `services/gymtrack-mcp` for any future cross-region latency testing.
 
-Production may move to `syd` or `nrt` (Tokyo) once traffic patterns emerge. The `primary_region` field in each `fly.toml` is the single change point.
+Production may move to `syd` or `nrt` (Tokyo) once traffic patterns emerge. The `primary_region` field is the single change point: `infra/cloud/fly/platform.fly.toml` for the staging platform, and the production app inherits that same value because `infra/cloud/fly/platform.production.overlay.toml` carries only `app` and `[env]`. The four per-service `fly.toml` files are RETIRED templates and are not the change point.
 
 ---
 
