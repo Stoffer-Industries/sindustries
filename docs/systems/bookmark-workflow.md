@@ -474,6 +474,6 @@ upstream contracts.
 - Task: `55ac9240-d54a-4b2c-88c4-8bb8af85d2b2` — Bookmark approval: tweet at original X author when tasked (this PR)
 - Task: `faf260e9-fe7b-4ce5-86ba-e47acab0ddb3` — Compounding signal for the bookmark pipeline
 - PR: https://github.com/Stoffer-Industries/sindustries/pull/216
-- PR: https://github.com/Stoffer-Industries/sindustries/pull/236 (Sankey + states-over-time + retire tools dashboard tech design)
+- PR: https://github.com/Stoffer-Industries/sindustries/pull/238 (Sankey + states-over-time + retire tools dashboard — merged 2026-07-16; the earlier PR #236 was closed without merging)
 - Tech design: `docs/specs/bookmark-pipeline-analytics-postgres-transition-log-tech-design.md`
 - Tech design: `docs/specs/bookmarks-tab-sankey-and-retire-tools-2026-07-16-tech-design.md`
