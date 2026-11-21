@@ -70,4 +70,4 @@ GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url>
 
 ## Related
 
-- [Agent workspace](/concepts/agent-workspace)
+- [Agent workspace](https://docs.openclaw.ai/concepts/agent-workspace)
