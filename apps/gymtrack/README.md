@@ -70,7 +70,9 @@ All user-owned tables are RLS-protected.
 - `/agent-consent` is the protected approval page used by external MCP clients.
 - `/settings/agents` lists active MCP connections and lets the user revoke them.
 
-Production provider setup and exact URLs/client IDs are documented in [`docs/runbooks/gymtrack-agent-connect.md`](../../docs/runbooks/gymtrack-agent-connect.md).
+Production provider setup and exact URLs/client IDs are documented in
+[`docs/systems/gymtrack.md` § Agent connection entry point](../../docs/systems/gymtrack.md#agent-connection-entry-point);
+the operator runbook `docs/runbooks/gymtrack-agent-connect.md` was retired with PR #583.
 
 Apple remains hidden until Quinn removes `'apple'` from `src/lib/authFlow.js` after the Supabase provider is wired.
 

@@ -249,7 +249,7 @@ resulting evidence contract without rewriting what happened.
 
 The accepted decisions, the value-free evidence records and the operator
 read-backs live in
-[`docs/cloud/production-provisioning-readback.md`](../../cloud/production-provisioning-readback.md).
+[`docs/cloud/production-provisioning-readback.md`](../cloud/production-provisioning-readback.md).
 
 ### Slice E — durable documentation
 

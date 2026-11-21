@@ -12,7 +12,7 @@ CI enforces two gates on PRs that touch `agents/workflows/feature-task/**`:
 2. **`cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings`** — runs in `.github/workflows/feature-task-clippy.yml` (`feature-task clippy`).
 
 Both must be green before the PR can move to acceptance. See
-[`../../docs/specs/feature-task-clippy-ci-gate-tech-design.md`](../../docs/specs/feature-task-clippy-ci-gate-tech-design.md)
+[`../../docs/specs/feature-task-clippy-ci-gate-tech-design.md`](../../../docs/specs/feature-task-clippy-ci-gate-tech-design.md)
 for the gate rollout plan and `CLIPPY_NOTES.md` for the baseline cleanup
 inventory.
 
