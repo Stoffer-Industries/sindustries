@@ -12,6 +12,23 @@ distinguishable from accepted limitations"). The validate workflow emits a JSON
 result that this document mirrors into prose; run-time evidence is uploaded as a
 workflow artifact so the JSON itself is never lost.
 
+**Superseded shape (verified against `origin/main` on 2026-11-21).** The header row
+for a "staging URL override" workflow input, the `PASS_WITH_LIMITATIONS` verdict
+vocabulary, the example `result.json` block, and the AC evidence keys below all
+described a shape the validate workflow and the harness do not produce. The
+workflow's `workflow_dispatch` inputs are exactly `intent_commit`,
+`run_failure_drill` and `max_duration_seconds` — there is no staging-URL override —
+and the staging URLs come from the `staging` GitHub environment variables
+(`STAGING_TASKS_API_URL`, `STAGING_BUDGET_API_URL`, `STAGING_SCHEDULER_API_URL`),
+which are bound to the stable hostnames in `infra/cloud/hostname-matrix.json`. The
+harness emits `verdict` as `pass` or `fail` (the schema constrains it to those two
+values) and emits `checks` as an ordered array of `{name, status, startedAt,
+endedAt}` entries, not as an object keyed by `health.*` / `workflows.*` /
+`failureDrill`. The rows and the block below now match the live contract, so an
+operator copying this file records the artifact the schema validator actually
+checks. The superseded wording is recorded in the `docs/repo-audits/2026-W46.md`
+finding so the history stays readable.
+
 ---
 
 ## Header
@@ -23,33 +40,43 @@ workflow artifact so the JSON itself is never lost.
 | Workflow run | `<https://github.com/Stoffer-Industries/sindustries/actions/runs/<id>>` |
 | Commit image | `<short SHA> @ <full SHA>` (Fly image tag) |
 | Branch | `<branch that produced the image>` |
-| Validate workflow input — staging URL override | `<URL or empty for default *.fly.dev>` |
+| Validate workflow input — `intent_commit` | `<commit SHA the run intends to validate (blank = HEAD)>` |
+| Validate workflow input — `run_failure_drill` | `<true | false>` |
+| Validate workflow input — `max_duration_seconds` | `<seconds>` |
+| Staging URLs exercised (from the `staging` environment vars `STAGING_TASKS_API_URL` / `STAGING_BUDGET_API_URL` / `STAGING_SCHEDULER_API_URL`) | `<https://tasks-api.staging.sindustries.co.nz> / <https://budget-api.staging.sindustries.co.nz> / <https://content-scheduler-api.staging.sindustries.co.nz>` |
 | Operator (Tom or Quinn) | `<name>` |
-| Verdict | `<PASS | PASS_WITH_LIMITATIONS | FAIL>` |
+| Verdict (harness `result.json`) | `<pass | fail>` |
 | Cleanup status | `<ok=true | ok=false, reason=...>` |
 
 ## Result JSON summary
 
-Paste the validate workflow's emitted `result.json` after the schema-validator step,
-collapsed to key fields:
+Paste the harness's emitted `artifacts/staging-workflows.json` (uploaded as a
+workflow artifact), collapsed to key fields. The shape below is the shape
+`tests/cloud/staging-validation.schema.json` validates, so the record and the
+schema stay diffable:
 
 ```json
 {
-  "verdict": "<PASS | PASS_WITH_LIMITATIONS | FAIL>",
+  "schemaVersion": 1,
+  "runId": "<staging-validate-<timestamp>>",
+  "intentCommit": "<full SHA>",
+  "environment": { "id": "<redacted>", "provider": "fly.io" },
+  "startedAt": "<ISO 8601>",
+  "endedAt": "<ISO 8601>",
+  "services": {
+    "tasksApi":         { "url": "https://tasks-api.staging.sindustries.co.nz",         "version": "<full SHA>", "matchesIntent": true },
+    "budgetApi":        { "url": "https://budget-api.staging.sindustries.co.nz",        "version": "<full SHA>", "matchesIntent": true },
+    "contentScheduler": { "url": "https://content-scheduler-api.staging.sindustries.co.nz", "version": "<full SHA>", "matchesIntent": true }
+  },
+  "checks": [
+    { "name": "tasks.health",    "status": "pass", "startedAt": "<ISO 8601>", "endedAt": "<ISO 8601>" },
+    { "name": "budget.health",   "status": "pass", "startedAt": "<ISO 8601>", "endedAt": "<ISO 8601>" },
+    { "name": "scheduler.health", "status": "pass", "startedAt": "<ISO 8601>", "endedAt": "<ISO 8601>" }
+  ],
+  "cleanup": { "ok": true, "operations": [ { "name": "tasks.archive", "ok": true, "error": null } ] },
   "productionBlockers": [],
   "acceptedLimitations": [],
-  "checks": {
-    "deploy": { "ok": true, "app": "...", "version": 0, "machines": 0, "elapsedMs": 0 },
-    "health.tasksApi":  { "ok": true, "statusCode": 200, "elapsedMs": 0 },
-    "health.budgetApi": { "ok": true, "statusCode": 200, "elapsedMs": 0 },
-    "health.worker":    { "ok": true, "logLine": "...", "elapsedMs": 0 },
-    "workflows.tasksApi":  { "ok": true, "stepsOk": ["create", "read", "patch", "archive"], "elapsedMs": 0 },
-    "workflows.budgetApi": { "ok": true, "stepsOk": ["me"], "elapsedMs": 0 },
-    "workflows.contentScheduler": { "ok": true, "stepsOk": ["create", "approve", "healthBullmq", "unapprove", "remove"], "elapsedMs": 0 },
-    "failureDrill": { "ok": true, "alertFired": true, "alertResolvedMs": 0 },
-    "schemaValidate": { "ok": true, "errors": [] },
-    "cleanup": { "ok": true, "removedUsers": 0, "removedItems": 0, "errors": [] }
-  }
+  "verdict": "<pass | fail>"
 }
 ```
 
@@ -59,13 +86,13 @@ Tick each AC when the corresponding evidence above and the cite / image / log li
 attest it. Always link the source directly under the entry, not as a footnote.
 
 - [ ] **AC1 — staging starts with production-like configuration and passes service health checks**
-  - Evidence: `health.tasksApi`, `health.budgetApi`, `health.worker`, `deploy.version`
+  - Evidence: `services.tasksApi`, `services.budgetApi`, `services.contentScheduler` (`url` / `version` / `matchesIntent`), and the `tasks.health` / `budget.health` / `scheduler.health` entries in `checks[]`
   - Source: workflow job log `<link>`, Fly release `<version>`
 - [ ] **AC2 — representative authenticated Tasks API, Budget API, and Content Scheduler workflows complete**
-  - Evidence: `workflows.tasksApi`, `workflows.budgetApi`, `workflows.contentScheduler`
+  - Evidence: the `tasks.*`, `budget.*` and `scheduler.*` entries in `checks[]`
   - Source: workflow job log `<link>`, harness stdout captured in artifact `<link>`
 - [ ] **AC3 — intentional failure has useful logging, alerting, and recovery**
-  - Evidence: `failureDrill`
+  - Evidence: the `failure_drill.*` entries in `checks[]` (from `artifacts/staging-failure-drill.json`)
   - Source: alerting provider page `<link>`, drill log `<link>`, worker restart line `<log-line>`
 - [ ] **AC4 — evidence is recorded with separated blockers / limitations**
   - Evidence: this document, schema-validated `result.json`
@@ -73,9 +100,12 @@ attest it. Always link the source directly under the entry, not as a footnote.
 
 ## Production blockers
 
-> **Hard rule.** A pass (`verdict == PASS`) requires `productionBlockers == []`. A non-empty
-> list flips the verdict to `PASS_WITH_LIMITATIONS` if the items are pre-accepted, or `FAIL`
-> if they block the cutover task `020f423e`.
+> **Hard rule.** The harness emits exactly two verdicts — `pass` or `fail` — and it emits
+> `productionBlockers` as an empty array; there is no third verdict value to flip to.
+> A run passes only when every check is `pass` (or an explicit `skip`), `cleanup.ok` is
+> `true`, and every service's `matchesIntent` is `true`. A boundary that is pre-accepted
+> belongs in `acceptedLimitations`, which does not by itself change the verdict; a genuine
+> blocker is recorded below and fails the run.
 
 | # | Blocker | Owner | Discovered | Mitigation / follow-up task |
 | - | --- | --- | --- | --- |
