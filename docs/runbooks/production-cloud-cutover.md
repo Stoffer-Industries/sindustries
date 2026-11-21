@@ -168,7 +168,7 @@ The preflight is a **gate, not a report**. It fails closed: an environment it co
 | P2 | The data-migration evidence handoff from `f2c23e26` is recorded | `gates.requiredEvidence` → `dependency-acceptance` |
 | P3 | The cloud and prodlike runtimes are on a schema-compatible commit/image | Operator-declared in the manifest; asserted by the route adapter. |
 | P4 | Cloud services, database, Redis, worker, dashboards and alerts are green | `gates.requiredEvidence` → `local-fallback-health`, `worker-leadership` |
-| P5 | The prodlike fallback boots and passes health checks **against the canonical cloud data plane** | The rollback script refuses a prodlike runtime that is not on the canonical data plane — a prodlike still pointing at the stale local database is not a valid rollback target. |
+| P5 | The prodlike fallback boots and passes health checks **against the canonical cloud data plane** | The rollback script refuses a prodlike runtime that is not on the canonical data plane — a prodlike still pointing at the stale local database is not a valid rollback target. The preflight health-checks every in-scope surface on **both** bindings, so the prodlike surfaces must be **serving** at the moment of the window — see the note below. |
 | P6 | Worker leadership is unambiguous — one active Content Scheduler worker fleet | `gates.requiredEvidence` → `worker-leadership`. The executor aborts on ambiguous leadership: duplicate external side effects are not an acceptable risk. |
 | P7 | The latest production backup, its restore-test result, recovery point, RPO/RTO and checksum are recorded | `gates.requiredEvidence` → `backup-and-restore-test` |
 | P8 | Route inventory, TTL and origin state match the manifest; no unrelated route drift | `gates.requiredEvidence` → `route-inventory`; the route adapter's compare-and-set refuses a version that moved underneath the operator. |
@@ -178,6 +178,21 @@ The preflight is a **gate, not a report**. It fails closed: an environment it co
 | P12 | No deploy, migration, secret rotation or competing cutover is in progress | The operator lock (`artifacts/cutover/cutover.lock`) plus the operator's own check. |
 | P13 | The hosted stack answers and the read-scoped observability credential is present | The probe reads `GET <stack>/api/alertmanager/grafana/api/v2/alerts` and compares the count of firing alerts against `abortThresholds.activeAlertCount`. A missing credential, an unreadable endpoint or a payload that is not an alert list all **fail** the check — an unobserved signal is not a healthy signal. The preflight's `hosted-observability-credential` gate names the missing endpoint or credential directly, and refuses the window when the credential is the write-scoped provisioning token (see §0.1). |
 | P14 | A **fresh passing rollback rehearsal** exists for this route mechanics | `gates.requiredEvidence` → `staging-rollback-rehearsal`. Documentation review cannot satisfy AC4. |
+
+### The prodlike fallback must be WARM, not merely present
+
+The preflight runs the health probes against **both** bindings — production and prodlike — and a failing prodlike probe fails the window. That is deliberate: prodlike is the rollback target, and a rollback target that is not serving is not a rollback target.
+
+Two things follow for the operator host, and neither is discoverable from the failure alone:
+
+- **The prodlike operator-facing surfaces must be running locally.** The prodlike Mission Control and Tasks app are the local dev servers on `:5175` and `:5176`. If either is down, the `health:prodlike` gate fails with a connection error and the window does not start — even though the production binding is healthy. Start them before the preflight, not after it fails.
+- **A frontend surface is health-checked at its document root.** The Mission Control and Tasks app surfaces declare `healthPath: "/"`, because they are single-page applications rather than services with a `/health` endpoint. The probe asks for the document the surface serves (`text/html`) rather than imposing a JSON content negotiation on it: the prodlike dev servers only serve their history fallback to a request that accepts HTML, so a health check that asks for JSON gets a 404 from a surface that is serving perfectly well. The preflight would then name the rollback fallback as unhealthy when it is not.
+
+Read the two health gates together with the rest of the plan report before the window:
+
+```bash
+scripts/cloud/cutover/preflight.sh --manifest "$CUTOVER_MANIFEST_PATH" --plan
+```
 
 ---
 

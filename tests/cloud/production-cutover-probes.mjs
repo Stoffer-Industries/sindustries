@@ -96,7 +96,7 @@ function readSecret(name) {
  */
 export async function request(
   url,
-  { method = 'GET', token = '', body = null, timeoutMs = null } = {},
+  { method = 'GET', token = '', body = null, timeoutMs = null, accept = 'application/json' } = {},
 ) {
   const controller = new AbortController();
   const effectiveTimeout = timeoutMs ?? Number(process.env.CUTOVER_PROBE_TIMEOUT_MS ?? 20000);
@@ -106,7 +106,7 @@ export async function request(
   // is allowed to carry one.
   const carriesBody = body !== null && body !== undefined && method !== 'GET' && method !== 'HEAD';
   try {
-    const headers = { accept: 'application/json' };
+    const headers = { accept };
     if (token) headers.authorization = `Bearer ${token}`;
     if (carriesBody) headers['content-type'] = 'application/json';
     const response = await fetch(url, {
@@ -150,6 +150,39 @@ export async function request(
 }
 
 /**
+ * The Accept header a surface's health check asks for.
+ *
+ * A health check asks one question: is this origin serving? It must not
+ * impose a content type the surface does not serve, because the origin
+ * answers that question with a 404 when the negotiation does not match.
+ *
+ * The frontend surfaces are the case that matters. Their health path is
+ * the document root ('/'), and the prodlike frontends are Vite dev
+ * servers: their history fallback only rewrites to index.html for a
+ * request that ACCEPTS HTML, so a health check that sends
+ * `Accept: application/json` gets 404 from a surface that is serving
+ * perfectly well. That is not a cosmetic difference — the preflight's
+ * `health:prodlike` gate reads that 404 as "the rollback fallback is
+ * unhealthy" and refuses the window, naming a healthy surface as the
+ * reason not to start.
+ *
+ * The production frontends hide the defect: the hosting platform serves
+ * index.html for '/' whatever the Accept header says, so the same probe
+ * passes against production and fails against prodlike. The failure only
+ * appears on the binding the rollback depends on.
+ *
+ * So the negotiation follows the surface kind, which is already part of
+ * the manifest contract: an `api` surface serves JSON and keeps asking
+ * for JSON; a `frontend` surface serves a document and is asked for one.
+ *
+ * @param {object} surface
+ * @returns {string} the Accept header value
+ */
+export function healthAcceptFor(surface) {
+  return surface.kind === 'frontend' ? 'text/html,application/json' : 'application/json';
+}
+
+/**
  * The health check for one surface.
  *
  * @param {object} manifest
@@ -157,10 +190,10 @@ export async function request(
  * @param {string} binding
  * @returns {Promise<object>} a check record
  */
-async function checkHealth(manifest, surface, binding) {
+export async function checkHealth(manifest, surface, binding) {
   const base = baseUrlFor(manifest, surface.id, binding);
   const url = `${base.replace(/\/+$/, '')}${surface.healthPath}`;
-  const response = await request(url);
+  const response = await request(url, { accept: healthAcceptFor(surface) });
   return {
     id: `health:${surface.id}`,
     ok: response.ok,
