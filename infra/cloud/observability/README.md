@@ -181,7 +181,7 @@ Do NOT commit any live exporter or provisioning credential. The redacted `.env.e
 ## Related docs
 
 - [`docs/systems/observability.md`](../../../docs/systems/observability.md) — durable ownership handover (AC4).
-- `~/.openclaw/workspace/docs/infra/runbooks/cloud-alerts-response.md` — per-alert response runbook (was at `docs/runbooks/cloud-alerts-response.md`; retired in PR #583 — re-create in workspace the first time an alert fires).
+- `~/.openclaw/workspace/infra/runbooks/cloud-alerts-response.md` — per-alert response runbook (canonical workspace location per `agents/definitions/README.md` "Where operational runbooks live"; was at `docs/runbooks/cloud-alerts-response.md`; retired in PR #583 — re-create there, with a row in that repo's `infra/RUNBOOKS.md`, the first time an alert fires).
 - [`docs/specs/hosted-observability-migration-alerts-tech-design.md`](../../../docs/specs/hosted-observability-migration-alerts-tech-design.md) — tech design.
 - [`infra/cloud/README.md`](../README.md) — parent index of `infra/cloud/` artefacts.
 - [`docs/systems/cloud-platform.md`](../../../docs/systems/cloud-platform.md) — platform context.

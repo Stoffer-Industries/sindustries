@@ -304,7 +304,7 @@ flowchart LR
 
 **Key files**
 - Lox logs: workspace `docs/infra/lox-daily-YYYY-MM-DD.md`
-- Lox runbooks: `~/.openclaw/workspace/docs/infra/runbooks/` (moved out of this repo in PR #583 — see `agents/definitions/README.md` "Where operational runbooks live")
+- Lox runbooks: `~/.openclaw/workspace/infra/runbooks/` (moved out of this repo in PR #583 — see `agents/definitions/README.md` "Where operational runbooks live")
 - Lox incident reviews: workspace `docs/infra/incident-reviews/`
 - Lox notify: `agents/skills/ops/notify-soft-fail/`
 - Quinn ops state: `quinn-ops-state.json` (in workspace root)

@@ -202,7 +202,7 @@ The PR includes a one-page `## Vercel env var matrix` table in the PR body mappi
   - Add a `Stable hostname matrix` subsection that links back to the tech design.
 - New: `docs/runbooks/stable-hostname-cutover.md` (Quinn-owned operator doc — Quinn authors this in their own workspace per `agents/definitions/README.md` "Where operational runbooks live"). The repo-side artefact is a short pointer here:
   ```
-  > The stable-hostname cutover runbook lives in `~/.openclaw/workspace/docs/infra/runbooks/stable-hostname-cutover.md` (Quinn-owned). This repo references it; do not duplicate.
+  > The stable-hostname cutover runbook lives in `~/.openclaw/workspace/infra/runbooks/stable-hostname-cutover.md` (Quinn-owned) — the canonical workspace runbook directory per `agents/definitions/README.md` "Where operational runbooks live", with a row in that repo's `infra/RUNBOOKS.md`. This repo references it; do not duplicate.
   ```
 - `tests/cloud/staging-validation.schema.json` — extend the result schema with `stableHostnameChecks: { … }` covering the new smoke contract.
 - `infra/cloud/README.md` — update the CORS example row from `https://mission-control.sindustries.dev` to `https://mission-control.staging.sindustries.co.nz` and add a sentence pointing at the matrix above.
