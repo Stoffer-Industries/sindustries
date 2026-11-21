@@ -202,8 +202,16 @@ separated) and the `app=` prefix becomes the metric label. The labels are theref
 operator-supplied strings, not Fly app names: keeping `tasks-api=…`,
 `budget-api=…`, `content-scheduler-api=…` preserves the metric contract exactly (AC3) even
 though all three URLs now point at one Fly app. The probe's own secret values must be
-re-pointed at the stable hostnames once DNS lands — an operator step on the probe app,
-not a code change.
+re-pointed at the stable hostnames — an operator step on the probe app, not a code
+change. **Superseded (DNS landed 2026-11-10; verified live 2026-11-22):** this clause
+originally read "must be re-pointed at the stable hostnames once DNS lands", describing a
+step gated on a DNS blocker that no longer exists — task `5cb4a8fe` landed the three
+records and their certificates (the task is `done`, completed 2026-11-19, with all three
+structured approvals granted) and the hostnames now resolve and serve. The re-point is
+still outstanding, but it is no longer waiting on DNS: the live staging probe's own
+published target metric (`sindustries_health_probe_target_info`, kind `fly-app`)
+fingerprints to the provider host `sindustries-platform-staging.fly.dev` for both its
+`tasks-api` and `budget-api` targets rather than to the stable hostnames.
 
 `OTEL_SERVICE_NAME` stays distinct per child (§3.3), so traces, logs, and dashboards keep
 distinguishing the four services even though their logs now interleave in one Fly app.
@@ -257,8 +265,11 @@ change — see §9 Q1, which needs Quinn's confirmation.
 
 See §3.5: the probe's target labels stay the logical service names, its code is unchanged,
 and its URLs move from `*.fly.dev` to the stable hostnames (already the intended target per
-`infra/cloud/hostname-matrix.json`; the probe is currently pointed at the provider URLs
-because the stable hostnames do not resolve).
+`infra/cloud/hostname-matrix.json`; the probe is currently pointed at the provider URLs).
+**Superseded (verified live 2026-11-22):** the parenthetical used to read "because the
+stable hostnames do not resolve" — a reason that is no longer true. The stable hostnames
+resolve and serve, and task `5cb4a8fe` is `done`; the probe still targets the provider
+host, so what remains is the operator re-point recorded in §3.5, not a DNS wait.
 
 ### AC4 — demonstrably cheaper
 
@@ -447,4 +458,7 @@ provider, the token was provisioned, and task `5cb4a8fe` landed the records on 2
 - `docs/specs/add-stable-app-name-hostnames-tech-design.md` — the hostname matrix contract
 - `docs/systems/cloud-platform.md` — the durable platform doc (AC5 lives here)
 - `infra/cloud/hostname-matrix.json` — authoritative hostname/app mapping
-- Task `5cb4a8fe` — the open DNS/certificate blocker that gates the final cutover
+- Task `5cb4a8fe` — the DNS/certificate blocker that gated the final cutover. **Superseded
+  (verified live 2026-11-22):** the task is `done` (completed 2026-11-19, with `accepted`,
+  `tech_design` and `qa_agent` all approved), the three staging records and their
+  certificates are live, and the hostnames resolve and serve.
