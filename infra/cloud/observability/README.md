@@ -89,7 +89,7 @@ After Tom hands over the Grafana Cloud + Fly + Neon credentials, the operator (Q
 5. Capture the AC1-AC3 evidence pack for task 31233a0a AC4:
    ```bash
    bash infra/cloud/observability/evidence-capture.sh --format md > evidence.md
-   # paste evidence.md into PR #724 body
+   # attach evidence.md as a comment on task 31233a0a (closing PR was #756)
    ```
 6. Exercise the failure-injection surface to verify alerts fire and resolve:
    ```bash
