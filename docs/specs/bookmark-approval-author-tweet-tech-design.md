@@ -8,6 +8,33 @@ shipped_date: null
 
 # Bookmark approval — author tweet notification — tech design
 
+## Amendment — route ownership and base URL (2026-11-22, task `55ac9240` repair)
+
+Sections 4–6 below describe the implementation as approved on 2026-07-17, when
+`POST /x/tweets` and `GET /x/tweets/:id/author` were new routes inside the
+Tasks API. PR #507 later split the Content Scheduler out of the Tasks API and
+the route moved with it to `services/content-scheduler-api/src/routes/xTweet.ts`,
+so the design's route-ownership and base-URL assumptions were superseded before
+this task ever shipped its quote-post. The repair for task `55ac9240` (Ash's
+2026-11-21 QA rerun blocked AC1 on a live `404`) applies the corrections below;
+the rest of the design is unchanged.
+
+| As approved | Superseded by | Current |
+| --- | --- | --- |
+| New route in `services/tasks-api/src/routes/xTweet.ts` | PR #507 | `services/content-scheduler-api/src/routes/xTweet.ts` |
+| Mounted in `services/tasks-api/src/app.ts` | PR #507 | `services/content-scheduler-api/src/app.ts` |
+| `getXClient()` in `services/tasks-api/src/routes/contentSchedulerPublish.ts` | PR #507 | `services/content-scheduler-api/src/routes/contentSchedulerPublish.ts` |
+| Base URL from `os.getenv("TASKS_API_BASE_URL", "http://localhost:4001/api/v1")` | this repair | `content_scheduler_api_base_url()` — override → `CONTENT_SCHEDULER_API_BASE_URL` → `CONTENT_SCHEDULER_BASE_URL` (+ `/api/v1`) → `http://localhost:4004/api/v1` |
+| `try_post_author_tweet(..., tasks_api_base_url=...)` | this repair | `try_post_author_tweet(..., content_scheduler_api_base_url=...)` |
+| `TasksApiUnreachableError` / `tweetLog.error == "tasks_api_unreachable:<reason>"` | this repair | `ContentSchedulerUnreachableError` / `"content_scheduler_unreachable:<reason>"` |
+
+The observable contract change to `tweetLog.error` is limited to that one
+error code: the `posted`/`skipped` outcomes, `missing_credentials` and
+`x_api_<status>:<message>` are unchanged. The route is mounted unauthenticated
+on the Content Scheduler, so the helper sends no credential — the auth caveat
+in the route's own file header still applies, and the Content Scheduler must
+share a host with the lobster.
+
 ## Links
 
 - Product spec: `brain/tasks/specs/in-progress/bookmark-approval-author-tweet-2026-07-17.md`

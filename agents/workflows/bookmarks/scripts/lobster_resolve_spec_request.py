@@ -4,29 +4,20 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 from pathlib import Path
 
 from common import STATE_PATH, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic
 from x_author_mention_tweets import queue_bookmark_mention_drafts
-from x_author_tweet import try_post_author_tweet
+from x_author_tweet import content_scheduler_api_base_url, try_post_author_tweet
 
 logger = logging.getLogger("bookmark.lobster_resolve_spec_request")
 
-# Default tasks-api base URL — same default the x_author_tweet module
-# uses internally. Override via TASKS_API_BASE_URL env var when the
-# lobster runs against a non-local tasks-api (CI, prod).
-_TASKS_API_BASE_URL = os.getenv("TASKS_API_BASE_URL", "http://localhost:4001/api/v1")
-
-# Default content-scheduler-api base URL — port 4003 in the prodlike stack
-# (matches `apps/mission-control/src/contentSchedulerApi.js`
-# `DEFAULT_API_BASE_BY_PORT['5176']`). Override via
-# CONTENT_SCHEDULER_API_BASE_URL when the lobster runs against a non-local
-# content-scheduler-api (CI, prod).
-_CONTENT_SCHEDULER_API_BASE_URL = os.getenv(
-    "CONTENT_SCHEDULER_API_BASE_URL",
-    "http://localhost:4003/api/v1",
-)
+# Content Scheduler API base URL — the host of `POST /x/tweets` (the
+# author-tweet step) and of `POST /content-scheduler/items` (the mention-drafts
+# step). Resolved by the x_author_tweet module so the bookmark workflow keeps
+# one source of truth for it: explicit override → CONTENT_SCHEDULER_API_BASE_URL
+# → CONTENT_SCHEDULER_BASE_URL (+ /api/v1) → the prodlike default.
+_CONTENT_SCHEDULER_API_BASE_URL = content_scheduler_api_base_url()
 
 
 def task_ids_for_bookmark(created: list[dict], bookmark_key: str) -> list[str]:
@@ -129,7 +120,7 @@ def main() -> int:
                 try:
                     tweet_log = try_post_author_tweet(
                         state_item,
-                        tasks_api_base_url=_TASKS_API_BASE_URL,
+                        content_scheduler_api_base_url=_CONTENT_SCHEDULER_API_BASE_URL,
                     )
                 except Exception as exc:  # pragma: no cover - defensive guard
                     logger.warning("author-tweet step raised for %s: %s", bookmark_key, exc)
