@@ -471,7 +471,7 @@ The auth reporting surface is **context-only**. Callers reduce the provider enve
 - Alertmanager self-hosting. Grafana Cloud's alerting is sufficient.
 - Outbound alert notification integrations (Slack, PagerDuty, email, or similar). These require a separate decision and task.
 - Drift detection for the observability stack. Follow-on workstream.
-- A `*.sindustries.dev` Grafana subdomain. Future UX improvement.
+- A first-party Grafana subdomain. Future UX improvement (the live zone is `sindustries.co.nz`; the `sindustries.dev` reservation was never provisioned).
 
 ---
 
