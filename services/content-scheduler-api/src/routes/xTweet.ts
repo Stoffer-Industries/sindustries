@@ -26,12 +26,17 @@
 //     502:  X_API_ERROR
 //     503:  MISSING_CREDENTIALS
 //
-// Auth: this endpoint is intended for in-cluster callers. The lobster
-// runs on the same host as the tasks-api dev container and calls
-// http://localhost:4001/api/v1/x/tweets unauthenticated, matching the
-// pattern of every other tasks-api write endpoint in this MVP. If the
-// tasks-api ever stops being localhost-only, this route MUST be locked
-// down (header token or LAN allowlist) before exposing it externally.
+// Auth: this endpoint is intended for in-cluster callers. The route moved
+// here from the tasks-api when the Content Scheduler was split out of it,
+// so its caller — the bookmark approval flow at
+// agents/workflows/bookmarks/scripts/x_author_tweet.py — still points at the
+// tasks-api base URL and must be repointed at this service (task 55ac9240).
+// This route is mounted unauthenticated under /api/v1, matching the pattern
+// of every other Content Scheduler write endpoint in this MVP: the mutation
+// auth gate in app.ts covers /api/v1/content-scheduler/items* and
+// /api/v1/content-scheduler/reorder only. If the Content Scheduler ever
+// stops being localhost-only, this route MUST be locked down (header token
+// or LAN allowlist) before exposing it externally.
 
 import { Router } from 'express';
 import { getXClient } from './contentSchedulerPublish.ts';
