@@ -1,7 +1,7 @@
 # GymTrack
 
-**Status:** Live (SPA + legacy REST agent API) / Draft rollout on branch `task-1474d515-gymtrack-mcp-server-oauth-redo` (MCP OAuth server)
-**Last updated:** 2026-11-16
+**Status:** Live (SPA + legacy REST agent API + MCP OAuth server)
+**Last updated:** 2026-11-22
 **Owner:** Rowan (engineering) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **Related tasks:** `18256740`, `f520c396`, `72d7cc3b`, `1474d515`, `bb09eaed`
