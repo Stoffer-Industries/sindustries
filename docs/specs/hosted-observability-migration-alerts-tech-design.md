@@ -48,6 +48,8 @@ Once this task lands, the cloud-deployed services ship traces, metrics, and data
 - **No `.openclaw` cron changes** — periodic health probes and metric scrape intervals are owned by the cloud runtime (Grafana Cloud's scrape config, the health-probe Fly app) and not by Quinn's local cron.
 - **No DNS changes** — the hosted Grafana URL is owned by Grafana Cloud; SIndustries does not provision a `*.sindustries.dev` Grafana subdomain in this task. That's a future UX improvement, not a foundation requirement.
 
+  **Superseded namespace (verified live 2026-11-22).** The bullet above names `sindustries.dev`, which was never registered — the zone carries no NS record, so no host under it has ever resolved — and the live apex is `sindustries.co.nz` (Cloudflare: `melnicoff.ns.cloudflare.com`, `tegan.ns.cloudflare.com`). A Grafana subdomain, if one is ever provisioned, belongs under `sindustries.co.nz`, not under the never-provisioned `sindustries.dev`. The two live surfaces that carry this same non-goal already say so: `docs/systems/observability.md` and `infra/cloud/observability/README.md`, each naming the live zone and recording the `sindustries.dev` reservation as never provisioned (PR #1064). `docs/systems/observability.md` is this document's own canonical owner index (see "Dashboard ownership" above), so this bullet is the one surface of that class PR #1064 did not reach.
+
 ## Implementation plan
 
 ### 1. Backend choice documentation
