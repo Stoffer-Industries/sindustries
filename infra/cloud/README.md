@@ -36,9 +36,9 @@ infra/cloud/
 │   ├── bootstrap-staging.env.example  # source names read by scripts/bootstrap-staging.sh
 │   └── bootstrap-production.env.example  # source names read by scripts/bootstrap-production.sh
 ├── bin/                        # Operator-facing deploy/status/rollback wrappers (task 2850c5ac)
-│   ├── deploy                  # Pin-and-deploy a single service
+│   ├── deploy                  # Pin-and-deploy the platform app (service names are aliases)
 │   ├── status                  # Check process types + machines across services
-│   ├── rollback                # Roll a single service back to a prior release
+│   ├── rollback                # Roll the platform app back to a prior release (shared fate)
 │   └── tests/                  # Stub-flyctl tests for the bin/ scripts
 └── scripts/                    # Owner-supplied operational scripts (Quinn runs locally)
     ├── bootstrap-platform.sh   # the shared, environment-aware bootstrap (staging | production)
@@ -138,9 +138,11 @@ smoke check curls the three path-prefix health routes on the platform's
 provider hostname and greps `fly logs` for the auto-post worker's structured
 startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed
 http_checks automatically remove the machine from the load balancer; rollback
-uses `fly releases rollback <v>` (see
-`docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section —
-the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
+is app-wide on the consolidated platform app —
+`fly releases rollback --app sindustries-platform-staging` (see
+`docs/runbooks/platform-consolidation-rollback.md` §4 "Backout", the live
+rollback runbook; the prior `docs/runbooks/cloud-deployment-rollback.md` was
+retired in PR #583).
 
 
 ## Operator wrappers (task 2850c5ac)
