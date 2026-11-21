@@ -4,8 +4,10 @@ import { after, before, test } from 'node:test';
 
 import {
   checkContentScheduler,
+  checkHealth,
   checkHostedSignals,
   checkTasksApi,
+  healthAcceptFor,
   request,
 } from '../production-cutover-probes.mjs';
 
@@ -17,6 +19,7 @@ const observed = {
 const servers = {};
 
 async function startServer(name) {
+  observed[name] = [];
   const server = createServer((incoming, response) => {
     const chunks = [];
     incoming.on('data', (chunk) => chunks.push(chunk));
@@ -24,6 +27,7 @@ async function startServer(name) {
       observed[name].push({
         method: incoming.method,
         url: incoming.url,
+        accept: incoming.headers.accept ?? null,
         authorization: incoming.headers.authorization ?? null,
         body: Buffer.concat(chunks).toString('utf8'),
       });
@@ -64,6 +68,45 @@ async function startSignalsServer(name, payload) {
         'x-request-id': `${name}-request`,
       });
       response.end(JSON.stringify(payload));
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  servers[name] = server;
+  return `http://127.0.0.1:${address.port}`;
+}
+
+/**
+ * A server that behaves like a Vite dev server: its history fallback
+ * rewrites to index.html only for a request that ACCEPTS HTML, and
+ * answers 404 otherwise. This is the shape of the prodlike frontends
+ * the probe health-checks, and it is the shape that a health check
+ * sending `Accept: application/json` cannot satisfy.
+ */
+async function startDocumentServer(name) {
+  observed[name] = [];
+  const server = createServer((incoming, response) => {
+    const chunks = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      const accept = incoming.headers.accept ?? '';
+      observed[name].push({
+        method: incoming.method,
+        url: incoming.url,
+        accept,
+        authorization: incoming.headers.authorization ?? null,
+        body: Buffer.concat(chunks).toString('utf8'),
+      });
+      if (!accept.includes('text/html')) {
+        response.writeHead(404, { 'content-type': 'text/plain' });
+        response.end('Not Found');
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end('<!doctype html><title>surface</title>');
     });
   });
   await new Promise((resolve, reject) => {
@@ -277,4 +320,70 @@ test('the hosted signals probe names the missing credential without pointing at 
   );
 
   delete process.env.GRAFANA_CLOUD_INSTANCE_URL;
+});
+
+test('a frontend health check asks for a document, not for JSON', async () => {
+  // The prodlike frontends are Vite dev servers: their history fallback
+  // serves index.html only to a request that accepts HTML. A health
+  // check that sends `Accept: application/json` gets 404 from a surface
+  // that is serving perfectly well, and the preflight then reads the
+  // rollback fallback as unhealthy and refuses the window.
+  const baseUrl = await startDocumentServer('frontend-document');
+  const frontendManifest = {
+    surfaces: [
+      {
+        id: 'mission-control',
+        kind: 'frontend',
+        healthPath: '/',
+        prodlikeBaseUrl: baseUrl,
+        productionBaseUrl: baseUrl,
+      },
+    ],
+  };
+
+  const result = await checkHealth(frontendManifest, frontendManifest.surfaces[0], 'prodlike');
+
+  assert.equal(result.ok, true, `the health check failed: ${result.detail}`);
+  assert.equal(result.status, 200);
+  assert.equal(observed['frontend-document'].length, 1);
+  assert.match(
+    observed['frontend-document'][0].accept,
+    /text\/html/,
+    'a frontend health check must ask for the document the surface serves',
+  );
+});
+
+test('an api health check still asks for JSON', async () => {
+  const baseUrl = await startServer('api-json');
+  const apiManifest = {
+    surfaces: [
+      {
+        id: 'tasks-api',
+        kind: 'api',
+        healthPath: '/health',
+        prodlikeBaseUrl: baseUrl,
+        productionBaseUrl: baseUrl,
+      },
+    ],
+  };
+
+  const result = await checkHealth(apiManifest, apiManifest.surfaces[0], 'prodlike');
+
+  assert.equal(result.ok, true);
+  assert.equal(
+    observed['api-json'][0].accept,
+    'application/json',
+    'an api surface serves JSON and keeps asking for JSON',
+  );
+});
+
+test('the health negotiation follows the surface kind', () => {
+  assert.equal(healthAcceptFor({ kind: 'frontend' }), 'text/html,application/json');
+  assert.equal(healthAcceptFor({ kind: 'api' }), 'application/json');
+  assert.equal(healthAcceptFor({ kind: 'origin' }), 'application/json');
+  assert.equal(
+    healthAcceptFor({}),
+    'application/json',
+    'a surface that declares no kind keeps the API negotiation',
+  );
 });
