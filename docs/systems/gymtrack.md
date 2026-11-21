@@ -108,7 +108,7 @@ The code is sent exactly once, at sign-up time (`signUp.verifications.sendEmailC
 
 When a signed-in user has no active row in `gymtrack_oauth_consents`, `/workouts` renders explicit Claude and ChatGPT connection options. Each option links to that provider's real MCP connector setup and displays GymTrack's remote MCP URL plus the seeded public client ID. The provider—not the SPA—must generate OAuth state and the PKCE challenge before calling `/oauth/authorize`.
 
-Production URLs, redirect allowlists, provider steps, and remaining operator checks were previously in `docs/runbooks/gymtrack-agent-connect.md` (retired in PR #583). The provider-specific flows live in `docs/specs/gymtrack-mcp-oauth-dcr-tech-design.md` + `docs/specs/gymtrack-mcp-openclaw-oauth-client-tech-design.md`; re-create the operator runbook at `~/.openclaw/workspace/docs/infra/runbooks/gymtrack-agent-connect.md` if Quinn needs to onboard a new MCP connector provider.
+Production URLs, redirect allowlists, provider steps, and remaining operator checks were previously in `docs/runbooks/gymtrack-agent-connect.md` (retired in PR #583). The provider-specific flows live in `docs/specs/gymtrack-mcp-oauth-dcr-tech-design.md` + `docs/specs/gymtrack-mcp-openclaw-oauth-client-tech-design.md`; re-create the operator runbook at `~/.openclaw/workspace/infra/runbooks/gymtrack-agent-connect.md` (the canonical workspace runbook directory per `agents/definitions/README.md` "Where operational runbooks live"; add a row to that repo's `infra/RUNBOOKS.md` when it is written) if Quinn needs to onboard a new MCP connector provider.
 
 ### MCP tool flow
 
@@ -260,4 +260,4 @@ This is a deliberate one-consumer build, consistent with `docs/ARCHITECTURE.md`'
   - `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`
   - `docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md`
   - `docs/specs/fix-gymtrack-lockfile-verification-argv-overflow-tech-design.md`
-- Agent connection rollout runbook: `~/.openclaw/workspace/docs/infra/runbooks/gymtrack-agent-connect.md` (was at `docs/runbooks/gymtrack-agent-connect.md`; retired in PR #583 — re-create in workspace when onboarding a new MCP connector provider)
+- Agent connection rollout runbook: `~/.openclaw/workspace/infra/runbooks/gymtrack-agent-connect.md` (canonical workspace location per `agents/definitions/README.md` "Where operational runbooks live"; was at `docs/runbooks/gymtrack-agent-connect.md`; retired in PR #583 — re-create there, with a row in that repo's `infra/RUNBOOKS.md`, when onboarding a new MCP connector provider)
