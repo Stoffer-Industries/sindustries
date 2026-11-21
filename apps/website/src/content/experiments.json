@@ -38,10 +38,11 @@
       "Content Scheduler changes the experiment from manual posting cadence to an approval-and-scheduling loop. The next learning is whether scheduled posts sourced from weekly site updates create more consistent public signal without lowering specificity.",
       "A reusable scheduling primitive and Ivy's themed weekly campaign workflow shift the cadence test from manual writing to whether a structured five-to-seven-post arc can preserve specificity across a week.",
       "Native X thread scheduling now treats a multi-part post as one content item, with a publish journal, retries, and rollback when a partial publish fails. This makes thread-based build-in-public updates possible without manually coordinating each post.",
-      "The X thread loop has now run end to end: a full themed weekly campaign published as linked replies, with scheduling, publishing, retry, and rollback handled as one content item. The cadence test now asks whether a scheduled thread arc can stay specific across a full week."
+      "The X thread loop has now run end to end: a full themed weekly campaign published as linked replies, with scheduling, publishing, retry, and rollback handled as one content item. The cadence test now asks whether a scheduled thread arc can stay specific across a full week.",
+      "The weekly Tech Manager Weekly import produced five real tweet drafts after its silent fetch failure was repaired on 2026-11-19. That adds a second concrete input to the channel loop; the next test is whether those imported ideas survive editing and approval without becoming generic summaries."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-09-18",
+    "updatedAt": "2026-11-20",
     "links": [],
     "image": "/brand/studio/social-content-hero.png",
     "visibility": "published"
