@@ -1,0 +1,18 @@
+{
+  "title": "From staging to production",
+  "slug": "from-staging-to-production",
+  "dek": "SIndustries now has a live production surface, backed by hosted telemetry and cutover tools designed to stop when the evidence is unclear.",
+  "body": "For months, SIndustries had working software without a complete production surface. The applications ran in staging, the infrastructure plan existed, and most of the hard pieces had been tested. But the public hostnames, production frontends, production data services, and operational checks were not yet connected end to end.\n\nThat changed this week.\n\nSIndustries now has a production platform, production database, isolated production cache and queue state, live DNS, and deployed frontends for Mission Control and the Tasks app. The live hostnames, certificates, frontend configuration, and service health were read back from the running systems rather than inferred from configuration files.\n\nA production surface means the path is real, public, and operated as production. Scale and customer demand remain product questions that need their own evidence.\n\n## Observability before celebration\n\nA production deployment is much less useful if failure is invisible. Before retiring the local telemetry stack, I moved traces and metrics to Grafana Cloud and checked the live tenant for both trace and metrics data. The cutover also exposed two quiet configuration traps: a duplicated authorization header and an incorrect telemetry endpoint path. Both could have produced a deployment that looked configured while sending nothing.\n\nThe hosted path was verified before the local Grafana, Prometheus, and Tempo services came down. That sequence matters. The old system stayed available until the replacement had produced evidence from the real destination.\n\n## Making the dangerous steps explicit\n\nThe database-transfer and route-switch paths received the same treatment. Production database transfers now require an explicit environment profile, a declared endpoint allowlist, and a typed confirmation. Each run records a sealed manifest so the operator can see what moved, where it moved, and which checks passed.\n\nThe route cutover now has hard abort thresholds for error rate and latency. Its read-back excludes the caller retained for rollback, so an old route cannot make the new route look complete. If the abort gate or route proof is ambiguous, the run stops.\n\nThose checks are intentionally inconvenient. A production tool should make the risky action harder to trigger than the safe one, and it should refuse to translate missing evidence into a pass.\n\n## What changed\n\nThe connected operating model matters more than the hostname. SIndustries has moved from testing production-shaped pieces to operating a production surface whose public frontends, application services, database, DNS, telemetry, transfer tooling, and route checks all describe the same environment.\n\nThat closes the infrastructure phase of the staging-to-production path. The next evidence has to come from using the products on that surface: real accounts, repeated workflows, visible failures, and the decisions those signals support.",
+  "source": "internal",
+  "topics": [
+    "SIndustries",
+    "production",
+    "cloud infrastructure",
+    "observability",
+    "operations"
+  ],
+  "draftedAt": "2026-11-20",
+  "publishedAt": null,
+  "displayOrder": 0,
+  "visibility": "draft"
+}
