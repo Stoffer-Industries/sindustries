@@ -143,10 +143,11 @@
       "The MCP server is live in production with dynamic client registration and rate limits on public OAuth write endpoints. The next evidence gate remains repeated use by people and connected agents, not deployment readiness.",
       "A live two-user Clerk-to-Supabase boundary test passed with one isolated workout per user. Migration acceptance still depends on harness corrections, independent review, and verified-email linking.",
       "The end-to-end suite now validates a production Clerk JWT against Supabase row-level security, proving authentication and row-level access together. A later production browser smoke exposed three sign-up and sign-in regressions; the repairs are merged, but final acceptance still depends on a clean real-account retest.",
-      "Browser-error telemetry now indexes on service name, while authentication events keep only safe provider, operation, error-code, and status context. This tightens the production observability path ahead of cutover."
+      "Browser-error telemetry now indexes on service name, while authentication events keep only safe provider, operation, error-code, and status context. This tightens the production observability path ahead of cutover.",
+      "The Supabase fallback sign-in path now runs without Clerk-only client options, and three real-app browser tests prove that a failed telemetry export cannot break sign-in, sign-up, or authenticated navigation. The next gate is a clean real-account production retest."
     ],
     "startedAt": "2026-07-13",
-    "updatedAt": "2026-11-13",
+    "updatedAt": "2026-11-20",
     "links": [],
     "image": "/brand/studio/gymtrack-hero.jpg",
     "visibility": "published"
