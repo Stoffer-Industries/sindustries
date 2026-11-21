@@ -18,7 +18,7 @@ One Neon production database, three schemas — the same shape staging proved on
 | `budget_api` | the budget API | `schemas.budget` |
 | `content_scheduler` | the content-scheduler API and the auto-post worker (they share the schema) | `schemas.contentScheduler` |
 
-The schema names live in [`infra/cloud/platform/platform-environments.mjs`](../infra/cloud/platform/platform-environments.mjs) and nowhere else. The evidence gate reads them from there, so an evidence artifact cannot prove a shape production does not use.
+The schema names live in [`infra/cloud/platform/platform-environments.mjs`](../../infra/cloud/platform/platform-environments.mjs) and nowhere else. The evidence gate reads them from there, so an evidence artifact cannot prove a shape production does not use.
 
 > **Resolved topology (Quinn, 2026-11-10):** production uses one Neon project and branch with the three schemas above. A future per-service split changes the manifest's `schemas` block and this contract together; it is not assumed by either.
 

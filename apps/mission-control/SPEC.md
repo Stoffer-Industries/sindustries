@@ -140,7 +140,7 @@ surface.
      button is disabled with a tooltip when the item is unapproved. Manual
      publish is still available in the composer flow for on-demand posting;
      event-driven auto-publish on `scheduledFor` arrival is documented in the
-     [auto-post system spec](../systems/content-scheduler-auto-post.md).
+     [auto-post system spec](../../docs/systems/content-scheduler.md#auto-post-event-driven-delayed-jobs).
    - **Max-three-published-per-day guard.** When Tom drags a card onto a
      day column that already has three published items, the drop is refused
      at the UI layer with the inline error `"Daily cap reached
@@ -232,9 +232,9 @@ specimen mount.
   `apps/mission-control/src/tabs/contentSchedulerCalendar.js` and use
   `Intl.DateTimeFormat` to handle the NZST/NZDT offset and DST start edge.
   Auto-publish on `scheduledFor` arrival is a separate subsystem documented
-  in [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md)
-  under [Auto-post (event-driven delayed jobs)](../systems/content-scheduler.md#auto-post-event-driven-delayed-jobs).
-  See [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md)
+  in [`docs/systems/content-scheduler.md`](../../docs/systems/content-scheduler.md)
+  under [Auto-post (event-driven delayed jobs)](../../docs/systems/content-scheduler.md#auto-post-event-driven-delayed-jobs).
+  See [`docs/systems/content-scheduler.md`](../../docs/systems/content-scheduler.md)
   for the full system contract.
 - **Bookmark state** is read by the Bookmarks tab from
   `brain/state/bookmark-review-state.json` (via the dev-only Vite
@@ -264,8 +264,9 @@ specimen mount.
   missing or malformed signal. The signal is produced by
   `agents/workflows/bookmarks/scripts/compute_compounding_signal.py`
   and is read-only against all upstream pipeline data. See
-  [`docs/runbooks/bookmark-compounding-signal.md`](../runbooks/bookmark-compounding-signal.md)
-  for the operator runbook and failure-case recovery.
+  [`agents/crons/prompts/bookmark-compounding-signal.md`](../../agents/crons/prompts/bookmark-compounding-signal.md)
+  for the calculator contract and failure-case recovery — the operator runbook
+  `docs/runbooks/bookmark-compounding-signal.md` was retired with PR #583.
 
 ## Open Items
 

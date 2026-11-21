@@ -1,8 +1,8 @@
 # Production source contract — consolidated platform
 
 **Status:** contract for the production environment (task `fb1240c0`, Slice B).
-**Source of truth:** [`infra/cloud/platform/platform-environments.mjs`](../infra/cloud/platform/platform-environments.mjs) (the environment manifest).
-**Local operator path:** [`infra/cloud/scripts/bootstrap-production.sh`](../infra/cloud/scripts/bootstrap-production.sh) → `infra/cloud/scripts/bootstrap-platform.sh --environment production`.
+**Source of truth:** [`infra/cloud/platform/platform-environments.mjs`](../../infra/cloud/platform/platform-environments.mjs) (the environment manifest).
+**Local operator path:** [`infra/cloud/scripts/bootstrap-production.sh`](../../infra/cloud/scripts/bootstrap-production.sh) → `infra/cloud/scripts/bootstrap-platform.sh --environment production`.
 **CI path:** the production deploy workflow (Slice C) reads the same source names from the GitHub `production` Environment.
 
 This document lists **names, owners and rotation** only. No secret value appears here, and none ever may: this file is committed to a public repository.
@@ -19,9 +19,9 @@ There are three names for every credential, and confusing them is how a producti
 | **Source name** | the GitHub `production` Environment, and the manifest | Quinn |
 | **Destination name** | the app-level `PLATFORM_*` Fly secret on `sindustries-platform-production` | the provisioner |
 
-The **source name** is the contract. The provisioner ([`platform-provision-secrets.mjs`](../infra/cloud/platform/platform-provision-secrets.mjs)) owns the source → destination mapping, and both the local bootstrap and the CI deploy path go through it, so a local bootstrap and a CI deploy cannot register different secrets on the same app.
+The **source name** is the contract. The provisioner ([`platform-provision-secrets.mjs`](../../infra/cloud/platform/platform-provision-secrets.mjs)) owns the source → destination mapping, and both the local bootstrap and the CI deploy path go through it, so a local bootstrap and a CI deploy cannot register different secrets on the same app.
 
-The local keys are the operator-facing convenience documented in [`infra/cloud/env/bootstrap-production.env.example`](../infra/cloud/env/bootstrap-production.env.example).
+The local keys are the operator-facing convenience documented in [`infra/cloud/env/bootstrap-production.env.example`](../../infra/cloud/env/bootstrap-production.env.example).
 
 ---
 
@@ -36,9 +36,9 @@ The local keys are the operator-facing convenience documented in [`infra/cloud/e
 | `PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `PLATFORM_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | yes | Quinn | per-deploy |
 | `PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | `PLATFORM_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | yes | Quinn | per-deploy |
 
-The three `PLATFORM_*_CORS_ALLOWED_ORIGINS` destinations are **not** sources: they are environment facts, owned by the manifest's `corsAllowedOrigins`, and rendered into the Fly config by the overlay ([`infra/cloud/fly/platform.production.overlay.toml`](../infra/cloud/fly/platform.production.overlay.toml)).
+The three `PLATFORM_*_CORS_ALLOWED_ORIGINS` destinations are **not** sources: they are environment facts, owned by the manifest's `corsAllowedOrigins`, and rendered into the Fly config by the overlay ([`infra/cloud/fly/platform.production.overlay.toml`](../../infra/cloud/fly/platform.production.overlay.toml)).
 
-The manifest is the source of truth for every name in this table. If a name here disagrees with the manifest, the manifest wins and this table is the bug — [`infra/cloud/platform/tests/platform-environments.test.mjs`](../infra/cloud/platform/tests/platform-environments.test.mjs) and [`infra/cloud/platform/tests/render-fly-config.test.mjs`](../infra/cloud/platform/tests/render-fly-config.test.mjs) bind the two surfaces together.
+The manifest is the source of truth for every name in this table. If a name here disagrees with the manifest, the manifest wins and this table is the bug — [`infra/cloud/platform/tests/platform-environments.test.mjs`](../../infra/cloud/platform/tests/platform-environments.test.mjs) and [`infra/cloud/platform/tests/render-fly-config.test.mjs`](../../infra/cloud/platform/tests/render-fly-config.test.mjs) bind the two surfaces together.
 
 ---
 
@@ -85,7 +85,7 @@ The production approval actor is `production-cloud-validate`. It is deliberately
 
 ## 6. Deploy gates
 
-Production has **three** gates, and each one guards a different mutation. The gate names are derived from the environment id, so they cannot drift from the environment they belong to; [`infra/cloud/scripts/tests/bootstrap-platform.test.sh`](../infra/cloud/scripts/tests/bootstrap-platform.test.sh) asserts that the staging workflow and the derivation still agree.
+Production has **three** gates, and each one guards a different mutation. The gate names are derived from the environment id, so they cannot drift from the environment they belong to; [`infra/cloud/scripts/tests/bootstrap-platform.test.sh`](../../infra/cloud/scripts/tests/bootstrap-platform.test.sh) asserts that the staging workflow and the derivation still agree.
 
 | Mutation | Gate | What it guards |
 |---|---|---|
