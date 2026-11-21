@@ -2088,6 +2088,34 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(item["tweetLog"]["status"], "skipped")
         self.assertEqual(item["tweetLog"]["error"], "missing_credentials")
 
+    def test_resolve_spec_request_targets_content_scheduler_for_tweet_step(self):
+        # Service-boundary regression: the author-tweet step must call the
+        # Content Scheduler, which owns `POST /x/tweets` since PR #507 moved
+        # the route out of the Tasks API. A Tasks API base URL made every
+        # quote-post 404 and AC1 of task 55ac9240 unpassable.
+        self._seed_pending_state(
+            source="x",
+            link="https://x.com/somebody/status/1234567890",
+        )
+
+        with patch.object(
+            resolve_spec_request,
+            "try_post_author_tweet",
+            return_value={
+                "status": "posted",
+                "tweetUrl": "https://x.com/sindustries/status/1",
+                "postedAt": "2026-11-22T00:00:00.000Z",
+            },
+        ) as mocked:
+            rc = self._run_resolve_with_created_tasks()
+
+        self.assertEqual(rc, 0)
+        mocked.assert_called_once()
+        base = mocked.call_args.kwargs.get("content_scheduler_api_base_url")
+        self.assertTrue(base, "the tweet step must receive an explicit base URL")
+        self.assertNotIn(":4001", base)
+        self.assertTrue(base.endswith("/api/v1"))
+
 
 
 if __name__ == "__main__":

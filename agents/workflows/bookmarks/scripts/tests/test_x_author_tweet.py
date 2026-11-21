@@ -21,19 +21,30 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from x_author_tweet import (  # noqa: E402  (import after sys.path tweak)
+    DEFAULT_CONTENT_SCHEDULER_API_BASE_URL,
     POSTED,
     SKIPPED,
     ERROR,
+    ContentSchedulerUnreachableError,
     CredentialsMissingError,
-    TasksApiUnreachableError,
     XApiError,
     call_x_tweets_route,
     compose_author_tweet,
+    content_scheduler_api_base_url,
     parse_x_link,
     parse_x_status_id,
     resolve_tweet_author,
     try_post_author_tweet,
 )
+
+
+def _ok_response(payload):
+    """A minimal urlopen context manager returning ``payload`` as JSON."""
+    resp = mock.MagicMock()
+    resp.read.return_value = json.dumps(payload).encode("utf-8")
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = lambda s, *a: None
+    return resp
 
 
 # --- parse_x_link --------------------------------------------------------
@@ -161,7 +172,7 @@ class ResolveTweetAuthorTests(unittest.TestCase):
         with mock.patch("x_author_tweet.urllib.request.urlopen", side_effect=http_err):
             self.assertIsNone(resolve_tweet_author("999"))
 
-    def test_tasks_api_unreachable_returns_none(self):
+    def test_content_scheduler_unreachable_returns_none(self):
         with mock.patch("x_author_tweet.urllib.request.urlopen",
                         side_effect=ConnectionRefusedError("refused")):
             self.assertIsNone(resolve_tweet_author("999"))
@@ -284,14 +295,14 @@ class CallXTweetsRouteTests(unittest.TestCase):
                 call_x_tweets_route("hi", "1")
         self.assertIn("x_api_502", str(ctx.exception))
 
-    def test_connection_refused_raises_tasks_api_unreachable(self):
+    def test_connection_refused_raises_content_scheduler_unreachable(self):
         with mock.patch("x_author_tweet.urllib.request.urlopen",
                         side_effect=ConnectionRefusedError("refused")):
-            with self.assertRaises(TasksApiUnreachableError) as ctx:
+            with self.assertRaises(ContentSchedulerUnreachableError) as ctx:
                 call_x_tweets_route("hi", "1")
-        self.assertIn("tasks_api_unreachable", str(ctx.exception))
+        self.assertIn("content_scheduler_unreachable", str(ctx.exception))
 
-    def test_uses_env_var_for_base_url(self):
+    def test_uses_content_scheduler_env_var_for_base_url(self):
         fake_response = mock.MagicMock()
         fake_response.read.return_value = json.dumps({
             "data": {"url": "https://x.com/u/status/x", "postedAt": "now"}
@@ -304,10 +315,93 @@ class CallXTweetsRouteTests(unittest.TestCase):
             captured["url"] = req.full_url
             return fake_response
 
-        with mock.patch.dict(os.environ, {"TASKS_API_BASE_URL": "http://example.test/api/v1"}):
+        with mock.patch.dict(os.environ, {"CONTENT_SCHEDULER_API_BASE_URL": "http://example.test/api/v1"}):
             with mock.patch("x_author_tweet.urllib.request.urlopen", side_effect=fake_urlopen):
                 call_x_tweets_route("hi", "1")
         self.assertEqual(captured["url"], "http://example.test/api/v1/x/tweets")
+
+
+# --- service boundary: Content Scheduler owns the x/tweets routes ---------
+
+class ContentSchedulerBaseUrlTests(unittest.TestCase):
+    """Regression coverage for the extracted service boundary.
+
+    `POST /x/tweets` and `GET /x/tweets/:id/author` moved out of the Tasks API
+    when the Content Scheduler was extracted (PR #507). The helper used to
+    resolve the Tasks API base URL, so every quote-post 404'd and AC1 of task
+    55ac9240 could never pass.
+    """
+
+    def test_default_targets_content_scheduler_not_tasks_api(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            base = content_scheduler_api_base_url()
+        self.assertEqual(base, DEFAULT_CONTENT_SCHEDULER_API_BASE_URL)
+        self.assertNotIn(":4001", base)
+        self.assertTrue(base.endswith("/api/v1"))
+
+    def test_api_base_url_env_var_wins(self):
+        with mock.patch.dict(
+            os.environ, {"CONTENT_SCHEDULER_API_BASE_URL": "http://example.test/api/v1"}, clear=True
+        ):
+            self.assertEqual(content_scheduler_api_base_url(), "http://example.test/api/v1")
+
+    def test_derives_api_base_url_from_origin_env_var(self):
+        with mock.patch.dict(
+            os.environ, {"CONTENT_SCHEDULER_BASE_URL": "http://origin.test"}, clear=True
+        ):
+            self.assertEqual(content_scheduler_api_base_url(), "http://origin.test/api/v1")
+
+    def test_origin_env_var_with_api_prefix_is_not_doubled(self):
+        with mock.patch.dict(
+            os.environ, {"CONTENT_SCHEDULER_BASE_URL": "http://origin.test/api/v1"}, clear=True
+        ):
+            self.assertEqual(content_scheduler_api_base_url(), "http://origin.test/api/v1")
+
+    def test_override_wins_over_env_var(self):
+        with mock.patch.dict(
+            os.environ, {"CONTENT_SCHEDULER_API_BASE_URL": "http://env.test/api/v1"}, clear=True
+        ):
+            self.assertEqual(
+                content_scheduler_api_base_url("http://override.test/api/v1"),
+                "http://override.test/api/v1",
+            )
+
+    def test_tasks_api_base_url_env_var_is_ignored(self):
+        """The Tasks API no longer hosts the route; its env var must not win."""
+        with mock.patch.dict(
+            os.environ, {"TASKS_API_BASE_URL": "http://localhost:4001/api/v1"}, clear=True
+        ):
+            self.assertNotIn(":4001", content_scheduler_api_base_url())
+
+    def test_post_targets_content_scheduler_route(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return _ok_response({"data": {"url": "https://x.com/u/status/x", "postedAt": "now"}})
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch("x_author_tweet.urllib.request.urlopen", side_effect=fake_urlopen):
+                call_x_tweets_route("hi", "1")
+        self.assertEqual(
+            captured["url"], f"{DEFAULT_CONTENT_SCHEDULER_API_BASE_URL}/x/tweets"
+        )
+        self.assertNotIn(":4001", captured["url"])
+
+    def test_author_lookup_targets_content_scheduler_route(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return _ok_response({"data": {"handle": "polydao"}})
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch("x_author_tweet.urllib.request.urlopen", side_effect=fake_urlopen):
+                resolve_tweet_author("999")
+        self.assertEqual(
+            captured["url"], f"{DEFAULT_CONTENT_SCHEDULER_API_BASE_URL}/x/tweets/999/author"
+        )
+        self.assertNotIn(":4001", captured["url"])
 
 
 def urllib_error(msg: str, *, code: int):
@@ -431,13 +525,13 @@ class TryPostAuthorTweetTests(unittest.TestCase):
         self.assertEqual(result["status"], ERROR)
         self.assertEqual(result["error"], "x_api_500:boom")
 
-    def test_tasks_api_unreachable_records_error(self):
+    def test_content_scheduler_unreachable_records_error(self):
         with mock.patch(
             "x_author_tweet.compose_author_tweet",
             return_value="@somebody nice thread",
         ), mock.patch(
             "x_author_tweet.call_x_tweets_route",
-            side_effect=TasksApiUnreachableError("tasks_api_unreachable:refused"),
+            side_effect=ContentSchedulerUnreachableError("content_scheduler_unreachable:refused"),
         ):
             result = try_post_author_tweet({
                 "source": "x",
@@ -445,7 +539,7 @@ class TryPostAuthorTweetTests(unittest.TestCase):
                 "title": "x",
             })
         self.assertEqual(result["status"], ERROR)
-        self.assertIn("tasks_api_unreachable", result["error"])
+        self.assertIn("content_scheduler_unreachable", result["error"])
 
     def test_happy_path_returns_posted(self):
         with mock.patch(
