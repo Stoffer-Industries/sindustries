@@ -51,7 +51,8 @@
         "CONTENT_SCHEDULER_API_SOURCE_DSN",
         "TASKS_API_DEST_DSN",
         "CONTENT_SCHEDULER_API_DEST_DSN",
-        "RECOVERY_TASKS_API_DSN",
+        "NEONDB_OWNER_DSN",
+      "RECOVERY_TASKS_API_DSN",
         "RECOVERY_CONTENT_SCHEDULER_API_DSN"
       ],
       "variableNames": [],
