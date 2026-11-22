@@ -275,6 +275,33 @@ fi
 
 cloud_db_info "cleanup: dropping tasks_api (schema present=${pre_tasks_schema_present}, pre-count=${pre_tasks_count}) and content_scheduler (schema present=${pre_content_scheduler_schema_present}, pre-count=${pre_content_scheduler_count})"
 
+# ---------------------------------------------------------------------------
+# Cross-schema isolation, BEFORE the drop
+# ---------------------------------------------------------------------------
+#
+# This script is the destructive one: it drops the live schemas so the
+# restore can rebuild them. The restore asserts the same isolation
+# invariant afterwards, but that assertion runs AFTER the drop — so a
+# destination whose role model cannot confine one service role to its own
+# schema was discovered only once the live schemas had been dropped and
+# recreated.
+#
+# That access is a property of the ROLES, not of the data: a role that is
+# a member of a role carrying pg_read_all_data or pg_write_all_data holds
+# USAGE, and read and write, on every schema in the database, and no
+# explicit GRANT can withdraw it. It is knowable right now, before
+# anything is dropped.
+#
+# So it is checked here, immediately before the first destructive
+# statement. A destination that cannot be isolated refuses the cleanup
+# with both schemas still in place, instead of being dropped and then
+# failing downstream with the data moved and the migrations not applied.
+#
+# Same helper, same predicate, same semantics as the restore's
+# end-state assertion: one implementation, so the two cannot drift.
+cloud_db_assert_cross_schema_isolation \
+  "$DEST_TASKS_DSN" "$DEST_CONTENT_SCHEDULER_DSN" "pre-cleanup"
+
 drop_start_epoch="$(date +%s)"
 
 PGPASSWORD="" psql \

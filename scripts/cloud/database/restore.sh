@@ -183,56 +183,16 @@ schema_owner() {
   printf '%s' "$owner"
 }
 
-# The role the server says this connection is running as. Taken from the
-# server rather than parsed out of the DSN: the DSN's userinfo is a
-# claim, `current_user` is the fact, and the assertion compares against
-# the fact.
-connection_role() {
-  local dsn="$1" role out
-  out="$(
-    PGPASSWORD="" psql \
-      --no-psqlrc --tuples-only --no-align \
-      --variable=ON_ERROR_STOP=1 \
-      --dbname="$dsn" \
-      --command="SELECT current_user;" \
-      2>&1
-  )" || cloud_db_die "could not read the current role of the destination connection: ${out}"
-  role="$(printf '%s' "$out" | awk '{print $1}')"
-  printf '%s' "$role"
-}
-
-# Whether the role THIS CONNECTION runs as holds a privilege on a schema.
-# `current_user` rather than an interpolated role name: psql does not
-# substitute variables into a `--command` string (it only does so for
-# `-f` files and standard input), so a `:'role'` placeholder reaches
-# the server verbatim and the query fails.
-schema_privilege() {
-  local dsn="$1" schema="$2" priv="$3" result out
-  out="$(
-    PGPASSWORD="" psql \
-      --no-psqlrc --tuples-only --no-align \
-      --variable=ON_ERROR_STOP=1 \
-      --dbname="$dsn" \
-      --command="SELECT has_schema_privilege(current_user, '${schema}', '${priv}');" \
-      2>&1
-  )" || cloud_db_die "could not read the ${priv} privilege of the connecting role on schema '${schema}': ${out}"
-  result="$(printf '%s' "$out" | awk '{print $1}')"
-  printf '%s' "${result:-f}"
-}
-
-schema_visible() {
-  local dsn="$1" schema="$2" count out
-  out="$(
-    PGPASSWORD="" psql \
-      --no-psqlrc --tuples-only --no-align \
-      --variable=ON_ERROR_STOP=1 \
-      --dbname="$dsn" \
-      --command="SELECT count(*) FROM pg_namespace WHERE nspname = '${schema}';" \
-      2>&1
-  )" || cloud_db_die "could not check whether schema '${schema}' is visible: ${out}"
-  count="$(printf '%s' "$out" | tr -d '[:space:]')"
-  [[ "${count:-0}" != "0" ]]
-}
+# The role the server says this connection is running as, and the
+# privilege of that role on a schema. Both now live in common.sh so
+# there is ONE implementation of the isolation predicate in this
+# harness — the pre-destructive preflight in cleanup-destination.sh and
+# the end-state assertion below must not be able to drift apart, because
+# two shapes of "can this role reach that schema" disagree (see
+# cloud_db_assert_cross_schema_isolation in common.sh).
+connection_role()  { cloud_db_connection_role "$@"; }
+schema_privilege() { cloud_db_schema_privilege "$@"; }
+schema_visible()   { cloud_db_schema_visible "$@"; }
 
 # The role each destination connection runs as. Read from the SERVER
 # (`current_user`), not parsed out of the DSN: the DSN's userinfo is a
@@ -265,6 +225,26 @@ if [[ "$tasks_role" == "$content_scheduler_role" ]]; then
   cloud_db_info \
     "both destination connections run as role '${tasks_role}'; this environment uses one role for both schemas, so the cross-schema isolation assertion does not apply"
 fi
+
+# Cross-schema isolation, BEFORE anything is written.
+#
+# The end-state assertion below verifies the state this restore produced.
+# It runs AFTER pg_restore, so a destination role model that cannot
+# confine one service role to its own schema was discovered only once the
+# live schemas had already been dropped and recreated — the drill aborts
+# with the data moved and the migrations not applied.
+#
+# That access is a property of the ROLES, not of the data: a role that is
+# a member of a role carrying pg_read_all_data or pg_write_all_data
+# holds USAGE, and read and write, on every schema in the database. So it
+# is knowable now, before the archive is even verified, and it is checked
+# here — before the first schema is created — so a mis-provisioned
+# destination fails with the destination untouched.
+#
+# Same predicate, same helper, same semantics as the end-state assertion:
+# one implementation, two points in the run.
+cloud_db_assert_cross_schema_isolation \
+  "$DEST_DSN" "$DEST_CONTENT_SCHEDULER_DSN" "pre-restore"
 
 if [[ ! -f "$ARCHIVE_PATH" ]]; then
   cloud_db_die "archive '$ARCHIVE_PATH' not found"
@@ -511,20 +491,12 @@ fi
 # differ, and only checkable when both schemas live in the same
 # database -- which is the production topology, and the one the
 # platform's own `neon.service-role-scope` gate enforces.
-if [[ "$tasks_role" != "$content_scheduler_role" ]]; then
-  if schema_visible "$DEST_DSN" content_scheduler; then
-    if [[ "$(schema_privilege "$DEST_DSN" content_scheduler USAGE)" != "f" ]]; then
-      cloud_db_die \
-        "post-restore isolation assertion failed: role '${tasks_role}' holds USAGE on schema content_scheduler, which belongs to '${content_scheduler_role}'. The production topology confines each service role to its own schema; refusing to continue."
-    fi
-  fi
-  if schema_visible "$DEST_CONTENT_SCHEDULER_DSN" tasks_api; then
-    if [[ "$(schema_privilege "$DEST_CONTENT_SCHEDULER_DSN" tasks_api USAGE)" != "f" ]]; then
-      cloud_db_die \
-        "post-restore isolation assertion failed: role '${content_scheduler_role}' holds USAGE on schema tasks_api, which belongs to '${tasks_role}'. The production topology confines each service role to its own schema; refusing to continue."
-    fi
-  fi
-fi
+#
+# The same helper and therefore the same predicate as the pre-restore
+# check above: one implementation, so the two cannot disagree about
+# what "isolated" means.
+cloud_db_assert_cross_schema_isolation \
+  "$DEST_DSN" "$DEST_CONTENT_SCHEDULER_DSN" "post-restore"
 
 cloud_db_info "post-restore ownership assertion passed: tasks_api owned by ${tasks_role}, content_scheduler owned by ${content_scheduler_role}"
 

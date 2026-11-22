@@ -121,8 +121,19 @@ case "$flat" in
       case "$flat" in
         *"'content_scheduler'"*) _schema="content_scheduler" ;;
       esac
-      _owner="$(cat "$PSQL_STUB_STATE_DIR/owner_${_schema}" 2>/dev/null || printf '%s' "$conn_role")"
-      if [[ -n "$conn_role" && "$conn_role" == "$_owner" ]]; then
+      # An UNRECORDED owner means the schema has not been created by this
+      # run yet. Falling back to the connecting role here made a
+      # pre-flight privilege question answer "yes" for a schema nobody
+      # owns -- the stub asserting something the server would not say.
+      # Before the restore creates its schemas there is no owner, so the
+      # answer is the cross-access override, which defaults to "no".
+      _owner_file="$PSQL_STUB_STATE_DIR/owner_${_schema}"
+      if [[ -f "$_owner_file" ]]; then
+        _owner="$(cat "$_owner_file")"
+      else
+        _owner=""
+      fi
+      if [[ -n "$_owner" && "$_owner" == "$conn_role" ]]; then
         printf '%s\n' "t"
       else
         case "$_schema" in
