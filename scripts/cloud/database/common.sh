@@ -523,6 +523,164 @@ cloud_db_assert_inequality() {
 # of the same name. The predicate below is `has_schema_privilege`, and it
 # is shared by the pre-destructive preflight and the post-restore
 # end-state assertion so the two cannot drift apart.
+#
+# ---------------------------------------------------------------------------
+# Accepted cross-schema access (a recorded decision, not a default)
+# ---------------------------------------------------------------------------
+#
+# Per-schema confinement is NOT enforceable in the production Neon role
+# model, and that is now a recorded decision rather than an open
+# question (task f2c23e26; Quinn recorded Tom's decision on
+# 2026-11-23 07:25 NZDT).
+#
+# WHY THE ACCESS EXISTS. Both production service roles are members of
+# `neon_superuser`, which carries `pg_read_all_data` and
+# `pg_write_all_data`. A member of such a role holds USAGE — and read
+# and write — on EVERY schema in the database, and no explicit GRANT can
+# withdraw it, because no explicit grant was the source. The decision is
+# to ACCEPT that shared access rather than revoke the membership, which
+# would be a wider change to the production role model than the
+# decision authorises.
+#
+# WHAT "ACCEPTED" IS NOT. It is not a switch that turns the assertion
+# off. The assertion still runs, still computes the same predicate, and
+# still refuses whenever the access it finds is not the accepted one.
+# The acceptance is narrow on four axes:
+#
+#   1. it applies only to a PRODUCTION run. Staging keeps the strict
+#      behaviour, and staging is single-role anyway.
+#   2. it applies only when the recorded declaration names EXACTLY the
+#      two roles this run is connecting as. A declaration for any other
+#      pair does not apply, and the run refuses.
+#   3. it requires a non-empty reason, so an acceptance is never an
+#      unexplained widening.
+#   4. it is reported loudly and recorded in the run envelope, so an
+#      accepted run is distinguishable from an isolated one afterwards.
+#
+# The operator supplies the declaration:
+#
+#   CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES    two role names, comma separated
+#   CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON   the decision that accepted it
+#
+# Those role names are the production topology's service roles, declared
+# in infra/cloud/platform/platform-environments.mjs
+# (`databaseServiceRoles` and `databaseServiceRoleSharedAccess`) and
+# recorded as the `neon.service-role-scope` gate's accepted-shared-access
+# evidence. The harness does not invent them: it matches the declaration
+# against the roles the server says it is actually running as, and
+# refuses when they are not the same pair.
+
+# ---------------------------------------------------------------------------
+# Schema DDL ownership
+# ---------------------------------------------------------------------------
+#
+# The two production service roles do NOT own the production schemas:
+# the schemas are owned by the database's owner role (`neondb_owner`).
+# `DROP SCHEMA ... CASCADE` and `CREATE SCHEMA` are therefore owner-only
+# statements, and running them as a service role fails closed with
+# "must be owner of schema" — before anything is dropped, but the run
+# cannot proceed either.
+#
+# So the destructive DDL runs through an OWNER connection while the
+# service roles keep their own DML-scoped connections for the data load.
+# The owner connection is optional: when it is not supplied the scripts
+# behave exactly as before (the service role creates and owns its own
+# schema), which is what the staging topology needs.
+
+# cloud_db_grant_schema_access <owner_dsn> <schema> <role> <label>
+#
+# Grants the schema-level privileges a service role needs to load data
+# into a schema it does not own: USAGE to resolve the schema, and
+# CREATE to create objects inside it. A freshly created schema has no
+# ACL of its own — `DROP SCHEMA ... CASCADE` took the previous grants
+# with it — so without this the data load fails with "permission denied
+# for schema".
+#
+# The grant is deliberately minimal and explicit: it names the schema
+# and the role, it does not widen to `GRANT ALL`, and it does not touch
+# any role membership. The accepted cross-schema access between the two
+# production service roles comes from their membership of
+# `neon_superuser`, not from this grant.
+cloud_db_grant_schema_access() {
+  local owner_dsn="$1" schema="$2" role="$3" label="$4" out
+  out="$(
+    PGPASSWORD="" psql \
+      --no-psqlrc --variable=ON_ERROR_STOP=1 \
+      --dbname="$owner_dsn" \
+      --command="GRANT USAGE, CREATE ON SCHEMA ${schema} TO ${role};" \
+      2>&1
+  )" || cloud_db_die \
+    "could not grant USAGE, CREATE on schema '${schema}' to role '${role}' (${label}): ${out}. The schema owner must be able to grant schema-level privileges to the service role that loads the data."
+  cloud_db_info "granted USAGE, CREATE on schema '${schema}' to role '${role}' (${label})"
+}
+
+# cloud_db_assert_shared_access_declaration
+#
+# Validates the accepted-shared-access declaration. Called DIRECTLY (not
+# in a command substitution) so that a malformed declaration stops the
+# run: an acceptance that names roles without a reason, or a reason
+# without roles, or more or fewer than two roles, is an unexplained
+# widening of the assertion and must not be carried into a production
+# run.
+cloud_db_assert_shared_access_declaration() {
+  local roles="${CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES:-}"
+  local reason="${CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON:-}"
+
+  if [[ -z "$roles" && -z "$reason" ]]; then
+    return 0
+  fi
+  if [[ -z "$roles" ]]; then
+    cloud_db_die \
+      "CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON is set but CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES is not; an acceptance must name the role pair it accepts"
+  fi
+  if [[ -z "$reason" ]]; then
+    cloud_db_die \
+      "CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES is set but CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON is not; an acceptance must record why the shared access is accepted"
+  fi
+
+  local first second extra
+  IFS=',' read -r first second extra <<<"$roles"
+  first="$(printf '%s' "$first" | tr -d '[:space:]')"
+  second="$(printf '%s' "$second" | tr -d '[:space:]')"
+  if [[ -z "$first" || -z "$second" || -n "${extra:-}" ]]; then
+    cloud_db_die \
+      "CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES must be exactly two comma-separated role names; got '${roles}'"
+  fi
+  if [[ "$first" == "$second" ]]; then
+    cloud_db_die \
+      "CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES names the same role twice ('${first}'); an acceptance covers two DIFFERENT service roles"
+  fi
+}
+
+# cloud_db_shared_access_acceptance_applies <role_a> <role_b>
+#
+# Whether the recorded acceptance covers exactly this pair of roles in
+# this run. Returns 0 when it applies, 1 when it does not. Never dies:
+# the caller reports the refusal with the direction-specific message.
+cloud_db_shared_access_acceptance_applies() {
+  local role_a="$1" role_b="$2"
+  local roles="${CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES:-}"
+  local accepted_a accepted_b
+
+  if [[ -z "$roles" ]]; then
+    return 1
+  fi
+  if [[ "${CLOUD_DB_ENVIRONMENT:-}" != "production" ]]; then
+    cloud_db_info \
+      "the recorded shared-access decision applies to production runs only; this run is '${CLOUD_DB_ENVIRONMENT:-unset}'"
+    return 1
+  fi
+  IFS=',' read -r accepted_a accepted_b <<<"$roles"
+  accepted_a="$(printf '%s' "$accepted_a" | tr -d '[:space:]')"
+  accepted_b="$(printf '%s' "$accepted_b" | tr -d '[:space:]')"
+  if { [[ "$accepted_a" == "$role_a" ]] && [[ "$accepted_b" == "$role_b" ]]; } || \
+     { [[ "$accepted_a" == "$role_b" ]] && [[ "$accepted_b" == "$role_a" ]]; }; then
+    return 0
+  fi
+  cloud_db_info \
+    "the recorded shared-access decision names '${accepted_a},${accepted_b}', which is not this run's role pair ('${role_a}', '${role_b}'); it does not apply here"
+  return 1
+}
 
 # cloud_db_connection_role <dsn>
 #
@@ -609,6 +767,7 @@ cloud_db_schema_privilege() {
 cloud_db_assert_cross_schema_isolation() {
   local tasks_dsn="$1" content_scheduler_dsn="$2" phase="$3"
   local tasks_role content_scheduler_role privilege
+  local cross_tasks_to_cs="f" cross_cs_to_tasks="f"
 
   tasks_role="$(cloud_db_connection_role "$tasks_dsn")"
   content_scheduler_role="$(cloud_db_connection_role "$content_scheduler_dsn")"
@@ -616,27 +775,50 @@ cloud_db_assert_cross_schema_isolation() {
   if [[ "$tasks_role" == "$content_scheduler_role" ]]; then
     cloud_db_info \
       "${phase}: both destination connections run as role '${tasks_role}'; this environment uses one role for both schemas, so the cross-schema isolation assertion does not apply"
+    CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE="not-applicable"
+    export CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE
     return 0
   fi
 
+  # The same predicate in both directions, computed before anything is
+  # decided about it: an accepted access is still a REAL access, and the
+  # run has to know which direction it is in order to report it.
   if cloud_db_schema_visible "$tasks_dsn" content_scheduler; then
     privilege="$(cloud_db_schema_privilege "$tasks_dsn" content_scheduler USAGE)"
-    if [[ "$privilege" != "f" ]]; then
-      cloud_db_die \
-        "${phase}: cross-schema isolation assertion failed: role '${tasks_role}' holds USAGE on schema 'content_scheduler', which belongs to '${content_scheduler_role}'. The production topology confines each service role to its own schema, and the platform's own 'neon.service-role-scope' gate enforces that. This is a PROVISIONING gap in the destination role model, not something the restore can repair: a role that is a member of a role carrying pg_read_all_data or pg_write_all_data holds USAGE — and read and write — on EVERY schema in the database, and no explicit GRANT can withdraw it, because no explicit grant was the source. Fix the role model (revoke the membership), or record an explicit decision that per-schema isolation is not enforced in this environment. Do NOT narrow this check to the schemas' explicit ACLs: that view reads CLEAN while the access is real, and it would silently disagree with the platform gate of the same name."
-    fi
+    if [[ "$privilege" != "f" ]]; then cross_tasks_to_cs="t"; fi
   fi
 
   if cloud_db_schema_visible "$content_scheduler_dsn" tasks_api; then
     privilege="$(cloud_db_schema_privilege "$content_scheduler_dsn" tasks_api USAGE)"
-    if [[ "$privilege" != "f" ]]; then
-      cloud_db_die \
-        "${phase}: cross-schema isolation assertion failed: role '${content_scheduler_role}' holds USAGE on schema 'tasks_api', which belongs to '${tasks_role}'. The production topology confines each service role to its own schema, and the platform's own 'neon.service-role-scope' gate enforces that. This is a PROVISIONING gap in the destination role model, not something the restore can repair: a role that is a member of a role carrying pg_read_all_data or pg_write_all_data holds USAGE — and read and write — on EVERY schema in the database, and no explicit GRANT can withdraw it, because no explicit grant was the source. Fix the role model (revoke the membership), or record an explicit decision that per-schema isolation is not enforced in this environment. Do NOT narrow this check to the schemas' explicit ACLs: that view reads CLEAN while the access is real, and it would silently disagree with the platform gate of the same name."
-    fi
+    if [[ "$privilege" != "f" ]]; then cross_cs_to_tasks="t"; fi
   fi
 
-  cloud_db_info \
-    "${phase}: cross-schema isolation verified (roles '${tasks_role}' and '${content_scheduler_role}' hold no USAGE on each other's schema)"
+  if [[ "$cross_tasks_to_cs" == "f" && "$cross_cs_to_tasks" == "f" ]]; then
+    cloud_db_info \
+      "${phase}: cross-schema isolation verified (roles '${tasks_role}' and '${content_scheduler_role}' hold no USAGE on each other's schema)"
+    CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE="isolated"
+    export CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE
+    return 0
+  fi
+
+  # The access is real. It is ACCEPTED only by a recorded decision that
+  # names exactly these two roles, in a production run, with a reason.
+  if cloud_db_shared_access_acceptance_applies "$tasks_role" "$content_scheduler_role"; then
+    cloud_db_warn \
+      "${phase}: ACCEPTED cross-schema access between roles '${tasks_role}' and '${content_scheduler_role}' under the recorded decision: ${CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON:-}"
+    CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE="accepted"
+    CLOUD_DB_ACCEPTED_SHARED_ACCESS_APPLIED="${CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES:-}"
+    export CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE CLOUD_DB_ACCEPTED_SHARED_ACCESS_APPLIED
+    return 0
+  fi
+
+  if [[ "$cross_tasks_to_cs" == "t" ]]; then
+    cloud_db_die \
+      "${phase}: cross-schema isolation assertion failed: role '${tasks_role}' holds USAGE on schema 'content_scheduler', which belongs to '${content_scheduler_role}'. The production topology confines each service role to its own schema, and the platform's own 'neon.service-role-scope' gate enforces that. This is a PROVISIONING gap in the destination role model, not something the restore can repair: a role that is a member of a role carrying pg_read_all_data or pg_write_all_data holds USAGE — and read and write — on EVERY schema in the database, and no explicit GRANT can withdraw it, because no explicit grant was the source. Fix the role model (revoke the membership), or record an explicit decision that per-schema isolation is not enforced in this environment. Do NOT narrow this check to the schemas' explicit ACLs: that view reads CLEAN while the access is real, and it would silently disagree with the platform gate of the same name."
+  fi
+
+  cloud_db_die \
+    "${phase}: cross-schema isolation assertion failed: role '${content_scheduler_role}' holds USAGE on schema 'tasks_api', which belongs to '${tasks_role}'. The production topology confines each service role to its own schema, and the platform's own 'neon.service-role-scope' gate enforces that. This is a PROVISIONING gap in the destination role model, not something the restore can repair: a role that is a member of a role carrying pg_read_all_data or pg_write_all_data holds USAGE — and read and write — on EVERY schema in the database, and no explicit GRANT can withdraw it, because no explicit grant was the source. Fix the role model (revoke the membership), or record an explicit decision that per-schema isolation is not enforced in this environment. Do NOT narrow this check to the schemas' explicit ACLs: that view reads CLEAN while the access is real, and it would silently disagree with the platform gate of the same name."
 }
 
 # ---------------------------------------------------------------------------

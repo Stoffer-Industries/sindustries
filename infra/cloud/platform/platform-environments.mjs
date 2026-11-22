@@ -174,17 +174,73 @@ export const PLATFORM_ENVIRONMENTS = {
       contentScheduler: 'content_scheduler',
     },
     /**
-     * The Neon service roles that own the production schemas.
+     * The Neon service roles that CONNECT to the production schemas.
      *
      * The role names are part of the production topology: the provisioning
      * capture compares the provider's role inventory against these exact
      * names, so a similarly named read-only or broad role cannot satisfy
      * the schema-scoped connectivity control by substring accident.
+     *
+     * These roles do NOT own the production schemas (see
+     * `databaseSchemaOwnerRole`), and they are NOT confined to their own
+     * schema (see `databaseServiceRoleSharedAccess`). Both facts used to
+     * be assumed rather than declared, and the cutover found both of them
+     * the hard way.
      */
     databaseServiceRoles: {
       tasks: 'sindustries_tasks_api',
       budget: 'sindustries_budget_api',
       contentScheduler: 'sindustries_content_scheduler',
+    },
+    /**
+     * The role that OWNS the production schemas.
+     *
+     * The production schemas are owned by the Neon database owner role,
+     * not by the service roles. That makes `DROP SCHEMA ... CASCADE` and
+     * `CREATE SCHEMA` owner-only statements: a service role cannot drop
+     * a schema it does not own (it fails closed with "must be owner of
+     * schema"), and a service role that creates the schema becomes its
+     * owner — which would be a topology change nobody approved.
+     *
+     * The cutover harness therefore takes an optional schema-OWNER
+     * connection for the destructive DDL and keeps the service roles on
+     * their own DML-scoped connections for the data load.
+     */
+    databaseSchemaOwnerRole: 'neondb_owner',
+    /**
+     * Accepted cross-schema access between the production service roles.
+     *
+     * Per-schema confinement is NOT enforceable in the production Neon
+     * role model, and that is a recorded decision rather than an open
+     * question (task f2c23e26; Quinn recorded Tom's decision on
+     * 2026-11-23 07:25 NZDT).
+     *
+     * WHY THE ACCESS EXISTS. Both production service roles are members of
+     * `neon_superuser`, which carries `pg_read_all_data` and
+     * `pg_write_all_data`. A member of such a role holds USAGE — and
+     * read and write — on EVERY schema in the database, and no explicit
+     * GRANT can withdraw it, because no explicit grant was the source.
+     * The decision is to ACCEPT that shared access rather than revoke the
+     * membership, which would be a wider change to the production role
+     * model than the decision authorises.
+     *
+     * WHY IT IS DECLARED HERE. The cutover harness, the provisioning
+     * gate and the recorded evidence must agree on WHICH pair of roles
+     * the acceptance covers. This declaration is the single source of
+     * truth for that pair: the gate refuses when the recorded evidence
+     * names a different pair, and the harness refuses a run whose roles
+     * are not the declared pair.
+     *
+     * `accepted: false` means the assertion is unconditional: any
+     * cross-schema access refuses the run.
+     */
+    databaseServiceRoleSharedAccess: {
+      accepted: true,
+      roles: ['sindustries_tasks_api', 'sindustries_content_scheduler'],
+      reason:
+        'Neon role model: both production service roles are members of neon_superuser, which carries pg_read_all_data and pg_write_all_data, so each holds USAGE on every schema and no explicit GRANT can withdraw it. Per-schema confinement is not enforceable in this environment, so the shared access between these two roles is accepted rather than enforced as isolation (task f2c23e26; Tom\'s decision recorded by Quinn on 2026-11-23 07:25 NZDT).',
+      decisionRef:
+        'task f2c23e26 - Quinn recorded the decision on 2026-11-23 07:25 NZDT - accept per-schema confinement as not enforceable',
     },
     sourceNames: {
       tasksDatabaseUrl: 'PRODUCTION_TASKS_API_DATABASE_URL',

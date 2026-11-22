@@ -37,19 +37,26 @@
   "neonServiceRoleScopeProof": {
     "recorded": true,
     "readBackAt": "2026-11-16T10:31:58.000Z",
-    "scope": "operator read-back authored by Quinn in commit 9c2c2e8d",
+    "scope": "Quinn read-back commit 9c2c2e8d plus the accepted shared access decision of 2026-11-23 for task f2c23e26",
     "evidenceRef": "docs/cloud/production-provisioning-readback.md",
     "targets": [
       "production",
       "tasks_api",
       "budget_api",
       "content_scheduler"
-    ]
+    ],
+    "acceptedSharedAccess": {
+      "roles": [
+        "sindustries_tasks_api",
+        "sindustries_content_scheduler"
+      ],
+      "decisionRef": "task f2c23e26 - Quinn recorded the decision on 2026-11-23 07:25 NZDT - accept per-schema confinement as not enforceable"
+    }
   },
   "neonFreeTierIsolationAcceptance": {
     "recorded": true,
     "readBackAt": "2026-11-17T18:28:00.000Z",
-    "scope": "Tom decision to remain on Neon Free and accept schema-scoped service-role isolation as the AC2 connectivity control",
+    "scope": "Tom decision to remain on Neon Free with schema-scoped service roles as the AC2 control and the 2026-11-23 deviation",
     "control": "schema-scoped-service-roles",
     "evidenceRef": "docs/cloud/production-provisioning-readback.md",
     "targets": [

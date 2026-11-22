@@ -64,6 +64,15 @@ Required:
                                     is read.
   --dest-tasks-dsn-file <path>      Destination tasks_api DSN file.
   --dest-content-scheduler-dsn-file <path>     Destination content_scheduler DSN file.
+  --dest-owner-dsn-file <path>     Destination SCHEMA-OWNER DSN file (optional).
+                                    Used for the destructive DDL
+                                    (DROP SCHEMA), because the
+                                    production schemas are owned by
+                                    the database owner role
+                                    (neondb_owner) and a service role
+                                    cannot drop them. When omitted,
+                                    the DROP runs on the service-role
+                                    DSNs, as before.
   --confirm <run-id>                Must match CLOUD_DB_RUN_ID.
   --confirm-cleanup-destination     Explicit two-key ack. Must be
                                     spelled exactly; refuses
@@ -97,6 +106,7 @@ while (( $# > 0 )); do
     --source-tasks-dsn-file)   SOURCE_TASKS_FILE="$2";  shift 2;;
     --dest-tasks-dsn-file)     DEST_TASKS_FILE="$2";    shift 2;;
     --dest-content-scheduler-dsn-file)    DEST_CONTENT_SCHEDULER_FILE="$2";   shift 2;;
+    --dest-owner-dsn-file)               DEST_OWNER_FILE="$2";              shift 2;;
     --confirm)                 CONFIRM="$2";            shift 2;;
     --confirm-cleanup-destination) CONFIRM_CLEANUP=1;    shift;;
     --environment)             ENVIRONMENT="$2";        shift 2;;
@@ -117,6 +127,7 @@ if [[ "$CONFIRM_CLEANUP" -ne 1 ]]; then
 fi
 
 cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_assert_shared_access_declaration
 cloud_db_load_expected_targets_from_env
 cloud_db_assert_production_ack
 
@@ -133,6 +144,21 @@ fi
 cloud_db_load_secret SOURCE_TASKS_DSN "$SOURCE_TASKS_FILE"
 cloud_db_load_secret DEST_TASKS_DSN  "$DEST_TASKS_FILE"
 cloud_db_load_secret DEST_CONTENT_SCHEDULER_DSN "$DEST_CONTENT_SCHEDULER_FILE"
+
+# The optional schema-OWNER connection. The production schemas are
+# owned by the database owner role (neondb_owner), so the DROP that
+# clears them is an owner-only statement: run as a service role it
+# fails closed with "must be owner of schema" before anything is
+# dropped, and the run cannot proceed either. When the operator
+# supplies an owner DSN, the DROP runs there; the service-role DSNs
+# stay in use for the reads (the pre-cleanup counts and the isolation
+# assertion).
+DEST_OWNER_DSN=""
+if [[ -n "${DEST_OWNER_FILE:-}" ]]; then
+  cloud_db_load_secret DEST_OWNER_DSN "$DEST_OWNER_FILE"
+  cloud_db_assert_target_dsn "destination (schema owner)" "$DEST_OWNER_DSN"
+  cloud_db_info "schema-owner DSN supplied: the destructive DROP runs as that role, not as the service roles"
+fi
 
 # Refuse any endpoint outside the declared target set at either end of
 # the source/dest spectrum.
@@ -304,15 +330,24 @@ cloud_db_assert_cross_schema_isolation \
 
 drop_start_epoch="$(date +%s)"
 
+# The DROP runs on the schema-OWNER connection when one was supplied:
+# the production schemas are owned by neondb_owner, so a service role
+# cannot drop them and the statement fails closed with "must be owner
+# of schema". Without an owner DSN the DROP runs on the service-role
+# DSNs, which is the staging shape where the service role owns its own
+# schema.
+CLEANUP_TASKS_DSN="${DEST_OWNER_DSN:-$DEST_TASKS_DSN}"
+CLEANUP_CONTENT_SCHEDULER_DSN="${DEST_OWNER_DSN:-$DEST_CONTENT_SCHEDULER_DSN}"
+
 PGPASSWORD="" psql \
   --no-psqlrc --variable=ON_ERROR_STOP=1 \
-  --dbname="$DEST_TASKS_DSN" \
+  --dbname="$CLEANUP_TASKS_DSN" \
   --command="DROP SCHEMA IF EXISTS tasks_api CASCADE;" \
   >/dev/null
 
 PGPASSWORD="" psql \
   --no-psqlrc --variable=ON_ERROR_STOP=1 \
-  --dbname="$DEST_CONTENT_SCHEDULER_DSN" \
+  --dbname="$CLEANUP_CONTENT_SCHEDULER_DSN" \
   --command="DROP SCHEMA IF EXISTS content_scheduler CASCADE;" \
   >/dev/null
 
@@ -350,9 +385,13 @@ python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" \
         "$pre_tasks_count" "$pre_content_scheduler_count" \
         "$pre_tasks_schema_present" "$pre_content_scheduler_schema_present" \
         "$drop_start_epoch" "$drop_end_epoch" \
-        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" \
+        "${CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE:-unknown}" \
+        "${CLOUD_DB_ACCEPTED_SHARED_ACCESS_APPLIED:-}" \
+        "${CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON:-}" \
+        "${DEST_OWNER_DSN:+owner}" <<'PY'
 import json, sys
-out_path, run_id, pre_t, pre_b, pre_t_present, pre_b_present, start, end, kind_prefix, environment = sys.argv[1:]
+out_path, run_id, pre_t, pre_b, pre_t_present, pre_b_present, start, end, kind_prefix, environment, cross_state, accepted_roles, accepted_reason, ddl_role = sys.argv[1:]
 envelope = {
   "schemaVersion": 1,
   "kind": f"{kind_prefix}-cleanup-destination",
@@ -375,6 +414,12 @@ envelope = {
   "endEpoch":   int(end),
   "durationSeconds": int(end) - int(start),
   "verdict": "SCHEMAS_ABSENT",
+  "ddlRole": ddl_role or "service-role",
+  "crossSchemaAccess": {
+    "state": cross_state,
+    "acceptedRoles": [r for r in accepted_roles.split(",") if r],
+    "acceptedReason": accepted_reason or None,
+  },
 }
 with open(out_path, "w", encoding="utf-8") as fh:
   json.dump(envelope, fh, indent=2, sort_keys=True)
