@@ -1515,6 +1515,24 @@ jobs:
       - name: Run cloud database cross-schema-isolation-preflight contract test
         run: bash scripts/cloud/database/tests/cross-schema-isolation-preflight.test.sh
 
+      # Task f2c23e26: the restore copies the source schema wholesale --
+      # every table, every row, including tables the repository's
+      # schema.prisma does not model. The cleanup step drops the live
+      # destination schemas first, so an unmodelled source table lands in
+      # production as permanent drift that no later `prisma migrate` run
+      # ever reconciles or prunes, and it lands AFTER the destination has
+      # already been destroyed. Measured on the live prodlike source
+      # (read-only, 2026-11-23): the tasks_api schema carries
+      # ContentSchedulerItem (29 rows, orphaned by the schema split) and
+      # Task_blocked_ready_backup (48 rows, left behind by the
+      # rolled-back add_blocked_ready_columns migration). The gate is
+      # read-only and runs BEFORE the destructive cleanup, so a source that
+      # does not match the model refuses while the live destination is
+      # still intact. This test pins the comparison, the read-only
+      # property, and the ORDERING that makes the gate worth having.
+      - name: Run cloud database source-schema-model-match contract test
+        run: bash scripts/cloud/database/tests/source-schema-model-match.test.sh
+
       # Task 020f423e: the cutover manifest validator and the route adapter's
       # compare-and-set, plan, read-back and history rules. A malformed
       # manifest — one that carries a credential, one with an unset

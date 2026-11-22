@@ -165,6 +165,35 @@ INVENTORY_OUT="${ARCHIVE_DIR}/inventory-${CLOUD_DB_RUN_ID}.json"
 cloud_db_info "step 1 inventory complete"
 
 # ---------------------------------------------------------------------------
+# Step 1.5: source schema vs the repository's model
+# ---------------------------------------------------------------------------
+#
+# The restore copies the source schema wholesale, so any table the
+# repository's schema.prisma does not model lands in the destination as
+# drift that no later `prisma migrate` run will ever reconcile -- and it
+# lands after the destination cleanup has already dropped the live
+# schemas. The check runs while the destination is still intact, so a
+# source that does not match the model refuses before anything is
+# destroyed.
+#
+# Measured on the live prodlike source (read-only, 2026-11-23): the
+# tasks_api schema carries ContentSchedulerItem (29 rows, orphaned by the
+# schema split) and Task_blocked_ready_backup (48 rows, left behind by
+# the rolled-back add_blocked_ready_columns migration). Neither is
+# modelled by services/tasks-api/prisma/schema.prisma.
+
+SCHEMA_MATCH_OUT="$(
+  "$(dirname "${BASH_SOURCE[0]}")/assert-source-schema-matches-model.sh" \
+    --source-tasks-dsn-file "$SRC_TASKS_FILE" \
+    --source-content-scheduler-dsn-file "$SRC_CONTENT_SCHEDULER_FILE" \
+    --result-dir "$ARCHIVE_DIR" \
+    --environment "$ENVIRONMENT" \
+    "${EXPECTED_HOST_FLAGS[@]}"
+)"
+
+cloud_db_info "step 1.5 source schema matches the repository model envelope=${SCHEMA_MATCH_OUT}"
+
+# ---------------------------------------------------------------------------
 # Step 2: dump
 # ---------------------------------------------------------------------------
 
