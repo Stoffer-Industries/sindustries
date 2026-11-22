@@ -483,12 +483,16 @@ function main() {
       if (surface.kind === 'frontend') continue;
       const tomlName = flyTomlForSurfaceId(surface.id, flyFiles);
       if (tomlName === null) {
-        // The health-probe surface is a planned Fly app (the design records
-        // it as a hosted observability public endpoint). Until the deploy
-        // surface lands, we don't fail the check on the missing toml —
-        // but we do report the gap so reviewers see it.
+        // The health-probe surface keeps its own Fly app and is NOT a
+        // platform child, so its spec does not live in this fly-dir — it
+        // lives beside the probe service at
+        // infra/cloud/observability/health-probe/fly.toml, which is the
+        // shared path the platform environment facts render for both
+        // environments. The probe is deployed in both, so this is a
+        // location difference, not a missing deploy surface: we do not
+        // fail the check on it, but we do report where the spec is.
         if (surface.id === 'health-probe') {
-          stdout.write(`note: health-probe fly.toml not present yet (planned; see design §architecture)\n`);
+          stdout.write(`note: health-probe fly.toml is not in this fly-dir — the probe keeps its own Fly app and is not a platform child; its spec lives at infra/cloud/observability/health-probe/fly.toml\n`);
           continue;
         }
         fail(`fly.toml for surface "${surface.id}" not found in ${args.flyDir} (expected ${surface.id}.fly.toml)`);
