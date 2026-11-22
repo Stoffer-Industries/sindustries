@@ -133,6 +133,29 @@ the gate above. The obsolete "three distinct production databases"
 requirement is gone: it asked the operator to create permanent
 production databases the migration is explicitly forbidden from creating.
 
+**The recovery target must be an EMPTY database, not a copy of
+production.** `restore.sh` refuses any target that already holds objects
+or that already holds either application schema, and it applies that
+guard to the recovery target exactly as it does to the destination — the
+recovery step runs the same script with the recovery DSNs as its
+destination. A Neon branch *forked from the production branch* therefore
+cannot be the recovery target: the fork carries the parent's rows AND
+its schemas, so the recovery restore fails closed with "destination is
+not empty" or "destination already contains schema(s)". "Isolated" means
+a separate ENDPOINT, and it also means empty. Create the recovery target
+as a NEW, EMPTY database and point `RECOVERY_*` at it; verify emptiness
+before dispatch (see the check in §4).
+
+**The destination is NOT empty, by design, and that is what
+`cleanup_destination` is for.** The production destination is the live
+production database that the production services already run against, so
+it holds `tasks_api` and `content_scheduler` with their tables. The
+restore's empty-target guard therefore refuses it unless the two
+schemas are dropped first. `cleanup_destination=true` does exactly
+that, and `pg_restore` recreates both schemas from the archive. This is
+the normal path for a first production run — it is not a
+"previous failed run" repair. See §4.
+
 **The recovery target's isolation is enforced in code, not in prose.**
 `drill.sh` reads the host out of each recovery DSN and refuses the run
 when the recovery target shares a host with the source (which would
@@ -194,8 +217,32 @@ byte.
      `destination_host` — the workflow and the drill both refuse a
      recovery target that shares a host with either
    - `interruption` = `none`
-   - `cleanup_destination` = `false` unless a previous failed run left
-     schemas behind in the destination
+   - `cleanup_destination` = `true` for a production run whose
+     destination is the existing production database. The destination is
+     populated by the live production services, so the restore's
+     empty-target guard refuses it unless the two schemas are dropped
+     first; `cleanup_destination=true` drops them and `pg_restore`
+     recreates them from the archive. Set it to `false` only when the
+     destination is already empty of both schemas (a repeated run into a
+     destination that a prior run cleaned and never repopulated).
+
+   When `recovery` is `true`, verify the recovery target is EMPTY before
+   dispatching. This is a read-only check; it prints counts and schema
+   names, never a DSN:
+
+   ```bash
+   # must print 0 and an empty schema list, for EACH recovery DSN
+   psql "$RECOVERY_TASKS_DSN" --no-psqlrc --tuples-only --no-align \
+     --command="SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('tasks_api','content_scheduler','public');"
+   psql "$RECOVERY_TASKS_DSN" --no-psqlrc --tuples-only --no-align \
+     --command="SELECT string_agg(schema_name, ',') FROM information_schema.schemata WHERE schema_name IN ('tasks_api','content_scheduler');"
+   ```
+
+   A non-zero table count or a non-empty schema list means the recovery
+   target is not a fresh database and the recovery restore will fail
+   closed — after the destination has already been migrated and
+   reconciled. Fix the target, not the harness.
+
 4. The workflow runs `drill.sh --environment production`, which executes
    in order:
    - `inventory.sh` — server version, schemas, extensions, relation
@@ -250,7 +297,7 @@ run them against a live destination outside a deliberate drill window.
 | Pre-flight | every prerequisite in §3 met; the readiness check in §3 exits 0; `production` Environment approved; confirmation string exact; source and destination hosts declared and different; PostgreSQL client major = 18 | any missing secret, a readiness gate unmet, wrong confirmation, undeclared endpoint, wrong client major |
 | Inventory | source reachable, both schemas present, `_prisma_migrations` present | source unreachable, schema missing, no migration table |
 | Dump | `pg_dump` exits 0, `pg_restore --list` parses the archive, sha256 computed | any of the three post-dump checks fails |
-| Restore | destination was empty pre-restore, both schemas present post-restore, `pg_restore --exit-on-error` exits 0 | destination non-empty pre-restore, missing schema post-restore, restore non-zero |
+| Restore | destination was empty pre-restore (in production, that means `cleanup_destination=true` dropped both schemas first — the raw destination is NOT empty, because it is the live production database), both schemas present post-restore, `pg_restore --exit-on-error` exits 0 | destination non-empty pre-restore, missing schema post-restore, restore non-zero |
 | Migrations | `prisma migrate deploy` exits 0 for both services, no failed or pending rows | any failed row, any unexpected pending row |
 | Reconcile | `verdict=PASS`, every check matches, every digest matches | any check mismatch, any digest mismatch |
 | Manifest | `manifest.json` lists every artefact with its digest and the reconcile verdict | manifest missing an artefact, or a reconcile verdict that is not `PASS` |
@@ -297,6 +344,16 @@ separate, operator-driven step recorded in the task.
 - The DSN secrets on the `production` GitHub Environment are rotated by
   Quinn. A rotation invalidates any in-flight run; re-dispatch after
   the rotation.
+- **The six DSN secrets must be raw libpq URLs with no `?schema=`
+  parameter.** `psql`, `pg_dump` and `pg_restore` consume these DSNs
+  directly and reject an unknown URI query parameter, and `migrate.sh`
+  appends the Prisma `?schema=` parameter itself when it invokes each
+  service's migration. A DSN that already carries `?schema=` therefore
+  fails at the first `psql` call rather than at the migration step.
+- **The recovery DSNs must point at a NEW EMPTY database** — see §3. The
+  workflow only checks that the secret is non-empty, so a DSN pointing
+  at a populated database passes the dispatch check and fails at the
+  restore, after the destination has already been migrated.
 - The DSN files written by the workflow live in the ephemeral runner
   temp directory and are destroyed with the runner.
 - The scripts redact DSNs, `password=`, `DATABASE_URL=` and every
