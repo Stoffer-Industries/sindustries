@@ -488,6 +488,158 @@ cloud_db_assert_inequality() {
 }
 
 # ---------------------------------------------------------------------------
+# Cross-schema isolation
+# ---------------------------------------------------------------------------
+#
+# The production topology gives each schema its own service role
+# (`databaseServiceRoles` in
+# infra/cloud/platform/platform-environments.mjs), and the platform's own
+# `neon.service-role-scope` gate requires that each production service
+# role can write only inside its own schema and holds no cross-schema
+# access.
+#
+# THE PREDICATE IS `has_schema_privilege(current_user, <other schema>,
+# 'USAGE')`, and it is deliberately the same predicate everywhere it is
+# used. Two shapes of this question are easy to confuse, and they are NOT
+# interchangeable:
+#
+#   * `has_schema_privilege` asks whether the role CAN reach the other
+#     schema. That is the security question, and it is the one the
+#     platform gate asks.
+#   * `aclexplode(nspacl)` asks whether the other schema's EXPLICIT ACL
+#     list mentions the role. That is a bookkeeping question.
+#
+# Measured against a reproduction of the production role model: the
+# explicit ACL for `content_scheduler` named only its own owner role, so
+# an explicit-ACL-only check read CLEAN, while the same role read AND
+# wrote the other schema's rows. The reason is role membership — a role
+# that is a member of a role carrying `pg_read_all_data` or
+# `pg_write_all_data` holds USAGE, SELECT, INSERT, UPDATE and DELETE on
+# every schema in the database, and NO explicit grant can withdraw it,
+# because no explicit grant was the source.
+#
+# So the explicit-ACL view would report a green light on a live
+# cross-schema write, and would silently disagree with the platform gate
+# of the same name. The predicate below is `has_schema_privilege`, and it
+# is shared by the pre-destructive preflight and the post-restore
+# end-state assertion so the two cannot drift apart.
+
+# cloud_db_connection_role <dsn>
+#
+# The role the SERVER says this connection runs as. Taken from the
+# server rather than parsed out of the DSN: the DSN's userinfo is a
+# claim, `current_user` is the fact.
+cloud_db_connection_role() {
+  local dsn="$1" role out
+  out="$(
+    PGPASSWORD="" psql \
+      --no-psqlrc --tuples-only --no-align \
+      --variable=ON_ERROR_STOP=1 \
+      --dbname="$dsn" \
+      --command="SELECT current_user;" \
+      2>&1
+  )" || cloud_db_die "could not read the current role of the connection: ${out}"
+  role="$(printf '%s' "$out" | awk '{print $1}')"
+  printf '%s' "$role"
+}
+
+# cloud_db_schema_visible <dsn> <schema>
+#
+# Whether the schema is present. `has_schema_privilege` ERRORS on a
+# schema that does not exist ("schema ... does not exist"), so a caller
+# that asks about a schema's privileges has to know first.
+cloud_db_schema_visible() {
+  local dsn="$1" schema="$2" count out
+  out="$(
+    PGPASSWORD="" psql \
+      --no-psqlrc --tuples-only --no-align \
+      --variable=ON_ERROR_STOP=1 \
+      --dbname="$dsn" \
+      --command="SELECT count(*) FROM pg_namespace WHERE nspname = '${schema}';" \
+      2>&1
+  )" || cloud_db_die "could not check whether schema '${schema}' is visible: ${out}"
+  count="$(printf '%s' "$out" | tr -d '[:space:]')"
+  [[ "${count:-0}" != "0" ]]
+}
+
+# cloud_db_schema_privilege <dsn> <schema> <privilege>
+#
+# Whether the role THIS CONNECTION runs as holds a privilege on a
+# schema. `current_user` rather than an interpolated role name: psql
+# does not substitute variables into a `--command` string (it only does
+# so for `-f` files and standard input), so a `:'role'` placeholder
+# reaches the server verbatim and the query fails.
+#
+# Prints `t` or `f`. Strict: a schema that does not exist makes the
+# query fail, which is the correct outcome for an assertion about a
+# schema the caller expects to be there.
+cloud_db_schema_privilege() {
+  local dsn="$1" schema="$2" priv="$3" result out
+  out="$(
+    PGPASSWORD="" psql \
+      --no-psqlrc --tuples-only --no-align \
+      --variable=ON_ERROR_STOP=1 \
+      --dbname="$dsn" \
+      --command="SELECT has_schema_privilege(current_user, '${schema}', '${priv}');" \
+      2>&1
+  )" || cloud_db_die "could not read the ${priv} privilege of the connecting role on schema '${schema}': ${out}"
+  result="$(printf '%s' "$out" | awk '{print $1}')"
+  printf '%s' "${result:-f}"
+}
+
+# cloud_db_assert_cross_schema_isolation <tasks_dsn> <content_scheduler_dsn> <phase>
+#
+# Refuses unless the two destination service roles cannot reach across
+# into each other's schema.
+#
+# `phase` names WHERE the check runs, and it is part of the message
+# because the same predicate is asserted at two points on purpose:
+#
+#   * BEFORE the first destructive statement — the cross-schema access
+#     implied by role membership is a property of the ROLES, and it is
+#     knowable before anything is written. A mis-provisioned role model
+#     therefore refuses the run with the destination untouched, instead
+#     of aborting after the live schemas have been dropped and
+#     recreated.
+#   * AFTER the restore — the state the restore actually produced.
+#
+# A single-role environment is not subject to the assertion: staging
+# genuinely restores both schemas with one role, and there is no "other"
+# schema to reach across into.
+cloud_db_assert_cross_schema_isolation() {
+  local tasks_dsn="$1" content_scheduler_dsn="$2" phase="$3"
+  local tasks_role content_scheduler_role privilege
+
+  tasks_role="$(cloud_db_connection_role "$tasks_dsn")"
+  content_scheduler_role="$(cloud_db_connection_role "$content_scheduler_dsn")"
+
+  if [[ "$tasks_role" == "$content_scheduler_role" ]]; then
+    cloud_db_info \
+      "${phase}: both destination connections run as role '${tasks_role}'; this environment uses one role for both schemas, so the cross-schema isolation assertion does not apply"
+    return 0
+  fi
+
+  if cloud_db_schema_visible "$tasks_dsn" content_scheduler; then
+    privilege="$(cloud_db_schema_privilege "$tasks_dsn" content_scheduler USAGE)"
+    if [[ "$privilege" != "f" ]]; then
+      cloud_db_die \
+        "${phase}: cross-schema isolation assertion failed: role '${tasks_role}' holds USAGE on schema 'content_scheduler', which belongs to '${content_scheduler_role}'. The production topology confines each service role to its own schema, and the platform's own 'neon.service-role-scope' gate enforces that. This is a PROVISIONING gap in the destination role model, not something the restore can repair: a role that is a member of a role carrying pg_read_all_data or pg_write_all_data holds USAGE — and read and write — on EVERY schema in the database, and no explicit GRANT can withdraw it, because no explicit grant was the source. Fix the role model (revoke the membership), or record an explicit decision that per-schema isolation is not enforced in this environment. Do NOT narrow this check to the schemas' explicit ACLs: that view reads CLEAN while the access is real, and it would silently disagree with the platform gate of the same name."
+    fi
+  fi
+
+  if cloud_db_schema_visible "$content_scheduler_dsn" tasks_api; then
+    privilege="$(cloud_db_schema_privilege "$content_scheduler_dsn" tasks_api USAGE)"
+    if [[ "$privilege" != "f" ]]; then
+      cloud_db_die \
+        "${phase}: cross-schema isolation assertion failed: role '${content_scheduler_role}' holds USAGE on schema 'tasks_api', which belongs to '${tasks_role}'. The production topology confines each service role to its own schema, and the platform's own 'neon.service-role-scope' gate enforces that. This is a PROVISIONING gap in the destination role model, not something the restore can repair: a role that is a member of a role carrying pg_read_all_data or pg_write_all_data holds USAGE — and read and write — on EVERY schema in the database, and no explicit GRANT can withdraw it, because no explicit grant was the source. Fix the role model (revoke the membership), or record an explicit decision that per-schema isolation is not enforced in this environment. Do NOT narrow this check to the schemas' explicit ACLs: that view reads CLEAN while the access is real, and it would silently disagree with the platform gate of the same name."
+    fi
+  fi
+
+  cloud_db_info \
+    "${phase}: cross-schema isolation verified (roles '${tasks_role}' and '${content_scheduler_role}' hold no USAGE on each other's schema)"
+}
+
+# ---------------------------------------------------------------------------
 # Run-id + cleanup scaffolding
 # ---------------------------------------------------------------------------
 
