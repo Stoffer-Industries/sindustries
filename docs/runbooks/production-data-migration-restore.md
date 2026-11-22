@@ -42,12 +42,94 @@ operator decisions recorded in the task, not steps in this document.
 | Database-name rule | must carry `sindustries_staging_` | must NOT carry the staging prefix |
 | Artifact directory | `./artifacts/cloud-staging` | `./artifacts/cloud-production` |
 | Envelope kind | `cloud-staging-*` | `cloud-production-*` |
+| Schema ownership after the restore | one role owns both schemas | **per-schema confined service roles** — `sindustries_tasks_api` owns `tasks_api`, `sindustries_content_scheduler` owns `content_scheduler` (`databaseServiceRoles` in `infra/cloud/platform/platform-environments.mjs`, production profile only) |
 
 The production Neon branch database is named `neondb` — **the same name
 staging uses**. A database-name prefix therefore cannot identify a
 production target, which is why the production profile identifies its
 target by declared endpoint instead, and why that allowlist is
 mandatory: a run that has not declared its endpoints refuses to run.
+
+### Schema ownership after the restore (production only)
+
+The harness restores the archive through ONE destination DSN, and
+`restore.sh` runs `pg_restore --no-owner --no-acl`. Two consequences
+follow, and only the production profile has the topology that makes
+them bite:
+
+- `--no-owner` makes the CONNECTING role the owner of every schema the
+  archive creates. The archive's TOC carries both `tasks_api` and
+  `content_scheduler` as SCHEMA entries, so the restore creates BOTH
+  under the tasks destination DSN — `content_scheduler` ends up owned by
+  `sindustries_tasks_api`.
+- `--no-acl` drops the source's grants, and the grants that mattered
+  lived on the live schema, which `cleanup_destination=true` dropped.
+  Nothing re-applies them: there is no `GRANT ... ON SCHEMA` or
+  `ALTER SCHEMA ... OWNER` anywhere in `infra/`, `services/` or
+  `scripts/`.
+
+Staging cannot show this. The staging profile restores with one role for
+both schemas, so one DSN owning both is exactly right there — the
+defect is invisible until the production profile's per-schema confined
+service roles are in play.
+
+**Verified, not inferred.** Reproducing the production topology in a
+throwaway database — two per-schema confined roles, the real two-schema
+archive dumped from the real source, then the harness sequence (drop both
+schemas, restore through the tasks DSN with `--no-owner --no-acl`) —
+produces:
+
+```
+owner of content_scheduler = <tasks role>      <- wrong
+cs_role    USAGE  on content_scheduler = false
+cs_role    CREATE on content_scheduler = false <- the service role cannot use its OWN schema
+tasks_role USAGE  on content_scheduler = true  <- cross-schema access
+```
+
+The third line is the drift `neon.service-role-scope` exists to catch
+(`infra/cloud/platform/production-operator-evidence.mjs`): each
+production service role must write only inside its own schema and hold
+no cross-schema access. The second line breaks `migrate.sh` step 4 and
+`reconcile.mjs` step 5, which both use the content-scheduler DSN.
+
+This was verified against the real source archive in a throwaway
+database on the local prodlike container; the source was read-only and
+production Neon was not reachable from the operator host, so the LIVE
+production role names and grants still need a read-back against
+production Neon (§3).
+
+**Closing it.** Both options below are harness changes. The drill runs
+the restore, the migrations and the reconcile in ONE process and has no
+resume flag, so there is no operator step that can run between the
+restore and the migrations:
+
+1. **Re-apply ownership and grants at the end of the restore.** After
+   `pg_restore`, run `ALTER SCHEMA tasks_api OWNER TO <tasks role>` and
+   `ALTER SCHEMA content_scheduler OWNER TO <content-scheduler role>`,
+   plus the matching `USAGE`/`CREATE` and table/sequence `GRANT`s. The
+   `GRANT`s succeed when run as the tasks role — it owns the schema
+   after the restore — but the `ALTER ... OWNER` does not: it fails with
+   `must be able to SET ROLE "<content-scheduler role>"`. It needs a role
+   that can SET ROLE both service roles (the Neon branch owner).
+   **Do not** grant the tasks role membership of the content-scheduler
+   role to get around this: it makes the `ALTER` work but leaves the
+   tasks role holding cross-schema access on `content_scheduler`, which
+   is exactly the drift `neon.service-role-scope` forbids.
+2. **Restore per schema, with each schema pre-created by its real
+   owner.** `pg_restore --schema=tasks_api` with the tasks DSN and
+   `pg_restore --schema=content_scheduler` with the content-scheduler
+   DSN. `pg_restore --schema=X` does NOT create the schema — it fails
+   closed on its first statement with `schema "content_scheduler" does
+   not exist` — so each schema must be pre-created with
+   `CREATE SCHEMA ... AUTHORIZATION <role>` first. Pre-creating needs a
+   role with CREATE on the database and the authority to set ownership.
+
+Option 1, run with a role that can SET ROLE both service roles, was
+verified to end with the correct owners, the content-scheduler role
+holding USAGE and CREATE on its own schema, the tasks role holding no
+cross-schema access, and every table restored. Until one of these lands,
+a production run cannot produce a correct end state — see the no-go
+condition in §6.
 
 ### The three keys
 
@@ -83,6 +165,17 @@ All of the following must hold before the workflow is dispatched:
   Tom and recorded in the task;
 - the source is quiesced — writes stopped or drained — for the
   duration of the run;
+- **the schema-ownership gap in §2 is closed.** The harness as it stands
+  restores both schemas through the tasks destination DSN, so in the
+  production profile `content_scheduler` comes back owned by the tasks
+  role, with the content-scheduler role holding no privileges on it. A
+  production run is a no-go until either `restore.sh` re-applies
+  ownership and grants after the restore, or the drill restores per
+  schema after pre-creating each schema with its real owner — see §2
+  "Closing it". This also needs a read-back of the LIVE production role
+  names and grants against production Neon, because the verification in
+  §2 was performed against a reproduction of the topology, not against
+  production Neon itself;
 - the operator has the runbook open next to the Actions tab.
 
 ### The readiness check (run it before dispatching)
@@ -341,7 +434,7 @@ run them against a live destination outside a deliberate drill window.
 | Pre-flight | every prerequisite in §3 met; the readiness check in §3 exits 0; `production` Environment approved; confirmation string exact; source and destination hosts declared and different; PostgreSQL client major = 18 | any missing secret, a readiness gate unmet, wrong confirmation, undeclared endpoint, wrong client major |
 | Inventory | source reachable, both schemas present, `_prisma_migrations` present | source unreachable, schema missing, no migration table |
 | Dump | `pg_dump` exits 0, `pg_restore --list` parses the archive, sha256 computed | any of the three post-dump checks fails |
-| Restore | destination was empty pre-restore (in production, that means `cleanup_destination=true` dropped both schemas first — the raw destination is NOT empty, because it is the live production database), both schemas present post-restore, `pg_restore --exit-on-error` exits 0 | destination non-empty pre-restore, missing schema post-restore, restore non-zero |
+| Restore | destination was empty pre-restore (in production, that means `cleanup_destination=true` dropped both schemas first — the raw destination is NOT empty, because it is the live production database), both schemas present post-restore, `pg_restore --exit-on-error` exits 0 | destination non-empty pre-restore, missing schema post-restore, restore non-zero, **or `content_scheduler` is not owned by the content-scheduler service role after the restore** (§2 — the harness cannot produce a correct production end state without one of the two fixes listed there) |
 | Migrations | `prisma migrate deploy` exits 0 for both services, no failed or pending rows | any failed row, any unexpected pending row |
 | Reconcile | `verdict=PASS`, every check matches, every digest matches | any check mismatch, any digest mismatch |
 | Manifest | `manifest.json` lists every artefact with its digest and the reconcile verdict | manifest missing an artefact, or a reconcile verdict that is not `PASS` |
