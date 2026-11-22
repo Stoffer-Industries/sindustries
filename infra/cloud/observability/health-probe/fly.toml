@@ -6,6 +6,18 @@
 # URLs, Redis URL, OTLP endpoint + headers) are referenced by name
 # only; live values land via `fly secrets set`.
 #
+# Stable hostnames (task 5cb4a8fe; source of truth: infra/cloud/hostname-matrix.json):
+#   staging:    health-probe.staging.sindustries.co.nz
+#   production: health-probe.sindustries.co.nz
+# The probe keeps its own Fly app in each environment — it is NOT a platform
+# child — so each certificate is added to the probe's own app rather than to
+# the consolidated platform app:
+# `fly certs add health-probe.staging.sindustries.co.nz --app sindustries-health-probe-staging`
+# (production: `--app sindustries-health-probe-production`)
+# (Quinn-owned operator step — done: the CNAME landed 2026-11-10 and the
+# certificate is issued and live; verified live 2026-11-23, both stable
+# hostnames answer HTTP 200 on /healthz).
+#
 # Build context: the repo root (../../../..) so the Dockerfile's
 # `COPY package-lock.json package.json ./` resolves correctly when
 # invoked as `fly deploy --config infra/cloud/observability/health-probe/fly.toml`
