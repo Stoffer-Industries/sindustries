@@ -409,6 +409,11 @@ byte.
    in order:
    - `inventory.sh` — server version, schemas, extensions, relation
      counts, Prisma migration state, source activity;
+   - `assert-source-schema-matches-model.sh` — read-only gate: the
+     source schema's table inventory must match the Prisma model the
+     repository declares for the service that owns it. It runs BEFORE
+     the destination cleanup, so a source carrying unmodelled tables
+     refuses while the live destination is still intact;
    - `dump.sh` — custom-format archive, verified with
      `pg_restore --list`, sha256, atomic rename;
    - `restore.sh` — restores into the destination, refuses a
@@ -429,6 +434,7 @@ byte.
 |---|---|---|
 | `pg_dump` fails or the archive does not parse | the `.partial` is removed; the source is never written to | fix the cause, re-dispatch with a fresh run id |
 | `pg_restore` fails mid-way | the destination is left partially restored; the source is untouched | re-dispatch with `cleanup_destination=true` so the two schemas are dropped and recreated by `pg_restore` itself |
+| the source schema carries a table the repository does not model | the gate refuses before the destination cleanup, so the live destination is untouched; the refusal names each unmodelled table and its row count | decide what the stray table is (left-over from a rolled-back migration, or orphaned by the schema split). Clean it from the source, or model it deliberately. Do not re-dispatch until the source matches the model |
 | `prisma migrate deploy` fails | the run stops before reconciliation; the failed migration stays recorded in `_prisma_migrations` | resolve the migration, then re-run from the dump step |
 | reconciliation reports a mismatch | the drill exits non-zero before the run is declared `PASS` | **halt.** Compare the envelopes, decide whether to re-dump, then re-dispatch |
 | the runner loses connectivity | the scripts fail closed; nothing is half-written | re-dispatch with a fresh run id; the destination is rebuilt from the archive |
