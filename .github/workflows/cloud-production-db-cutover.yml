@@ -7,6 +7,10 @@
 # data move is an operator action with a deliberate window, not something
 # a merge can start.
 #
+# The source databases are bound to the Mac mini's prodlike Postgres. This
+# workflow therefore runs only on that host's dedicated cutover runner; a
+# GitHub-hosted runner has no network path to the source endpoint.
+#
 # THREE INDEPENDENT KEYS must all line up before a single row moves:
 #
 #   1. The `production` GitHub Environment. Its reviewers are the
@@ -80,14 +84,27 @@ concurrency:
 jobs:
   cutover:
     name: Production cutover
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, self-hosted-production-cutover]
     environment: production
     timeout-minutes: 90
+    defaults:
+      run:
+        shell: /opt/homebrew/bin/bash --noprofile --norc -e -o pipefail {0}
     env:
       ENVIRONMENT: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prepare the Mac mini toolchain
+        run: |
+          set -euo pipefail
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          /opt/homebrew/bin/bash --version | grep -q 'version [4-9]\.'
+          /opt/homebrew/bin/psql --version | grep -q '18\.'
+          /opt/homebrew/bin/pg_dump --version | grep -q '18\.'
+          test -x /opt/homebrew/bin/pg_restore
+          test -x /opt/homebrew/bin/shellcheck
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -97,19 +114,6 @@ jobs:
 
       - name: Install repository deps
         run: npm ci
-
-      - name: Install PostgreSQL 18 client and shellcheck
-        run: |
-          set -euo pipefail
-          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client-18 shellcheck
-          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
       - name: Lint cloud database scripts
         run: npm run lint:cloud-db
