@@ -7,8 +7,12 @@
 // whose smoke-check step targets the matrix's stable staging hostname
 // (not the provider-shaped *.fly.dev URL). The four in-scope workflows
 // (tasks-api, budget-api, content-scheduler-api, health-probe) are
-// asserted explicitly; health-probe is permitted to be a no-op until
-// its deploy surface lands (the matrix records the planned Fly app).
+// asserted explicitly. The health-probe deploy surface HAS landed — it
+// ships as deploy-staging-health-probe.yml and
+// deploy-production-health-probe.yml, ci.yml calls the staging one, and
+// the probe keeps its own Fly app (it is not a platform child) — so it
+// is asserted like the rest; the matrix records its live production Fly
+// app and its staging and production CNAME targets.
 //
 // Pure Node 22, no deps. Exits 0 on full success, 1 if any assertion
 // fails. The matching
@@ -39,8 +43,11 @@ function parseArgs() {
 // api/worker surfaces whose deploy workflow must smoke-check the
 // matrix stable staging hostname. Frontend surfaces are Vercel
 // projects; they have no GitHub deploy-staging-*.yml smoke step.
-// health-probe is permitted to be a no-op (the matrix records a
-// planned Fly app; the deploy surface may not yet be in tree).
+// health-probe is OPTIONAL only in the sense that its deploy workflow
+// is asserted when the file is present and skipped (with a note) when
+// it is not: the probe's deploy surface has landed
+// (deploy-staging-health-probe.yml, called by ci.yml), so a missing
+// file would mean the surface was removed, not that it is planned.
 const REQUIRED_API_WORKFLOWS = [
   { surfaceId: 'tasks-api', workflow: 'deploy-staging-tasks-api.yml', healthPath: '/health' },
   { surfaceId: 'budget-api', workflow: 'deploy-staging-budget-api.yml', healthPath: '/health' },
@@ -80,13 +87,15 @@ function main() {
     let exists = true;
     try { statSync(workflowPath); } catch { exists = false; }
     if (!exists) {
-      // Optional workflows may be absent; the deploy surface for
-      // health-probe is planned but not yet landed. Skip them entirely
-      // — no need to require a matching matrix surface, and no need
-      // to require the workflow file.
+      // Optional workflows are skipped when their file is absent — no
+      // need to require a matching matrix surface, and no need to
+      // require the workflow file. The health-probe deploy surface has
+      // landed (deploy-staging-health-probe.yml, called by ci.yml), so
+      // an absent file means the surface was removed, not that it is
+      // still planned.
       const isOptional = OPTIONAL_API_WORKFLOWS.includes(req);
       if (isOptional) {
-        notes.push(`${req.workflow} not present yet (planned; deploy surface lands in a follow-up)`);
+        notes.push(`${req.workflow} not present in .github/workflows (the deploy surface has landed — the probe ships as deploy-staging-health-probe.yml, called by ci.yml — so an absent file means it was removed, not planned)`);
         continue;
       }
       errors.push(`${req.workflow} not found at .github/workflows/${req.workflow}`);
