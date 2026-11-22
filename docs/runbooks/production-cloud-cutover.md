@@ -52,7 +52,7 @@ Every in-scope surface's route lives in the runtime configuration. The adapter c
 | `workspace/.env` | `TASKS_API_BASE_URL` | `http://localhost:4001/api/v1` | Tasks API stable URL |
 | `.env` | `CONTENT_SCHEDULER_BASE_URL` | `http://localhost:4004` | Content Scheduler stable origin |
 | `.env` | `MISSION_CONTROL_BASE_URL` | `http://localhost:5175` | Mission Control stable origin |
-| `.env` | `TASKS_APP_BASE_URL` | `http://localhost:5176` | Tasks app stable origin |
+| `.env` | `TASKS_APP_BASE_URL` | `http://localhost:5174` | Tasks app stable origin |
 
 The adapter atomically replaces only those URL literals, preserves the existing file mode, reads the files back, and refuses to record a route version unless every managed caller resolves the requested binding. The files may contain credentials; the adapter never prints their contents.
 
@@ -185,7 +185,7 @@ The preflight runs the health probes against **both** bindings — production an
 
 Two things follow for the operator host, and neither is discoverable from the failure alone:
 
-- **The prodlike operator-facing surfaces must be running locally.** The prodlike Mission Control and Tasks app are the local dev servers on `:5175` and `:5176`. If either is down, the `health:prodlike` gate fails with a connection error and the window does not start — even though the production binding is healthy. Start them before the preflight, not after it fails.
+- **The prodlike operator-facing surfaces must be running locally.** The prodlike Mission Control and Tasks app are the local dev servers on `:5175` and `:5174` — the ports `scripts/dev/mode-env.sh` assigns in prodlike mode (`MISSION_CONTROL_PORT=5175`, `TASKS_APP_PORT=5174`). `:5176` is the DEV-mode Mission Control port and nothing serves it in prodlike, so a prodlike URL on `:5176` is a dead route, not a slow one. If either surface is down, the `health:prodlike` gate fails with a connection error and the window does not start — even though the production binding is healthy. Start them before the preflight, not after it fails.
 - **A frontend surface is health-checked at its document root.** The Mission Control and Tasks app surfaces declare `healthPath: "/"`, because they are single-page applications rather than services with a `/health` endpoint. The probe asks for the document the surface serves (`text/html`) rather than imposing a JSON content negotiation on it: the prodlike dev servers only serve their history fallback to a request that accepts HTML, so a health check that asks for JSON gets a 404 from a surface that is serving perfectly well. The preflight would then name the rollback fallback as unhealthy when it is not.
 
 Read the two health gates together with the rest of the plan report before the window:

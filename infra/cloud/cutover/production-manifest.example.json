@@ -6,6 +6,10 @@
     "shape is reviewable; it must never carry a credential, a DSN or a token.",
     "The format is JSON, not YAML: the repo has no YAML parser dependency, and",
     "the machine-owned config in this repo is JSON (infra/cloud/hostname-matrix.json).",
+    "The prodlike URLs are the ports scripts/dev/mode-env.sh assigns in prodlike",
+    "mode: Tasks API :4001, Content Scheduler :4004, Mission Control :5175, Tasks",
+    "app :5174. :5176 is the DEV-mode Mission Control port and nothing serves it",
+    "in prodlike, so a prodlike URL on :5176 is a dead route.",
     "The approved tech design names a 'versioned YAML' manifest; the shape and",
     "the fail-closed validation are what matter, and JSON keeps the manifest",
     "readable by the same tooling with no new dependency."
@@ -109,7 +113,7 @@
       "id": "tasks-app",
       "kind": "frontend",
       "productionBaseUrl": "https://tasks.sindustries.co.nz",
-      "prodlikeBaseUrl": "http://localhost:5176",
+      "prodlikeBaseUrl": "http://localhost:5174",
       "healthPath": "/",
       "rollbackSurface": false,
       "callerClass": "operator-facing-ui",
@@ -118,7 +122,7 @@
           "id": "openclaw-runtime-tasks-app",
           "path": ".env",
           "owner": "managed",
-          "prodlikeTarget": "http://localhost:5176",
+          "prodlikeTarget": "http://localhost:5174",
           "productionTarget": "https://tasks.sindustries.co.nz"
         }
       ]
