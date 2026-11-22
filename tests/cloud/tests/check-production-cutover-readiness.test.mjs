@@ -69,6 +69,23 @@ test('the unmodified artifact passes every gate', () => {
   );
 });
 
+test('the cutover workflow is pinned to the Mac mini runner contract', () => {
+  const workflow = readFileSync(WORKFLOW, 'utf8');
+
+  assert.match(
+    workflow,
+    /runs-on:\s*\[self-hosted, macOS, ARM64, self-hosted-production-cutover\]/,
+  );
+  assert.match(
+    workflow,
+    /shell: \/opt\/homebrew\/bin\/bash --noprofile --norc -e -o pipefail \{0\}/,
+  );
+  assert.match(workflow, /echo "\/opt\/homebrew\/bin" >> "\$GITHUB_PATH"/);
+  assert.match(workflow, /\/opt\/homebrew\/bin\/pg_dump --version/);
+  assert.doesNotMatch(workflow, /runs-on:\s*ubuntu-latest/);
+  assert.doesNotMatch(workflow, /apt-get/);
+});
+
 test('a missing required DSN secret fails and names the secret', () => {
   const state = loadFixture();
   state.providers.github.secretNames = state.providers.github.secretNames.filter(
