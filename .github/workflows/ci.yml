@@ -1499,6 +1499,22 @@ jobs:
       - name: Run cloud database per-schema-restore contract test
         run: bash scripts/cloud/database/tests/per-schema-restore.test.sh
 
+      # Task f2c23e26: the restore asserted the per-schema isolation
+      # invariant, but only AFTER pg_restore -- so a destination whose ROLE
+      # MODEL cannot confine one service role to its own schema was
+      # discovered only once the live schemas had already been dropped and
+      # recreated. That access is a property of the roles, not of the data
+      # (a role in a group carrying pg_read_all_data / pg_write_all_data
+      # holds USAGE, and read and write, on every schema, and no explicit
+      # GRANT can withdraw it). So the same assertion now runs BEFORE the
+      # first destructive statement, and a mis-provisioned destination
+      # refuses with both schemas still in place. This test pins that
+      # ordering, and pins that the predicate is NOT narrowed to the
+      # schemas' explicit ACL list, which reads CLEAN while the access is
+      # real.
+      - name: Run cloud database cross-schema-isolation-preflight contract test
+        run: bash scripts/cloud/database/tests/cross-schema-isolation-preflight.test.sh
+
       # Task 020f423e: the cutover manifest validator and the route adapter's
       # compare-and-set, plan, read-back and history rules. A malformed
       # manifest — one that carries a credential, one with an unset
