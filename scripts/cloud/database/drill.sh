@@ -226,6 +226,7 @@ RESTORE_OUT="$(
   "$(dirname "${BASH_SOURCE[0]}")/restore.sh" \
     --source-dsn-file "$SRC_TASKS_FILE" \
     --destination-dsn-file "$DEST_TASKS_FILE" \
+    --destination-content-scheduler-dsn-file "$DEST_CONTENT_SCHEDULER_FILE" \
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
     --result-dir "$ARCHIVE_DIR" \
@@ -331,6 +332,7 @@ if (( RECOVERY )); then
   "$(dirname "${BASH_SOURCE[0]}")/restore.sh" \
     --source-dsn-file "$DEST_TASKS_FILE" \
     --destination-dsn-file "$RECOVERY_TASKS_FILE" \
+    --destination-content-scheduler-dsn-file "$RECOVERY_CONTENT_SCHEDULER_FILE" \
     --archive "$DUMP2_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP2_SHA" \
     --result-dir "$ARCHIVE_DIR" \

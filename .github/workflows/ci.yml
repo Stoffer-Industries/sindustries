@@ -1484,6 +1484,21 @@ jobs:
       - name: Run cloud database schema-presence contract test
         run: bash scripts/cloud/database/tests/schema-presence.test.sh
 
+      # Task 020f423e: the production restore writes BOTH schemas from ONE
+      # archive, and the production profile gives each schema its OWN
+      # service role. Restoring through a single DSN hands both schemas to
+      # one role: the content-scheduler service role loses access to its
+      # own schema, and the tasks role gains the cross-schema access the
+      # platform's own `neon.service-role-scope` gate forbids. The restore
+      # succeeded and the failure surfaced one step later, at
+      # `prisma migrate deploy`, as `permission denied for schema
+      # content_scheduler` -- after the live schema had already been
+      # dropped and recreated with the wrong owner. This test pins the
+      # per-schema restore and the ownership/isolation assertions that
+      # make that end state impossible to miss.
+      - name: Run cloud database per-schema-restore contract test
+        run: bash scripts/cloud/database/tests/per-schema-restore.test.sh
+
       # Task 020f423e: the cutover manifest validator and the route adapter's
       # compare-and-set, plan, read-back and history rules. A malformed
       # manifest — one that carries a credential, one with an unset
