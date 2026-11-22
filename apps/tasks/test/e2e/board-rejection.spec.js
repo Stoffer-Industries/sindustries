@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { dragCardToColumn } from './helpers/dragCardToColumn.js';
+
 // The Tasks API rejects a `doing` → `acceptance` transition with 409 when the
 // structured `qa_agent` approval is missing or still pending. The message is
 // built in `services/tasks-api/src/routes/tasks/_statusTransitions.ts`; this
@@ -87,9 +89,17 @@ test('a rejected transition surfaces the API error and leaves the card in its or
 
   // Drag it into `acceptance`. The board issues the real PATCH; the API
   // rejects the transition and leaves the task in `doing`.
-  await page.getByTestId('card-gated-task').dragTo(page.getByTestId('column-acceptance'));
+  //
+  // The drag is dispatched deterministically (explicit `dragstart`/`dragover`/
+  // `drop` sharing one `DataTransfer`) rather than through the browser's own
+  // drag controller, which can deliver the drop before the card's `dragstart`
+  // handler has written the payload.
+  await dragCardToColumn(page, 'card-gated-task', 'column-acceptance');
 
-  expect(attempted).toEqual([{ status: 'acceptance' }]);
+  // The PATCH is intercepted by the route handler above, so the attempt is
+  // recorded asynchronously — poll for it instead of asserting on a list that
+  // may not have been written yet.
+  await expect.poll(() => [...attempted]).toEqual([{ status: 'acceptance' }]);
 
   // The board surfaces the API's own message, so the user learns which gate
   // blocked the move and who has to clear it.
