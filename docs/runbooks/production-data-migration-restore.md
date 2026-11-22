@@ -42,7 +42,8 @@ operator decisions recorded in the task, not steps in this document.
 | Database-name rule | must carry `sindustries_staging_` | must NOT carry the staging prefix |
 | Artifact directory | `./artifacts/cloud-staging` | `./artifacts/cloud-production` |
 | Envelope kind | `cloud-staging-*` | `cloud-production-*` |
-| Schema ownership after the restore | one role owns both schemas | **per-schema confined service roles** — `sindustries_tasks_api` owns `tasks_api`, `sindustries_content_scheduler` owns `content_scheduler` (`databaseServiceRoles` in `infra/cloud/platform/platform-environments.mjs`, production profile only) |
+| Schema ownership after the restore | one role owns both schemas | the schemas stay owned by the database owner role (`neondb_owner` — `databaseSchemaOwnerRole` in `infra/cloud/platform/platform-environments.mjs`); each service role is scoped to its own schema (`databaseServiceRoles`) |
+| Cross-schema access between the two service roles | n/a (one role) | **ACCEPTED and recorded** — per-schema confinement is not enforceable in the Neon role model; see "Accepted cross-schema access" below |
 
 The production Neon branch database is named `neondb` — **the same name
 staging uses**. A database-name prefix therefore cannot identify a
@@ -86,17 +87,88 @@ cs_role    CREATE on content_scheduler = false <- the service role cannot use it
 tasks_role USAGE  on content_scheduler = true  <- cross-schema access
 ```
 
-The third line is the drift `neon.service-role-scope` exists to catch
-(`infra/cloud/platform/production-operator-evidence.mjs`): each
-production service role must write only inside its own schema and hold
-no cross-schema access. The second line breaks `migrate.sh` step 4 and
-`reconcile.mjs` step 5, which both use the content-scheduler DSN.
+The third line is the drift `neon.service-role-scope` exists to catch. At the time
+of that reproduction it was recorded as "each production service role must
+write only inside its own schema and hold no cross-schema access" — and
+that is now known to be **unenforceable** in this role model rather than
+merely unmet (see the next section). The second line breaks `migrate.sh`
+step 4 and `reconcile.mjs` step 5, which both use the content-scheduler
+DSN.
 
 This was verified against the real source archive in a throwaway
 database on the local prodlike container; the source was read-only and
 production Neon was not reachable from the operator host, so the LIVE
 production role names and grants still need a read-back against
 production Neon (§3).
+
+### Accepted cross-schema access (production only)
+
+**Per-schema confinement is not enforceable in the production Neon role
+model, and that is a recorded decision rather than an open question.**
+Task `f2c23e26`; Quinn recorded Tom's decision on 2026-11-23 07:25
+NZDT (option (b): accept per-schema confinement as not enforceable).
+
+Both production service roles are members of `neon_superuser`, which
+carries `pg_read_all_data` and `pg_write_all_data`. A member of such a
+role holds USAGE — and read and write — on EVERY schema in the database,
+and **no explicit GRANT can withdraw it**, because no explicit grant was
+the source. Revoking the membership would be a wider change to the
+production role model than the decision authorises, so the shared access
+is accepted instead.
+
+The decision changed three things together, and they have to change
+together or the declared topology and the gate disagree:
+
+1. **The declared topology** — `databaseServiceRoleSharedAccess` in
+   `infra/cloud/platform/platform-environments.mjs` now declares the
+   accepted pair, the reason and the decision reference. It is the single
+   source of truth for WHICH pair of roles the acceptance covers.
+2. **The gate** — the `neon.service-role-scope` slot in
+   `infra/cloud/platform/production-operator-evidence.mjs` no longer
+   asserts "no cross-schema access". The recorded proof carries an
+   `acceptedSharedAccess` block, and
+   `tests/cloud/scripts/check-production-provisioning-state.mjs` refuses
+   when the recorded evidence and the declared topology name different
+   pairs. An accepted deviation that is not NAMED on both sides is
+   treated as drift.
+3. **The harness** — `cloud_db_assert_cross_schema_isolation` in
+   `scripts/cloud/database/common.sh` still computes the same
+   `has_schema_privilege` predicate and still refuses whenever the access
+   it finds is not the accepted one. The acceptance is narrow on four
+   axes: production runs only; the declared pair must be exactly the two
+   roles the run connects as; a non-empty reason is required; and the
+   acceptance is reported loudly and recorded in the run envelope.
+
+**The acceptance never applies silently.** A run that proceeds under it
+says `ACCEPTED cross-schema access` in its log and records
+`crossSchemaAccess.state = "accepted"` with the accepted roles and the
+reason in the envelope.
+
+### The two operator inputs a production run needs
+
+The production topology needs two things the staging topology does not,
+and both are operator inputs at run time:
+
+```bash
+# 1. the schema-OWNER connection. The production schemas are owned by
+#    neondb_owner, so DROP SCHEMA / CREATE SCHEMA are owner-only
+#    statements. Without this the cleanup fails closed with "must be
+#    owner of schema" and the restore would hand the schema to the
+#    service role, changing the topology.
+--dest-owner-dsn-file <path>          # cleanup-destination.sh
+--destination-owner-dsn-file <path>   # restore.sh
+
+# 2. the recorded acceptance. Both variables are required together: an
+#    acceptance without a reason is an unexplained widening and the run
+#    refuses before it does anything.
+export CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES="sindustries_tasks_api,sindustries_content_scheduler"
+export CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON="<the recorded decision>"
+```
+
+Without the owner connection the scripts behave exactly as before — the
+service role creates and owns its own schema — which is what the staging
+topology needs. Without the acceptance the cross-schema assertion still
+refuses, exactly as before.
 
 **Closing it — DONE (option 2, implemented).** Both options below are
 harness changes. The drill runs the restore, the migrations and the

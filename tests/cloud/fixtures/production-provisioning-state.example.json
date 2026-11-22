@@ -32,7 +32,14 @@
         "tasks_api",
         "budget_api",
         "content_scheduler"
-      ]
+      ],
+      "acceptedSharedAccess": {
+        "roles": [
+          "sindustries_tasks_api",
+          "sindustries_content_scheduler"
+        ],
+        "decisionRef": "task f2c23e26 - Quinn recorded the decision on 2026-11-23 07:25 NZDT - accept per-schema confinement as not enforceable"
+      }
     },
     "productionProbeInterval": {
       "recorded": true,

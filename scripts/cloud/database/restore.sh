@@ -76,6 +76,18 @@ Required:
                                  to its own service role, and a restore
                                  that cannot honour that would silently
                                  hand both schemas to one role.
+  --destination-owner-dsn-file <path>
+                                 Optional. Mode-0600 destination DSN file
+                                 for the SCHEMA OWNER role. The production
+                                 schemas are owned by the database owner
+                                 role (neondb_owner), not by the service
+                                 roles, so CREATE SCHEMA is an owner-only
+                                 statement. When this is supplied the
+                                 schemas are created as that role and the
+                                 service role is granted USAGE, CREATE on
+                                 its own schema for the data load. When
+                                 omitted, the service role creates and
+                                 owns its own schema, as before.
   --archive <path>               Path to the .dump archive.
   --archive-sha256 <digest>      Expected sha256 digest (64 hex chars).
 
@@ -120,6 +132,8 @@ while (( $# > 0 )); do
     --destination-dsn-file)       DEST_DSN_FILE="$2"; shift 2;;
     --destination-content-scheduler-dsn-file)
                                   DEST_CONTENT_SCHEDULER_DSN_FILE="$2"; shift 2;;
+    --destination-owner-dsn-file)
+                                  DEST_OWNER_DSN_FILE="$2"; shift 2;;
     --archive)                    ARCHIVE_PATH="$2"; shift 2;;
     --archive-sha256)             EXPECTED_SHA="$2"; shift 2;;
     --result-dir)                 RESULT_DIR="$2"; shift 2;;
@@ -144,6 +158,7 @@ if [[ -n "$INTENTIONAL_FAILURE_AFTER" ]]; then
 fi
 
 cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_assert_shared_access_declaration
 cloud_db_load_expected_targets_from_env
 cloud_db_assert_production_ack
 cloud_db_assign_run_id
@@ -155,6 +170,22 @@ cloud_db_assign_run_id
 cloud_db_load_secret SOURCE_DSN "$SOURCE_DSN_FILE"
 cloud_db_load_secret DEST_DSN "$DEST_DSN_FILE"
 cloud_db_load_secret DEST_CONTENT_SCHEDULER_DSN "$DEST_CONTENT_SCHEDULER_DSN_FILE"
+
+# The optional schema-OWNER connection. The production schemas are
+# owned by the database owner role (neondb_owner), so CREATE SCHEMA is
+# an owner-only statement: run as a service role it fails closed with
+# "must be owner of schema" — and, worse, it would make the service
+# role the schema's owner, which is a topology change nobody approved.
+# With an owner DSN the schema is created as the owner and the service
+# role is granted USAGE, CREATE on it for the data load.
+DEST_OWNER_DSN=""
+OWNER_ROLE=""
+if [[ -n "${DEST_OWNER_DSN_FILE:-}" ]]; then
+  cloud_db_load_secret DEST_OWNER_DSN "$DEST_OWNER_DSN_FILE"
+  cloud_db_assert_target_dsn "destination (schema owner)" "$DEST_OWNER_DSN"
+  OWNER_ROLE="$(cloud_db_connection_role "$DEST_OWNER_DSN")"
+  cloud_db_info "schema-owner DSN supplied: the schemas are created as '${OWNER_ROLE}', and the service roles are granted USAGE, CREATE on their own schema"
+fi
 cloud_db_assert_target_dsn "source" "$SOURCE_DSN"
 cloud_db_assert_target_dsn "destination (tasks_api)" "$DEST_DSN"
 cloud_db_assert_target_dsn "destination (content_scheduler)" "$DEST_CONTENT_SCHEDULER_DSN"
@@ -364,8 +395,34 @@ create_schema_as_owner() {
   cloud_db_info "created schema ${schema} as its own owner (${label})"
 }
 
-create_schema_as_owner "$DEST_DSN" tasks_api "tasks_api destination"
-create_schema_as_owner "$DEST_CONTENT_SCHEDULER_DSN" content_scheduler "content_scheduler destination"
+# create_schema_for_service_role <schema> <service_dsn> <service_role> <label>
+#
+# Creates the schema with the role that must OWN it, and makes sure the
+# service role can still load data into it.
+#
+# Two shapes, and the difference is the production topology:
+#
+#   * WITHOUT an owner DSN — the service role creates the schema and
+#     therefore owns it. That is the staging shape, where the service
+#     role owns its own schema outright.
+#   * WITH an owner DSN — the schema is created by the database owner
+#     role (neondb_owner), because that is who owns the production
+#     schemas, and the service role is granted USAGE, CREATE on it.
+#     The alternative — letting the service role create it — would
+#     silently change the schema's owner, which is a topology change
+#     the accepted shared-access decision did NOT authorise.
+create_schema_for_service_role() {
+  local service_dsn="$1" schema="$2" service_role="$3" label="$4"
+  if [[ -n "$DEST_OWNER_DSN" ]]; then
+    create_schema_as_owner "$DEST_OWNER_DSN" "$schema" "${label} (schema owner ${OWNER_ROLE})"
+    cloud_db_grant_schema_access "$DEST_OWNER_DSN" "$schema" "$service_role" "$label"
+  else
+    create_schema_as_owner "$service_dsn" "$schema" "$label"
+  fi
+}
+
+create_schema_for_service_role "$DEST_DSN" tasks_api "$tasks_role" "tasks_api destination"
+create_schema_for_service_role "$DEST_CONTENT_SCHEDULER_DSN" content_scheduler "$content_scheduler_role" "content_scheduler destination"
 
 # Use --exit-on-error so a SQL error fails the whole restore; --no-owner
 # and --no-acl so the destination is the source of privilege truth. With
@@ -469,13 +526,27 @@ restored_schemas="tasks_api,content_scheduler"
 tasks_owner="$(schema_owner "$DEST_DSN" tasks_api)"
 content_scheduler_owner="$(schema_owner "$DEST_CONTENT_SCHEDULER_DSN" content_scheduler)"
 
-if [[ "$tasks_owner" != "$tasks_role" ]]; then
-  cloud_db_die \
-    "post-restore ownership assertion failed: schema tasks_api is owned by '${tasks_owner:-<unknown>}' but the role that restored it is '${tasks_role}'. A schema restored through the wrong role is the defect that breaks the production migrations; refusing to continue."
+# The EXPECTED owner depends on how the schema was created. Without an
+# owner DSN the service role created the schema and therefore owns it.
+# With an owner DSN the schema is created by the database owner role
+# (neondb_owner) — the production topology — and the service role is
+# only the role that loads the data into it. Asserting the wrong one of
+# those would either reject a correct restore or wave through a schema
+# whose owner silently changed.
+expected_tasks_owner="$tasks_role"
+expected_content_scheduler_owner="$content_scheduler_role"
+if [[ -n "$DEST_OWNER_DSN" ]]; then
+  expected_tasks_owner="$OWNER_ROLE"
+  expected_content_scheduler_owner="$OWNER_ROLE"
 fi
-if [[ "$content_scheduler_owner" != "$content_scheduler_role" ]]; then
+
+if [[ "$tasks_owner" != "$expected_tasks_owner" ]]; then
   cloud_db_die \
-    "post-restore ownership assertion failed: schema content_scheduler is owned by '${content_scheduler_owner:-<unknown>}' but the role that restored it is '${content_scheduler_role}'. A schema restored through the wrong role is the defect that breaks the production migrations; refusing to continue."
+    "post-restore ownership assertion failed: schema tasks_api is owned by '${tasks_owner:-<unknown>}' but the expected owner is '${expected_tasks_owner}'. A schema with the wrong owner is the defect that breaks the production migrations; refusing to continue."
+fi
+if [[ "$content_scheduler_owner" != "$expected_content_scheduler_owner" ]]; then
+  cloud_db_die \
+    "post-restore ownership assertion failed: schema content_scheduler is owned by '${content_scheduler_owner:-<unknown>}' but the expected owner is '${expected_content_scheduler_owner}'. A schema with the wrong owner is the defect that breaks the production migrations; refusing to continue."
 fi
 
 if [[ "$(schema_privilege "$DEST_DSN" tasks_api USAGE)" != "t" ]]; then
@@ -485,6 +556,19 @@ fi
 if [[ "$(schema_privilege "$DEST_CONTENT_SCHEDULER_DSN" content_scheduler USAGE)" != "t" ]]; then
   cloud_db_die \
     "post-restore privilege assertion failed: role '${content_scheduler_role}' cannot USE its own schema content_scheduler; refusing to continue"
+fi
+
+# The service role must also be able to CREATE inside its own schema —
+# that is what the data load does. When the schema was created by the
+# owner role, this is the grant that makes the load possible, so it is
+# asserted rather than assumed.
+if [[ "$(schema_privilege "$DEST_DSN" tasks_api CREATE)" != "t" ]]; then
+  cloud_db_die \
+    "post-restore privilege assertion failed: role '${tasks_role}' cannot CREATE inside its own schema tasks_api; the data load would fail with 'permission denied for schema'; refusing to continue"
+fi
+if [[ "$(schema_privilege "$DEST_CONTENT_SCHEDULER_DSN" content_scheduler CREATE)" != "t" ]]; then
+  cloud_db_die \
+    "post-restore privilege assertion failed: role '${content_scheduler_role}' cannot CREATE inside its own schema content_scheduler; the data load would fail with 'permission denied for schema'; refusing to continue"
 fi
 
 # Cross-schema isolation. It is only meaningful when the two roles
@@ -506,12 +590,20 @@ cloud_db_info "post-restore ownership assertion passed: tasks_api owned by ${tas
 
 python3 - "$RESULT_PATH" "$CLOUD_DB_RUN_ID" "$EXPECTED_SHA" \
         "$restore_start_epoch" "$restore_end_epoch" "$restored_schemas" \
+        "$tasks_owner" "$content_scheduler_owner" \
         "$tasks_role" "$content_scheduler_role" \
         "$(stat -c %s "$ARCHIVE_PATH" 2>/dev/null || stat -f %z "$ARCHIVE_PATH")" \
-        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" <<'PY'
+        "$CLOUD_DB_KIND_PREFIX" "$CLOUD_DB_ENVIRONMENT" \
+        "${CLOUD_DB_CROSS_SCHEMA_ACCESS_STATE:-unknown}" \
+        "${CLOUD_DB_ACCEPTED_SHARED_ACCESS_APPLIED:-}" \
+        "${CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON:-}" \
+        "${OWNER_ROLE:-}" <<'PY'
 import json, sys
 
-out_path, run_id, expected_sha, start_epoch, end_epoch, schemas, tasks_role, content_scheduler_role, size_bytes, kind_prefix, environment = sys.argv[1:]
+(out_path, run_id, expected_sha, start_epoch, end_epoch, schemas,
+ tasks_schema_owner, content_scheduler_schema_owner,
+ tasks_role, content_scheduler_role, size_bytes, kind_prefix, environment,
+ cross_state, accepted_roles, accepted_reason, owner_role) = sys.argv[1:]
 
 envelope = {
   "schemaVersion": 1,
@@ -530,8 +622,18 @@ envelope = {
   "perSchemaRestore": True,
   "singleRoleDestination": tasks_role == content_scheduler_role,
   "schemaOwners": {
+    "tasks_api": tasks_schema_owner,
+    "content_scheduler": content_scheduler_schema_owner,
+  },
+  "serviceRoles": {
     "tasks_api": tasks_role,
     "content_scheduler": content_scheduler_role,
+  },
+  "ddlRole": owner_role or "service-role",
+  "crossSchemaAccess": {
+    "state": cross_state,
+    "acceptedRoles": [r for r in accepted_roles.split(",") if r],
+    "acceptedReason": accepted_reason or None,
   },
 }
 with open(out_path, "w", encoding="utf-8") as fh:

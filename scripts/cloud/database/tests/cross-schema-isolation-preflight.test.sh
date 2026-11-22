@@ -103,6 +103,7 @@ conn_role="$(printf '%s' "$dbname" | sed -E 's#^[a-z0-9+.-]+://([^:@/]*)(:[^@]*)
 
 present_file="$PSQL_STUB_STATE_DIR/present"
 usage_file="$PSQL_STUB_STATE_DIR/usage"
+owners_file="$PSQL_STUB_STATE_DIR/owners"
 
 schema_present() {
   [[ -f "$present_file" ]] || return 1
@@ -117,8 +118,27 @@ case "$flat" in
         mv "$present_file.tmp" "$present_file"
       fi
       printf 'DROP SCHEMA\n' ;;
+  *"CREATE SCHEMA"*)
+      _schema="$(printf '%s' "$flat" | sed -E 's/.*CREATE SCHEMA ([a-z_]+).*/\1/')"
+      printf '%s\n' "$_schema" >> "$present_file"
+      printf '%s|%s\n' "$_schema" "$conn_role" >> "$owners_file"
+      printf 'CREATE SCHEMA\n' ;;
   *"SELECT current_user"*)
       printf '%s\n' "$conn_role" ;;
+  *"pg_get_userbyid"*)
+      _schema="unknown"
+      case "$flat" in
+        *"nspname = 'tasks_api'"*)         _schema="tasks_api" ;;
+        *"nspname = 'content_scheduler'"*) _schema="content_scheduler" ;;
+      esac
+      _owner="ABSENT"
+      if [[ -f "$owners_file" ]]; then
+        while IFS='|' read -r _s _o; do
+          [[ -z "${_s:-}" ]] && continue
+          if [[ "$_s" == "$_schema" ]]; then _owner="$_o"; fi
+        done < "$owners_file"
+      fi
+      printf '%s\n' "$_owner" ;;
   *"has_schema_privilege(current_user,"*)
       _schema="unknown"
       case "$flat" in
@@ -204,14 +224,19 @@ sha="$(PATH="$BIN:$PATH" sha256sum "$archive" | awk '{print $1}')"
 RUN_ID="20260101T000000Z-isolationtest"
 
 # write_state <present schemas...> <usage rows...>
+#
+# A row with ONE '|' is a schema owner (`<schema>|<owner role>`); a row
+# with TWO is a privilege row (`<role>|<schema>|<t|f>`).
 write_state() {
   : > "$STATE/present"
   : > "$STATE/usage"
+  : > "$STATE/owners"
   local s
   for s in "$@"; do
     case "$s" in
-      *"|"*) printf '%s\n' "$s" >> "$STATE/usage" ;;
-      *)     printf '%s\n' "$s" >> "$STATE/present" ;;
+      *"|"*"|"*) printf '%s\n' "$s" >> "$STATE/usage" ;;
+      *"|"*)     printf '%s\n' "$s" >> "$STATE/owners" ;;
+      *)         printf '%s\n' "$s" >> "$STATE/present" ;;
     esac
   done
 }
@@ -229,6 +254,8 @@ run_cleanup() {
       CLOUD_DB_RUN_ID="$RUN_ID" \
       CLOUD_DB_ARTIFACT_DIR="$WORK/artifacts" \
       ENVIRONMENT=staging \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES="${ACCEPT_ROLES:-}" \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON="${ACCEPT_REASON:-}" \
       bash "$CLEANUP_SH" \
         --source-tasks-dsn-file "$WORK/secrets/source.dsn" \
         --dest-tasks-dsn-file "$1" \
@@ -254,10 +281,89 @@ run_restore() {
       CLOUD_DB_RUN_ID="$RUN_ID" \
       CLOUD_DB_ARTIFACT_DIR="$WORK/artifacts" \
       ENVIRONMENT=staging \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES="${ACCEPT_ROLES:-}" \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON="${ACCEPT_REASON:-}" \
       bash "$RESTORE_SH" \
         --source-dsn-file "$WORK/secrets/source.dsn" \
         --destination-dsn-file "$WORK/secrets/dest_tasks.dsn" \
         --destination-content-scheduler-dsn-file "$WORK/secrets/dest_content_scheduler.dsn" \
+        --archive "$archive" \
+        --archive-sha256 "$sha" \
+        --result-dir "$WORK/artifacts" 2>&1
+  )
+}
+
+# ---------------------------------------------------------------------------
+# The PRODUCTION shape: two service roles, the real role names, one
+# database, and the cross-schema access that Neon membership grants.
+#
+# The acceptance under test is the recorded decision (task f2c23e26;
+# Quinn recorded Tom's decision on 2026-11-23 07:25 NZDT) that the
+# cross-schema access between those two roles is ACCEPTED rather than
+# enforced as isolation. The acceptance is narrow: it applies to that
+# exact pair, in a production run, with a recorded reason.
+# ---------------------------------------------------------------------------
+
+printf 'postgres://source_reader:***@source-host.internal:5432/neondb?sslmode=require\n' \
+  > "$WORK/secrets/prod_source.dsn"
+printf 'postgres://sindustries_tasks_api:***@neon-main.internal:5432/neondb?sslmode=require\n' \
+  > "$WORK/secrets/prod_dest_tasks.dsn"
+printf 'postgres://sindustries_content_scheduler:***@neon-main.internal:5432/neondb?sslmode=require\n' \
+  > "$WORK/secrets/prod_dest_content_scheduler.dsn"
+chmod 0600 "$WORK/secrets"/prod_*.dsn
+
+ACCEPT_ROLES="sindustries_tasks_api,sindustries_content_scheduler"
+ACCEPT_REASON="Tom's accepted shared-access decision, recorded by Quinn on 2026-11-23 07:25 NZDT (task f2c23e26): per-schema confinement is not enforceable in the Neon role model."
+
+run_cleanup_production() {
+  # $1 = accepted roles, $2 = accepted reason
+  : > "$WORK/sql.log"
+  : > "$WORK/restore.log"
+  ( cd "$WORK/artifacts" && \
+    env \
+      PATH="$BIN:$PATH" \
+      PSQL_SQL_LOG="$WORK/sql.log" \
+      PG_RESTORE_LOG="$WORK/restore.log" \
+      PSQL_STUB_STATE_DIR="$STATE" \
+      CLOUD_DB_RUN_ID="$RUN_ID" \
+      CLOUD_DB_ARTIFACT_DIR="$WORK/artifacts" \
+      ENVIRONMENT=production \
+      CLOUD_DB_PRODUCTION_ACK=1 \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES="$1" \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON="$2" \
+      bash "$CLEANUP_SH" \
+        --source-tasks-dsn-file "$WORK/secrets/prod_source.dsn" \
+        --dest-tasks-dsn-file "$WORK/secrets/prod_dest_tasks.dsn" \
+        --dest-content-scheduler-dsn-file "$WORK/secrets/prod_dest_content_scheduler.dsn" \
+        --expected-host source-host.internal:5432 \
+        --expected-host neon-main.internal:5432 \
+        --confirm "$RUN_ID" \
+        --confirm-cleanup-destination 2>&1
+  )
+}
+
+run_restore_production() {
+  # $1 = accepted roles, $2 = accepted reason
+  : > "$WORK/sql.log"
+  : > "$WORK/restore.log"
+  ( cd "$WORK/artifacts" && \
+    env \
+      PATH="$BIN:$PATH" \
+      PSQL_SQL_LOG="$WORK/sql.log" \
+      PG_RESTORE_LOG="$WORK/restore.log" \
+      PSQL_STUB_STATE_DIR="$STATE" \
+      CLOUD_DB_RUN_ID="$RUN_ID" \
+      CLOUD_DB_ARTIFACT_DIR="$WORK/artifacts" \
+      ENVIRONMENT=production \
+      CLOUD_DB_PRODUCTION_ACK=1 \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_ROLES="$1" \
+      CLOUD_DB_ACCEPTED_SHARED_ACCESS_REASON="$2" \
+      bash "$RESTORE_SH" \
+        --source-dsn-file "$WORK/secrets/prod_source.dsn" \
+        --destination-dsn-file "$WORK/secrets/prod_dest_tasks.dsn" \
+        --destination-content-scheduler-dsn-file "$WORK/secrets/prod_dest_content_scheduler.dsn" \
+        --expected-host source-host.internal:5432 \
+        --expected-host neon-main.internal:5432 \
         --archive "$archive" \
         --archive-sha256 "$sha" \
         --result-dir "$WORK/artifacts" 2>&1
@@ -410,6 +516,157 @@ if [[ $rc -eq 0 ]]; then
   pass "a single-role environment is not refused by the isolation assertion"
 else
   fail "the isolation assertion refused a single-role environment (rc=$rc)"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+# ---------------------------------------------------------------------------
+# Case 6 — the RECORDED ACCEPTANCE: the production role model cannot
+# confine the two service roles to their own schemas, and that is now an
+# accepted, recorded deviation. The cleanup must PROCEED and say so
+# loudly.
+# ---------------------------------------------------------------------------
+
+write_state \
+  tasks_api content_scheduler \
+  "sindustries_tasks_api|tasks_api|t" \
+  "sindustries_content_scheduler|content_scheduler|t" \
+  "sindustries_tasks_api|content_scheduler|t"
+
+set +e
+out="$(run_cleanup_production "$ACCEPT_ROLES" "$ACCEPT_REASON")"
+rc=$?
+set -e
+
+if [[ $rc -eq 0 ]]; then
+  pass "the cleanup proceeds when the recorded acceptance covers the run's role pair"
+else
+  fail "the cleanup refused a run covered by the recorded acceptance (rc=$rc)"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+if grep -q "ACCEPTED cross-schema access" <<<"$out"; then
+  pass "the acceptance is reported, not silent"
+else
+  fail "the acceptance was not reported"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+if grep -q "DROP SCHEMA IF EXISTS tasks_api CASCADE" "$WORK/sql.log"; then
+  pass "the cleanup dropped the schemas under the recorded acceptance"
+else
+  fail "the cleanup did not drop the schemas under the recorded acceptance"
+  printf '%s\n' "$WORK/sql.log" | sed 's/^/      /'
+fi
+
+# ---------------------------------------------------------------------------
+# Case 7 — the acceptance covers ONE pair. A declaration for any other
+# pair must not wave through a run whose roles are not that pair.
+# ---------------------------------------------------------------------------
+
+write_state \
+  tasks_api content_scheduler \
+  "sindustries_tasks_api|tasks_api|t" \
+  "sindustries_content_scheduler|content_scheduler|t" \
+  "sindustries_tasks_api|content_scheduler|t"
+
+set +e
+out="$(run_cleanup_production "sindustries_tasks_api,sindustries_budget_api" "$ACCEPT_REASON")"
+rc=$?
+set -e
+
+if [[ $rc -ne 0 ]] && ! grep -q "DROP SCHEMA" "$WORK/sql.log"; then
+  pass "an acceptance for a DIFFERENT role pair does not apply, and the run refuses"
+else
+  fail "an acceptance for a different role pair was applied (rc=$rc)"
+  printf '%s\n' "$out" | sed 's/^/      /'
+  printf '%s\n' "$WORK/sql.log" | sed 's/^/      /'
+fi
+
+# ---------------------------------------------------------------------------
+# Case 8 — an acceptance without a reason is an unexplained widening of
+# the assertion, and it is refused before the run does anything.
+# ---------------------------------------------------------------------------
+
+write_state \
+  tasks_api content_scheduler \
+  "sindustries_tasks_api|tasks_api|t" \
+  "sindustries_content_scheduler|content_scheduler|t" \
+  "sindustries_tasks_api|content_scheduler|t"
+
+set +e
+out="$(run_cleanup_production "$ACCEPT_ROLES" "")"
+rc=$?
+set -e
+
+if [[ $rc -ne 0 ]] && ! grep -q "DROP SCHEMA" "$WORK/sql.log"; then
+  pass "an acceptance without a recorded reason refuses the run"
+else
+  fail "an acceptance without a reason was accepted (rc=$rc)"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+if grep -q "must record why the shared access is accepted" <<<"$out"; then
+  pass "the refusal names the missing reason"
+else
+  fail "the refusal did not name the missing reason"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+# ---------------------------------------------------------------------------
+# Case 9 — the acceptance is a PRODUCTION decision. A staging run keeps
+# the strict behaviour even when the declaration is present.
+# ---------------------------------------------------------------------------
+
+write_state \
+  tasks_api content_scheduler \
+  "tasks_role|tasks_api|t" \
+  "cs_role|content_scheduler|t" \
+  "tasks_role|content_scheduler|t"
+
+set +e
+out="$(ACCEPT_ROLES="tasks_role,cs_role" ACCEPT_REASON="$ACCEPT_REASON" \
+      run_cleanup "$WORK/secrets/dest_tasks.dsn" "$WORK/secrets/dest_content_scheduler.dsn")"
+rc=$?
+set -e
+
+if [[ $rc -ne 0 ]] && ! grep -q "DROP SCHEMA" "$WORK/sql.log"; then
+  pass "a staging run is not covered by the production acceptance"
+else
+  fail "the production acceptance leaked into a staging run (rc=$rc)"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+# ---------------------------------------------------------------------------
+# Case 10 — the restore under the recorded acceptance: the pre-restore
+# check finds a fresh destination (no schemas yet), and the POST-restore
+# assertion sees the cross-schema access the restored schemas have. It
+# must proceed under the recorded acceptance and report it.
+# ---------------------------------------------------------------------------
+
+# The destination is fresh (no schema is present), but the ROLE MODEL is
+# the production one: each role can use its own schema, and the tasks
+# role also holds USAGE on the content_scheduler schema.
+write_state \
+  "sindustries_tasks_api|tasks_api|t" \
+  "sindustries_content_scheduler|content_scheduler|t" \
+  "sindustries_tasks_api|content_scheduler|t"
+
+set +e
+out="$(run_restore_production "$ACCEPT_ROLES" "$ACCEPT_REASON")"
+rc=$?
+set -e
+
+if [[ $rc -eq 0 ]]; then
+  pass "the restore proceeds under the recorded acceptance"
+else
+  fail "the restore refused a run covered by the recorded acceptance (rc=$rc)"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+if grep -q "post-restore: ACCEPTED cross-schema access" <<<"$out"; then
+  pass "the post-restore assertion reports the accepted access"
+else
+  fail "the post-restore assertion did not report the accepted access"
   printf '%s\n' "$out" | sed 's/^/      /'
 fi
 

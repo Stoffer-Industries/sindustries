@@ -29,14 +29,31 @@ project's `main` branch. Neither exists on the production branch, so
 neither can authenticate to it.
 
 The production branch's own three service roles were then confirmed to
-work ONLY in their own schema — each was connected with its own password
-and wrote to its own schema, with no cross-schema access:
+work in their own schema — each was connected with its own password and
+wrote to its own schema:
 
 | Role | Schema | Result |
 | --- | --- | --- |
 | `sindustries_tasks_api` | `tasks_api` | login OK, CREATE/INSERT/SELECT/DROP OK |
 | `sindustries_budget_api` | `budget_api` | login OK, CREATE/INSERT/SELECT/DROP OK |
 | `sindustries_content_scheduler` | `content_scheduler` | login OK, CREATE/INSERT/SELECT/DROP OK |
+
+**The cross-schema access is a recorded, accepted deviation.** The
+read-back above was recorded on 2026-11-16, before the cutover work
+established the full role model. The later read-back (Quinn,
+2026-11-22) found that both `sindustries_tasks_api` and
+`sindustries_content_scheduler` are DIRECT members of `neon_superuser`,
+which carries `pg_read_all_data` and `pg_write_all_data` — so each role
+holds USAGE, and read and write, on EVERY schema in the database, and no
+explicit GRANT can withdraw it, because no explicit grant was the source.
+Per-schema confinement is therefore not enforceable in this role model.
+Tom accepted that shared access on 2026-11-23 07:25 NZDT (recorded by
+Quinn, task `f2c23e26`, option (b)) rather than revoking the membership.
+The acceptance covers exactly the pair
+`sindustries_tasks_api` / `sindustries_content_scheduler`, is declared in
+the environment manifest (`databaseServiceRoleSharedAccess`), and is
+recorded in the `neon.service-role-scope` proof's `acceptedSharedAccess`
+block; the provisioning gate refuses when the two disagree.
 
 **Connectivity control:** Neon on the Free plan cannot express an IP
 allowlist (`allowed_ips.ips` is empty, `protected=false`,

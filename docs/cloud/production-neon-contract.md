@@ -55,12 +55,22 @@ the **Free** plan. Tom's 2026-11-18 decision therefore re-specifies the
 repository-owned evidence around the control Neon Free can actually
 enforce:
 
-1. **One login role per production schema.** The role owns that schema and
-   no other; the production branch carries no second service role for the
-   same schema.
-2. **The role is schema-scoped.** The live read-back proved that each
-   service role could create, write, select and drop in its own schema and
-   had no cross-schema access.
+1. **One login role per production schema.** The role is scoped to that
+   schema and no other; the production branch carries no second service
+   role for the same schema.
+2. **The role is schema-scoped — with one recorded deviation.** The live
+   read-back proved that each service role could create, write, select and
+   drop in its own schema. It ALSO proved something the original control
+   did not allow for: the two service roles are members of
+   `neon_superuser`, which carries `pg_read_all_data` and
+   `pg_write_all_data`, so each holds USAGE — and read and write — on
+   every schema in the database, and no explicit GRANT can withdraw it.
+   Per-schema confinement is therefore NOT enforceable in this role
+   model. Tom accepted that shared access on 2026-11-23 (recorded by
+   Quinn, task `f2c23e26`) instead of revoking the membership. The
+   deviation is named in the record (`acceptedSharedAccess`) and checked
+   against the environment manifest's `databaseServiceRoleSharedAccess`
+   declaration, so it cannot be widened silently.
 3. **Staging and dev credentials cannot reach production.** The evidence
    must include a *denied* connection attempt from a staging credential
    and from a dev credential — not merely role names.
