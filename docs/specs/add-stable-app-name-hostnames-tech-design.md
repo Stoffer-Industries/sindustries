@@ -234,6 +234,8 @@ The harness is wired into `.github/workflows/cloud-staging-validate.yml` as an a
 - Quinn creates production CNAMEs at their own pace; production certs follow the same `fly certs add` / Vercel domain-add pattern.
 - A one-line placeholder note in `infra/cloud/env/<service>.env.example` documents which production hostname each `*_ALLOWED_ORIGINS` row should point at once Quinn flips staging→production parity.
 
+**Superseded (landed; verified live 2026-11-23).** The production CNAMEs and certificates this section left for Quinn have since been created. `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz` and `content-scheduler-api.sindustries.co.nz` all CNAME to `sindustries-platform-production.fly.dev`, and `health-probe.sindustries.co.nz` CNAMEs to `sindustries-health-probe-production.fly.dev`; all four answer HTTP 200 on `/health` (or `/healthz` for the probe). The apex zone is served by Cloudflare (`melnicoff.ns.cloudflare.com`, `tegan.ns.cloudflare.com`), so OQ2 is answered as well. `docs/cloud/production-blockers.md` §1 records the three API CNAMEs as `Closed 2026-11-18`. The `*_ALLOWED_ORIGINS` placeholder note is unchanged and still accurate — the env examples still carry the staging values with a note naming the production counterpart.
+
 ### 9. PR description
 
 The PR body (separate from the tech design) lists:
@@ -243,6 +245,8 @@ The PR body (separate from the tech design) lists:
 - The Vercel env var matrix.
 - The smoke harness run + JSON evidence link.
 - The remaining production blockers (CNAMEs, certs, env-var promotion) for AC6.
+
+**Superseded (landed; verified live 2026-11-23).** All three blockers this section lists are closed. The CNAMEs and certificates landed as described in §8 above, and the env-var promotion landed with them: `docs/cloud/production-blockers.md` records the production Vercel `VITE_*` values as `Closed 2026-11-18` and the consolidated platform app's fifteen app-level Fly secrets as `Live — release and 15-name inventory read back 2026-11-16`. The durable artifact this section defers to is that register.
 
 The PR body does **not** include the task AC checklist (per the tech-design skill — ACs in a merged PR body are treated as "covered"). The matrix is the only AC-bearing content in the PR body.
 
@@ -296,7 +300,7 @@ Additional gates:
 
 1. **OQ1 — Canonical staging + production domain.** Confirm that `sindustries.co.nz` (with `*.staging.sindustries.co.nz` delegation) supersedes the foundation's `*.sindustries.dev` reservation for staging and production. If Quinn wants to keep `.dev` for staging and use `.co.nz` for production, the matrix splits per-environment. **Needs Quinn.**
 2. **OQ2 — DNS provider for `sindustries.co.nz`.** Name the provider so the PR's `## DNS / TLS setup` section lists the exact CNAME-creation command Quinn will run (Cloudflare / Route 53 / Gandi / other). **Needs Quinn.**
-3. **OQ3 — Production rollout window.** AC6 defers production CNAMEs + certs to Quinn. Is there a target window, or does production DNS land as part of the production-cutover task (`020f423e`)? If the latter, this PR's AC6 evidence is limited to staging; the production-blockers list is the durable artifact. **Needs Quinn.**
+3. **OQ3 — Production rollout window.** AC6 defers production CNAMEs + certs to Quinn. Is there a target window, or does production DNS land as part of the production-cutover task (`020f423e`)? If the latter, this PR's AC6 evidence is limited to staging; the production-blockers list is the durable artifact. **Needs Quinn.** **Answered (landed; verified live 2026-11-23):** the production DNS leg landed out of band rather than as part of the production-cutover task — `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz` and `content-scheduler-api.sindustries.co.nz` CNAME to `sindustries-platform-production.fly.dev` and answer HTTP 200 on `/health` (the health probe's own CNAME likewise resolves). This PR's AC6 evidence is therefore still staging-only, and `docs/cloud/production-blockers.md` is the durable artifact that records the production state.
 4. **OQ4 — CORS extraction vs duplication.** Tasks API and Budget API need a `CsvList` parser. Is the shared-package extraction already scoped, or should this task duplicate with a follow-up? See Item 6 of "Risks and mitigations". **Needs Quinn.** (Default: duplicate + follow-up; revise if Quinn says otherwise.)
 5. **OQ5 — GymTrack production hostname.** Out of scope per AC1; confirm we are not pulling `gymtrack.sindustries.co.nz` into this task. **Needs Quinn.** (Default: confirm scope, defer to a separate task.)
 
