@@ -98,10 +98,10 @@ production Neon was not reachable from the operator host, so the LIVE
 production role names and grants still need a read-back against
 production Neon (§3).
 
-**Closing it.** Both options below are harness changes. The drill runs
-the restore, the migrations and the reconcile in ONE process and has no
-resume flag, so there is no operator step that can run between the
-restore and the migrations:
+**Closing it — DONE (option 2, implemented).** Both options below are
+harness changes. The drill runs the restore, the migrations and the
+reconcile in ONE process and has no resume flag, so there is no
+operator step that can run between the restore and the migrations:
 
 1. **Re-apply ownership and grants at the end of the restore.** After
    `pg_restore`, run `ALTER SCHEMA tasks_api OWNER TO <tasks role>` and
@@ -120,16 +120,44 @@ restore and the migrations:
    `pg_restore --schema=content_scheduler` with the content-scheduler
    DSN. `pg_restore --schema=X` does NOT create the schema — it fails
    closed on its first statement with `schema "content_scheduler" does
-   not exist` — so each schema must be pre-created with
-   `CREATE SCHEMA ... AUTHORIZATION <role>` first. Pre-creating needs a
-   role with CREATE on the database and the authority to set ownership.
+   not exist` — so each schema must be pre-created first.
+
+Option 2 is what ships. `restore.sh` now takes
+`--destination-content-scheduler-dsn-file` and does the per-schema
+restore. Each schema is created by `CREATE SCHEMA <name>;` run AS the
+role that owns it — not `CREATE SCHEMA ... AUTHORIZATION`, so the role
+needs no SET ROLE authority and no privileged operator role is
+involved. The only privilege the service role needs is CREATE on the
+destination database, which it must already hold to own the schema it
+creates. `pg_restore --schema=<name>` then restores that role's own
+objects through that role's own DSN.
+
+Three things make this safe rather than merely different:
+
+- **The end state is asserted, not assumed.** After the restore the
+  script proves that each schema is owned by the role that restored it
+  (`current_user` vs `pg_get_userbyid(nspowner)`), that each role can
+  USE its own schema, and — when the two roles differ — that neither
+  role holds USAGE on the other's schema. A wrong end state fails the
+  restore loudly, at the one point that can see it, instead of
+  surfacing one step later at `prisma migrate deploy` as
+  `permission denied for schema content_scheduler`.
+- **The same-role arrangement is refused in production.** Two
+  destination DSNs that connect as the SAME role is the shape of the
+  original defect, and it would pass every ownership assertion (the
+  owner equals the connecting role either way). A production run
+  refuses it outright; staging, which genuinely uses one role, records
+  `singleRoleDestination: true` in the restore envelope.
+- **The content-scheduler destination DSN is required.** There is no
+  fallback to the old single-DSN path, so the defect cannot be
+  reintroduced by omitting a flag.
 
 Option 1, run with a role that can SET ROLE both service roles, was
 verified to end with the correct owners, the content-scheduler role
 holding USAGE and CREATE on its own schema, the tasks role holding no
-cross-schema access, and every table restored. Until one of these lands,
-a production run cannot produce a correct end state — see the no-go
-condition in §6.
+cross-schema access, and every table restored. It is NOT what ships:
+it needs a privileged role, and the membership workaround that makes
+its `ALTER` work reintroduces the cross-schema drift.
 
 ### The three keys
 
@@ -165,17 +193,14 @@ All of the following must hold before the workflow is dispatched:
   Tom and recorded in the task;
 - the source is quiesced — writes stopped or drained — for the
   duration of the run;
-- **the schema-ownership gap in §2 is closed.** The harness as it stands
-  restores both schemas through the tasks destination DSN, so in the
-  production profile `content_scheduler` comes back owned by the tasks
-  role, with the content-scheduler role holding no privileges on it. A
-  production run is a no-go until either `restore.sh` re-applies
-  ownership and grants after the restore, or the drill restores per
-  schema after pre-creating each schema with its real owner — see §2
-  "Closing it". This also needs a read-back of the LIVE production role
-  names and grants against production Neon, because the verification in
-  §2 was performed against a reproduction of the topology, not against
-  production Neon itself;
+- **the schema-ownership gap in §2 is closed.** `restore.sh` restores per
+  schema: each role creates its own schema and restores its own objects
+  through its own DSN, and the resulting ownership and cross-schema
+  isolation are asserted before the restore is allowed to succeed. See
+  §2 "Closing it". This still needs a read-back of the LIVE production
+  role names and grants against production Neon, because the
+  verification in §2 was performed against a reproduction of the
+  topology, not against production Neon itself;
 - the operator has the runbook open next to the Actions tab.
 
 ### The readiness check (run it before dispatching)
