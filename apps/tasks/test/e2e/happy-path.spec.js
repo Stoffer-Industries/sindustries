@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { dragCardToColumn } from './helpers/dragCardToColumn.js';
+
 test('happy path: create task, move to doing, archive', async ({ page }) => {
   const title = `Created in e2e ${Date.now()}`;
   const now = new Date().toISOString();
@@ -85,8 +87,7 @@ test('happy path: create task, move to doing, archive', async ({ page }) => {
   await expect(card).toBeVisible();
 
   const cardId = await card.getAttribute('data-testid');
-  const doing = page.getByTestId('column-doing');
-  await card.dragTo(doing);
+  await dragCardToColumn(page, cardId, 'column-doing');
 
   await expect(page.getByTestId(cardId)).toBeVisible();
 
