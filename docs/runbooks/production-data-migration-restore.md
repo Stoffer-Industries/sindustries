@@ -191,8 +191,15 @@ capture can never read as "ready".
 | `CONTENT_SCHEDULER_API_SOURCE_DSN` | read-only DSN for source `content_scheduler` |
 | `TASKS_API_DEST_DSN` | owner DSN for destination `tasks_api` |
 | `CONTENT_SCHEDULER_API_DEST_DSN` | owner DSN for destination `content_scheduler` |
-| `RECOVERY_TASKS_API_DSN` | owner DSN for the recovery database (only with `recovery=true`) |
-| `RECOVERY_CONTENT_SCHEDULER_API_DSN` | owner DSN for the recovery target's `content_scheduler` schema (only with `recovery=true`) |
+| `RECOVERY_TASKS_API_DSN` | owner DSN for the recovery target's `tasks_api` (only with `recovery=true`) |
+| `RECOVERY_CONTENT_SCHEDULER_API_DSN` | owner DSN for the recovery target's `content_scheduler` (only with `recovery=true`) |
+
+The two recovery secrets are separate owner DSNs and the drill consumes
+them as two separate DSNs. `restore.sh` is given the recovery
+`tasks_api` DSN as its destination and re-checks that endpoint's
+emptiness; the recovery `content_scheduler` DSN is passed to
+`migrate.sh` and `reconcile.mjs` with no emptiness guard applied by any
+script. Check BOTH before dispatching — see the §4 pre-dispatch check.
 
 The workflow writes each DSN to a mode-`0600` file in the runner's temp
 directory before the scripts run. The scripts accept file paths only —
@@ -228,20 +235,57 @@ byte.
 
    When `recovery` is `true`, verify the recovery target is EMPTY before
    dispatching. This is a read-only check; it prints counts and schema
-   names, never a DSN:
+   names, never a DSN.
+
+   **Run it against BOTH recovery DSNs.** The two recovery secrets are
+   separate owner DSNs (`RECOVERY_TASKS_API_DSN` and
+   `RECOVERY_CONTENT_SCHEDULER_API_DSN`, §9), and the drill consumes
+   them as two separate DSNs: `drill.sh` asserts the recovery isolation
+   for the recovery tasks host and the recovery content-scheduler host
+   independently, and nothing requires the two to be the same database
+   (`cleanup-destination.sh` asserts source-vs-destination inequality
+   for the destination pair, but no such assertion exists for the
+   recovery pair).
+
+   They are also not guarded equally:
+
+   - `drill.sh` step 6 calls `restore.sh --destination-dsn-file
+     "$RECOVERY_TASKS_FILE"`, so the restore's empty-target guard
+     re-checks the **tasks** endpoint itself and fails closed there.
+   - The **content-scheduler** recovery DSN is passed to `migrate.sh`
+     and `reconcile.mjs`, and no script applies the empty-target guard
+     to it. The check below is the only guard on that endpoint.
 
    ```bash
+   # Set these from the §9 secrets. An unset value must abort the
+   # check rather than fall through: `psql ""` connects to the local
+   # default database and would print 0 and an empty schema list —
+   # a false pass on a target nobody checked.
+   : "${RECOVERY_TASKS_API_DSN:?RECOVERY_TASKS_API_DSN is not set}"
+   : "${RECOVERY_CONTENT_SCHEDULER_API_DSN:?RECOVERY_CONTENT_SCHEDULER_API_DSN is not set}"
+
    # must print 0 and an empty schema list, for EACH recovery DSN
-   psql "$RECOVERY_TASKS_DSN" --no-psqlrc --tuples-only --no-align \
+
+   # 1) tasks recovery endpoint — also re-checked by restore.sh at restore time
+   psql "$RECOVERY_TASKS_API_DSN" --no-psqlrc --tuples-only --no-align \
      --command="SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('tasks_api','content_scheduler','public');"
-   psql "$RECOVERY_TASKS_DSN" --no-psqlrc --tuples-only --no-align \
-     --command="SELECT string_agg(schema_name, ',') FROM information_schema.schemata WHERE schema_name IN ('tasks_api','content_scheduler');"
+   psql "$RECOVERY_TASKS_API_DSN" --no-psqlrc --tuples-only --no-align \
+     --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','content_scheduler');"
+
+   # 2) content_scheduler recovery endpoint — no script guards this one
+   psql "$RECOVERY_CONTENT_SCHEDULER_API_DSN" --no-psqlrc --tuples-only --no-align \
+     --command="SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('tasks_api','content_scheduler','public');"
+   psql "$RECOVERY_CONTENT_SCHEDULER_API_DSN" --no-psqlrc --tuples-only --no-align \
+     --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','content_scheduler');"
    ```
 
-   A non-zero table count or a non-empty schema list means the recovery
-   target is not a fresh database and the recovery restore will fail
-   closed — after the destination has already been migrated and
-   reconciled. Fix the target, not the harness.
+   A non-zero table count or a non-empty schema list on **either**
+   endpoint means the recovery target is not a fresh database. On the
+   tasks endpoint the recovery restore fails closed; on the
+   content-scheduler endpoint nothing in the harness fails closed — the
+   check above is the only thing that catches it, and only before the
+   destination has already been migrated and reconciled. Fix the target,
+   not the harness.
 
 4. The workflow runs `drill.sh --environment production`, which executes
    in order:
