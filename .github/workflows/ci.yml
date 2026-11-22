@@ -1540,6 +1540,14 @@ jobs:
       - name: Run cloud database owner-DDL contract test
         run: bash scripts/cloud/database/tests/owner-ddl.test.sh
 
+      # Task f2c23e26: the cutover workflow DERIVES the accepted shared
+      # access from the environment manifest rather than restating it, and
+      # this test pins that bridge: the exported pair is the declared
+      # pair, it is exactly the two production service roles, and every
+      # export line is safely quoted for `eval`.
+      - name: Run accepted shared-access export contract test
+        run: node --test tests/cloud/tests/print-accepted-shared-access.test.mjs
+
       # Task f2c23e26: the restore copies the source schema wholesale --
       # every table, every row, including tables the repository's
       # schema.prisma does not model. The cleanup step drops the live

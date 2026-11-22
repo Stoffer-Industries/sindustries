@@ -29,6 +29,7 @@ usage() {
 Usage: drill.sh \
   --source-tasks-dsn-file <path> --source-content-scheduler-dsn-file <path> \
   --dest-tasks-dsn-file <path>   --dest-content-scheduler-dsn-file <path> \
+  [--dest-owner-dsn-file <path>] \
   --confirm <run-id> \
   [--archive-dir <path>] [--recovery] [--interruption <dump|restore|none>] \
   [--cleanup-destination]
@@ -38,6 +39,16 @@ Required:
   --source-content-scheduler-dsn-file <path>    Source content_scheduler DSN file.
   --dest-tasks-dsn-file <path>       Destination tasks_api DSN file.
   --dest-content-scheduler-dsn-file <path>      Destination content_scheduler DSN file.
+  --dest-owner-dsn-file <path>   Optional. Destination SCHEMA-OWNER DSN file.
+                                 The production schemas are owned by the
+                                 database owner role (neondb_owner), so the
+                                 destructive DDL (DROP SCHEMA) and the
+                                 schema creation (CREATE SCHEMA) are
+                                 owner-only statements. When this is
+                                 supplied, the cleanup and the destination
+                                 restore use that connection for the DDL
+                                 and the service roles keep their own
+                                 DML-scoped connections for the data load.
   --confirm <run-id>                 Must match CLOUD_DB_RUN_ID.
 
 Optional:
@@ -83,6 +94,7 @@ USAGE
 
 SRC_TASKS_FILE="" SRC_CONTENT_SCHEDULER_FILE=""
 DEST_TASKS_FILE="" DEST_CONTENT_SCHEDULER_FILE=""
+DEST_OWNER_FILE=""
 RECOVERY_TASKS_FILE="" RECOVERY_CONTENT_SCHEDULER_FILE=""
 ARCHIVE_DIR=""
 RECOVERY=0
@@ -97,6 +109,7 @@ while (( $# > 0 )); do
     --source-content-scheduler-dsn-file) SRC_CONTENT_SCHEDULER_FILE="$2"; shift 2;;
     --dest-tasks-dsn-file)    DEST_TASKS_FILE="$2";  shift 2;;
     --dest-content-scheduler-dsn-file)   DEST_CONTENT_SCHEDULER_FILE="$2"; shift 2;;
+    --dest-owner-dsn-file)  DEST_OWNER_FILE="$2"; shift 2;;
     --archive-dir)            ARCHIVE_DIR="$2";      shift 2;;
     --environment)            ENVIRONMENT="$2";      shift 2;;
     --expected-host)          cloud_db_add_expected_host "$2"; shift 2;;
@@ -113,8 +126,18 @@ while (( $# > 0 )); do
 done
 
 cloud_db_set_environment "$ENVIRONMENT"
+cloud_db_assert_shared_access_declaration
 cloud_db_load_expected_targets_from_env
 cloud_db_assert_production_ack
+
+# The optional schema-OWNER connection, passed through to the two
+# scripts that run DDL against the destination. The recovery target is
+# NOT included: its DSNs are already owner DSNs for that separate
+# temporary database, so the connecting role owns its schemas there.
+DEST_OWNER_FLAGS=()
+if [[ -n "$DEST_OWNER_FILE" ]]; then
+  DEST_OWNER_FLAGS=(--dest-owner-dsn-file "$DEST_OWNER_FILE")
+fi
 
 # Every sub-script receives the same environment label and the same
 # declared endpoint allowlist, so no step can drift to a different
@@ -235,6 +258,7 @@ if [[ "$CLEANUP_DESTINATION_FLAG" -eq 1 ]]; then
       --source-tasks-dsn-file "$SRC_TASKS_FILE" \
       --dest-tasks-dsn-file   "$DEST_TASKS_FILE" \
       --dest-content-scheduler-dsn-file  "$DEST_CONTENT_SCHEDULER_FILE" \
+      "${DEST_OWNER_FLAGS[@]}" \
       --confirm "$CONFIRM" \
       --confirm-cleanup-destination \
       --environment "$ENVIRONMENT" \
@@ -256,6 +280,7 @@ RESTORE_OUT="$(
     --source-dsn-file "$SRC_TASKS_FILE" \
     --destination-dsn-file "$DEST_TASKS_FILE" \
     --destination-content-scheduler-dsn-file "$DEST_CONTENT_SCHEDULER_FILE" \
+    "${DEST_OWNER_FLAGS[@]}" \
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
     --result-dir "$ARCHIVE_DIR" \
