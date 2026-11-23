@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 5cb4a8fe-6069-4b3c-b2ef-0b8dc61cdb3c
 product_spec: brain/tasks/specs/open/stable-app-name-hostnames.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "774, 775, 776, 968, 969, 973, 974, 984, 985, 992, 993, 1020"
+shipped_date: 2026-11-18
 ---
 
 # Add stable app-name hostnames for staging and production
@@ -18,6 +18,7 @@ shipped_date: null
 - Worktree: `/Users/quinnstoffer/.openclaw/workspace/worktrees/rowan-stable-app-name-hostnames`
 - Tech design: `docs/specs/add-stable-app-name-hostnames-tech-design.md`
 - Companion (workstream 2 of 7): task `2850c5ac-252e-404a-863b-b83755b2f618` (`cloud-staging-environment`) — this design consumes the staging topology that workstream delivers.
+- Shipped: PR #774, #775 and #776 (the matrix, the workflow smoke checks and the Vercel env matrix), PR #968, #969, #973 and #974 (the per-environment CNAME contract, the harness transport classification, the live hostname verification workflow and the AC6 register), PR #984 and #985 (the Vercel project model and the frontend build deps), PR #992 and #993 (the AC5 public-runner and authenticated-runner verdicts) and PR #1020 (the AC6 production API read-back), merged 2026-10-08 → 2026-11-18. Task `5cb4a8fe` closed `done` on 2026-11-19 with its `spec`, `tech_design` and `accepted` approvals granted.
 
 ## Clarification and assumptions
 
