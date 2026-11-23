@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: ac74e9bb-beb6-4d97-b604-8102d35176ee
 product_spec: /Users/quinnstoffer/.openclaw/workspace/brain/tasks/specs/in-progress/content-scheduler-auto-post-2026-07-16.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "245"
+shipped_date: 2026-07-18
 ---
 
 # Content Scheduler: event-driven auto-post — tech design
@@ -20,6 +20,7 @@ shipped_date: null
 - Repository: `Stoffer-Industries/sindustries`
 - Branch: `task-ac74e9bb-content-scheduler-auto-post`
 - Worktree: `/Users/quinnstoffer/workspaces/rowan/sindustries-task-ac74e9bb-content-scheduler-auto-post`
+- Shipped: PR #245 (this tech design plus the event-driven auto-post implementation it describes), merged 2026-07-18. Task `ac74e9bb` closed `done` on 2026-07-20 with its `spec`, `tech_design` and `accepted` approvals granted.
 
 ## Product intent summary
 

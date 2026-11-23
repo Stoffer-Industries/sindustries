@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: bb09eaed-c15e-4770-be5d-8a245a62afc9
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: "703, 714, 716, 734, 792, 809, 827, 830, 832, 834, 835"
+shipped_date: 2026-10-17
 ---
 
 # Migrate GymTrack identity from Supabase Auth to Clerk — Tech Design
@@ -21,6 +21,7 @@ shipped_date: null
 - Primary repo: `Stoffer-Industries/sindustries`
 - Branch: `task-bb09eaed-migrate-gymtrack-identity-to-clerk`
 - Worktree: `/Users/quinnstoffer/.openclaw/workspace/worktrees/task-bb09eaed-migrate-gymtrack-identity-to-clerk`
+- Shipped: PR #703 (the architecture decision this design cites, merged 2026-09-19), PR #714 (this tech design plus the Phase 1 `public.profiles` schema and the clerk-readiness dry run), PR #716 (Phase 2, repointing the `user_id` foreign keys), PR #734 (Phase 3 Slice A, the Supabase Auth → Clerk swap behind `VITE_AUTH_PROVIDER`), PR #792 (Phase 3 Slice B, the Clerk RLS boundary test), PR #809 (Phase 4, the verified-email linking flow), PR #827 (the `## Auth` section of the GymTrack app spec aligned with the Clerk identity layer) and PRs #830, #832, #834 and #835 (the runtime auth regression fixes), merged 2026-09-19 → 2026-10-17. Task `bb09eaed` closed `done` on 2026-11-10 with its `tech_design`, `qa_agent` and `accepted` approvals granted.
 
 ## `.openclaw` boundary notes
 

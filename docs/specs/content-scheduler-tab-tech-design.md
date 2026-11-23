@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 115e8d89-be43-4b81-9e0e-9ab422810f5f
 product_spec: brain/tasks/specs/content-scheduler-multi-channel-2026-07-07.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "203, 213"
+shipped_date: 2026-07-11
 ---
 
 # Content Scheduler tab in Mission Control — tech design
@@ -19,6 +19,7 @@ shipped_date: null
 - Tasks API server (host for new content-scheduler routes): `services/tasks-api/src/app.ts`
 - Tasks API Prisma schema (host for new `ContentSchedulerItem` model): `services/tasks-api/prisma/schema.prisma`
 - Design System primitives used: `@sindustries/ui/react` `Button`, `Card`, `Field`, `Modal`
+- Shipped: PR #203 (this tech design) and PR #213 (the Mission Control tab plus the tasks-api routes and the `ContentSchedulerItem` model), merged 2026-07-08 and 2026-07-11. Task `115e8d89` closed `done` on 2026-07-15 with its `spec`, `tech_design` and `accepted` approvals granted.
 
 ## Repositories
 
