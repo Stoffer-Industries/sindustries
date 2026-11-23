@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 206927ed-d851-47af-8864-0056487e0c4e
 product_spec: brain/tasks/specs/open/production-runtime-configuration.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "414, 593"
+shipped_date: 2026-09-08
 ---
 
 # Cloud readiness: define and secure production runtime configuration
@@ -18,6 +18,7 @@ shipped_date: null
 - Sibling cloud-readiness tech designs:
   - `docs/specs/cloud-readiness-akahu-token-encryption-tech-design.md` (BUDGET_API_TOKEN_KEY precedent — reuse the secret-loading shape)
   - `docs/specs/cloud-readiness-budget-api-require-sessions-tech-design.md` (auth-boundary precedent)
+- Shipped: PR #414 (the production runtime configuration contract) and PR #593 (the fix pointing the production-runtime-config references at the workspace path), merged 2026-08-10 and 2026-09-08. The task's own `[implementer-prs]` record names the same two PRs, and task `206927ed` closed `done` on 2026-09-14 with its `tech_design` and `accepted` approvals granted.
 
 ## Repositories
 

@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: b2f62c36-6367-435b-a329-9c55ad62c551
 product_spec: /Users/quinnstoffer/.openclaw/workspace/brain/tasks/specs/open/cloud-deployment-foundation.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "514, 527, 528, 529, 530, 531, 539"
+shipped_date: 2026-08-27
 ---
 
 # Cloud Deployment Foundation — Tech Design
@@ -21,6 +21,7 @@ shipped_date: null
 - Repository: `Stoffer-Industries/sindustries`
 - Branch: `task-b2f62c36-cloud-deployment-foundation`
 - Worktree: `/Users/quinnstoffer/.openclaw/workspace/worktrees/task-b2f62c36-cloud-deployment-foundation`
+- Shipped: PR #514, #527, #528, #529, #530, #531 and #539 (the WS1 deploy slices plus the WS2 runbook and the AC3 toolchain fix), merged 2026-08-23 → 2026-08-27. The task's own `[implementer-prs]` record names the same seven PRs, and task `b2f62c36` closed `done` on 2026-09-08 with its `tech_design`, `spec` and `accepted` approvals granted. The design doc itself shipped in PR #508 (merged 2026-08-22).
 
 ## Product intent summary
 
