@@ -3,13 +3,15 @@
 **Status:** The **infrastructure** for production hostnames is implemented, and
 the production hostnames are live: every per-surface production hostname
 resolves to the deployment the matrix names, presents a valid certificate and
-serves traffic. The rows still marked `Pending` below are the
-**operator-owned** setup steps Quinn and Tom must complete; each one names
-the evidence needed to close it. A row is marked `Closed` only where the
-work has landed and the evidence is recorded here or in
+serves traffic. **No hostname row in this register is still open.** Every row
+in §1–§5 is marked `Closed`, `Set`, `Live` or `Not applicable`, and a row is
+marked `Closed` only where the work has landed and the evidence is recorded
+here or in
 [`docs/cloud/production-provisioning-readback.md`](production-provisioning-readback.md).
-Until an open row is closed, the production hostnames it covers either fail
-DNS, fail TLS, or point at staging infrastructure.
+The work that remains is the production cutover, recorded in §7 and tracked
+by its own tasks (`020f423e` for the cutover, `f2c23e26` for the data
+migration, and a separate task for the production smoke run) rather than by
+an open row here; §7 also records the cutover's readiness gates.
 
 This document is the AC6 evidence register. Slice 5 of the implementation PR
 references it; slice 5 marks the task as `[implementer-prs]`-eligible (subject
@@ -40,7 +42,7 @@ production hostname resolution. The findings are recorded in §5 below.
 **Production API hostname read-back:** 2026-11-18 — the four Fly-hosted
 production surfaces were re-read (CNAME target, TLS certificate and health
 response), which closes the four §1 DNS rows and the §2 API TLS row that
-still read `Pending`. See
+read `Pending` before that read-back. See
 [§9](#9-observed-state-live-verification-2026-11-13).
 
 ---
@@ -587,7 +589,8 @@ and `{"surface":"tasks-app","url":"https://tasks.sindustries.co.nz/","assets":1,
 
 The four Fly-hosted production surfaces were re-read on 2026-11-18 — CNAME
 target, TLS certificate and health response — which closes the four §1 DNS
-rows and the §2 API TLS row that still read `Pending`. The closure evidence
+rows and the §2 API TLS row that read `Pending` before that read-back. The
+closure evidence
 is the operator read-back in
 [`docs/cloud/production-provisioning-readback.md`](production-provisioning-readback.md)
 §4: resolution read from two independent public resolvers, CNAME targets
