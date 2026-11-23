@@ -104,6 +104,25 @@ attached to the workflow):
 }
 ```
 
+## Live staging surface (superseded)
+
+**Superseded (2026-11-07 staging consolidation; verified live 2026-11-23).** The
+three per-service staging Fly apps named in the `services` block above were
+destroyed ahead of the consolidation (task `219fb673`): staging is now the one
+consolidated `sindustries-platform-staging` app, and the three retired
+per-service staging hosts answer HTTP 502 (no app behind them) — verified live
+2026-11-23. The live equivalents of the three `url` fields above are the three
+stable staging hostnames
+(`https://tasks-api.staging.sindustries.co.nz/health`,
+`https://budget-api.staging.sindustries.co.nz/health` and
+`https://content-scheduler-api.staging.sindustries.co.nz/health`) and the
+consolidated platform host's three path-prefix routes, all answering HTTP 200
+on the same date; the stable CNAMEs themselves landed under task `5cb4a8fe`.
+The JSON block above is the verbatim `staging-workflows.json` emitted by the
+2026-10-08 run and is unchanged — its `url` fields are the run-time provider
+hosts, not the current staging surface. This record's run verdict, check
+results, accepted limitations and cleanup record are unchanged.
+
 ## AC-by-AC coverage
 
 | AC | Status | Evidence (URL / file / command) |
