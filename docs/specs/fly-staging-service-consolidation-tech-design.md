@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 219fb673-72d9-4d6c-a820-f31481316b37
 product_spec: brain/tasks/specs/open/fly-staging-service-consolidation-2026-11-05.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "920, 928, 929, 932, 934, 935, 936, 937, 938"
+shipped_date: 2026-11-06
 ---
 
 # Fly Staging Service Consolidation — tech design
@@ -42,7 +42,8 @@ required.
 
 | Item | Value |
 | --- | --- |
-| Task | `219fb673-72d9-4d6c-a820-f31481316b37` — "💻 Consolidate tasks-api/budget-api/auto-post-worker/content-scheduler-api onto one Fly staging machine" (`taskType: code`, priority high) |
+| Task | `219fb673-72d9-4d6c-a820-f31481316b37` — "💻 Consolidate tasks-api/budget-api/auto-post-worker/content-scheduler-api onto one Fly staging machine" (`taskType: code`, priority high; `done` — closed 2026-11-12) |
+| Shipped PRs | #920 (the consolidation itself), #928, #929, #932, #934, #935, #936, #937, #938 (the cutover fixes and the retirement of the destroyed per-service surfaces) — merged 2026-11-06 to 2026-11-08. The task's `[implementer-prs]` comments name the same nine PRs. |
 | Owner | Rowan (delivery assignee) |
 | Branch | `task-219fb673-fly-staging-consolidation` |
 | Worktree | `/Volumes/WD1/worktrees/rowan/task-219fb673-fly-staging-consolidation` |
@@ -54,6 +55,23 @@ required.
 ---
 
 ## 2. Current state (baseline)
+
+**Superseded (2026-11-07 staging consolidation; verified live 2026-11-23).** This section is
+the design-time baseline this consolidation was written against, kept as the historical
+record of what it replaced — it is not the live staging topology. The four per-service
+staging Fly apps listed below were destroyed at the cutover: verified live 2026-11-23, all
+four retired provider hosts (`sindustries-tasks-api-staging.fly.dev`,
+`sindustries-budget-api-staging.fly.dev`, `sindustries-content-scheduler-api-staging.fly.dev`
+and `sindustries-auto-post-worker-staging.fly.dev`) answer HTTP 502, while the three stable
+staging hostnames (`https://tasks-api.staging.sindustries.co.nz/health`,
+`https://budget-api.staging.sindustries.co.nz/health`,
+`https://content-scheduler-api.staging.sindustries.co.nz/health`) and the consolidated
+platform host's three path-prefix routes answer HTTP 200. Staging now runs ONE consolidated
+app (`sindustries-platform-staging`) carrying all four services as supervisor children behind
+the in-container nginx router — §3 below is the shape that shipped. The live staging deploy
+path, health URLs and hostname mapping are recorded in `docs/systems/cloud-platform.md` and
+`infra/cloud/hostname-matrix.json`, and the live manual rollback runbook is
+`docs/runbooks/platform-consolidation-rollback.md`.
 
 Four Fly apps in `syd`, each one always-on `shared-cpu-1x` / 1GB Machine, each with its own
 image, release, secrets set, deploy workflow, and CI path filter:
@@ -72,7 +90,13 @@ Facts that constrain the design (all verified in this repo, 2026-11-06):
    `infra/cloud/scripts/bootstrap-staging.sh` strips the per-service prefix and applies
    `DATABASE_URL` to each app, so the *staging* values differ per app (Neon, distinct
    `?schema=` values: `tasks_api`, `budget_api`, `content_scheduler`) while the *variable
-   name* does not.
+   name* does not. **Superseded (2026-11-07 consolidation; verified live 2026-11-23):** the
+   per-app application no longer happens — `bootstrap-staging.sh` now execs
+   `infra/cloud/scripts/bootstrap-platform.sh` and applies every secret to the one
+   consolidated app, and the three per-service `DATABASE_URL` values are mapped onto the
+   children inside the container by the supervisor from the app-level `PLATFORM_*` secrets
+   (`infra/cloud/platform/platform-services.mjs`). The constraint this fact records is what
+   forced that design, so it still holds.
 2. **Fly secrets are app-scoped.** All process groups in one app see the same environment
    (Fly's own docs: "secrets are shared across all process groups in a single app").
    Therefore one consolidated app cannot hand three different `DATABASE_URL` values to three
@@ -84,10 +108,21 @@ Facts that constrain the design (all verified in this repo, 2026-11-06):
 4. **`infra/cloud/**` is in every service's CI path filter** (`.github/workflows/ci.yml`
    `tasks_api` / `budget_api` / `content_scheduler_api` / `auto_post_worker` filters), so
    *any* change under `infra/cloud/` currently re-deploys all four apps on merge to `main`.
+   **Superseded (2026-11-07 consolidation; verified live 2026-11-23):** the four
+   per-service filters named here no longer exist. `ci.yml`'s `changes` job carries a single
+   `platform` filter covering `services/tasks-api/**`, `services/budget-api/**`,
+   `services/content-scheduler-api/**`, `infra/cloud/**` and the platform deploy
+   workflows — so a change under `infra/cloud/` still re-deploys, but it re-deploys the ONE
+   consolidated app, not four apps.
 5. **Three of the four apps carry a `release_command`** running a per-service Prisma
    migration (`npm run prisma:migrate --workspace services/<svc>`); the worker carries none.
    `tasks-api.fly.toml` records that Fly executes `release_command` directly, not through a
-   shell, so `cd` and shell builtins are unavailable.
+   shell, so `cd` and shell builtins are unavailable. **Superseded (2026-11-07 consolidation;
+   verified live 2026-11-23):** the four apps are gone, and the consolidated app carries ONE
+   `release_command` — `npm run prisma:migrate:platform`
+   (`infra/cloud/fly/platform.fly.toml`) — which chains the three per-service migrations
+   from the app-level `PLATFORM_*` secret. The constraint this fact records is why that
+   command is a single npm script rather than a shell chain, so it still holds.
 6. **tasks-api asserts its API-port/DB-port pairing** at boot
    (`services/tasks-api/src/server.ts:15-44`), with `ALLOW_PORT_DB_MISMATCH=1` as the
    documented escape hatch. Its `PORT=4001` must not change.
