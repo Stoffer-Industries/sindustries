@@ -25,7 +25,17 @@ def fetch(path: str, base_url: str | None = None) -> dict:
     base = base_url or get_base_url()
     url = f"{base}{path}"
     try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
+        # The OpenClaw secret-egress proxy (HTTP_PROXY/HTTPS_PROXY) exists to
+        # substitute protected secret sentinels into requests bound for
+        # approved *external* destinations. The Tasks API is a local service
+        # call and never carries a secret sentinel, but urllib's default
+        # opener honours the ambient proxy env vars unconditionally, so the
+        # proxy refuses this non-allowlisted local destination with HTTP 502
+        # ("Secret egress proxy refused the request.") — indistinguishable
+        # from a real Tasks API outage. Use a proxy-free opener so Tasks API
+        # calls never traverse that proxy, whatever the caller's environment.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url, timeout=30) as resp:
             body = resp.read().decode("utf-8")
             return json.loads(body) if body else {}
     except Exception as e:  # noqa: BLE001
