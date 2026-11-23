@@ -42,7 +42,7 @@ Project creation, Vercel authentication, optional custom-domain assignment, and 
 4. Replace the obsolete Fly-specific frontend Dockerfiles, Fly app specs, nginx config, and env examples. Fly assets for APIs and workers remain unchanged.
 5. Remove `apps/tasks/pnpm-lock.yaml`. The repository is npm-managed, and Vercel otherwise gives the nearer stale pnpm lockfile precedence over the active npm lockfile, producing a different dependency graph and a failed shared-package CSS import.
 6. Update the Mission Control system document and add a structural CI test that rejects reintroduction of the retired Fly frontend artefacts or the stale Tasks pnpm lockfile.
-7. Create and deploy both Vercel projects. Record the stable URLs and live checks in the task; do not claim the staging API integration is complete until that API has a live release.
+7. Create and deploy both Vercel projects. Record the stable URLs and live checks in the task; do not claim the staging API integration is complete until that API has a live release. **Superseded (verified live 2026-11-23).** Both projects were created and deployed — PR #592, merged 2026-09-08 — and the staging API does now have a live release, so the step's caution is discharged; the stable URLs and the live checks are recorded in the task (`9a53b122`) and in `docs/systems/mission-control.md`.
 
 ## Contracts
 
@@ -56,7 +56,7 @@ SPA routing uses a catch-all rewrite to `/index.html`. A successful `GET /` plus
 
 ## Workflow and operational changes
 
-Vercel deployments are operator-triggered for the first rollout. Git integration can be enabled after the projects exist; it must preserve one project per app and use the repository root as the build context. Fly deployment workflows remain scoped to APIs and workers only.
+Vercel deployments are operator-triggered for the first rollout. Git integration can be enabled after the projects exist; it must preserve one project per app and use the repository root as the build context. Fly deployment workflows remain scoped to APIs and workers only. **Superseded (verified live 2026-11-23).** Both Vercel projects exist — the staging rollout shipped as PR #592, merged 2026-09-08 — so the projects-are-not-there premise is discharged. Deployments remain operator-triggered for a different reason: Vercel's GitHub integration still cannot access the private repository, so the CLI-driven dispatch is still the only path. The one-project-per-app and repository-root build-context constraints are unchanged.
 
 ## Verification matrix
 
