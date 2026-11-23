@@ -98,6 +98,53 @@ Read and follow:
 
 **Only those three bullets are valid reasons to skip code garden.** `DEPENDENCY_BLOCKED` and `WAITING_EXTERNAL` classifications from the queue are explicitly NOT skip reasons on their own — they mean Step 2 has nothing to progress, which is exactly the signal to move to Step 3. Do not invent additional judgment calls this file doesn't list (e.g. "don't compete for review attention," "hold until the dependency chain clears," "avoid opening a PR while other tasks are mid-flight") as reasons to skip. If the three bullets don't apply, open code gardening — that is the required action, not a fallback to consider.
 
+## Turn budget — this heartbeat shares the cron lane with the other agents' heartbeats
+
+Added 2026-11-23 after the 7-day lift analysis below. This agent's own heartbeat is
+the largest single correlate of the other agents' `heartbeat skipped: cron-in-progress`
+events, so a turn that outlasts its cadence does not only cost this agent its own
+pass — it starves the other agents' heartbeats, including one of the `qa_agent`
+approvers on an open task.
+
+Measured 2026-11-23 over 7 days (2026-11-16 15:30 → 2026-11-23 14:48) across 172 skip
+ticks, from cron run history with skip events excluded from the occupancy windows (a
+skip is not a running job):
+
+| job | share of wall time running | P(running at a skip tick) | lift vs baseline |
+| --- | --- | --- | --- |
+| `heartbeat-rowan` | 30.1% | 59.9% | 1.95x |
+| Task Lobsters | 16.3% | 19.2% | 1.16x |
+| `heartbeat-quinn` | 10.6% | 7.6% | 0.74x |
+| `heartbeat-lox` | 2.7% | 0.0% | 0.00x |
+
+103 of the 172 skip ticks (60%) had this heartbeat in flight, and every other job sat
+at or below its own baseline. Per `heartbeat-global-cron-busy-skip`, mere overlap is
+evidence, not proof — the skip storm is also long-standing and fleet-wide (50 of Lox's
+skips on 2026-11-17 → 2026-11-21 had no rowan run in flight at all), so its origin is
+scheduler-level lane tracking rather than this job. This job is the largest aggravator
+of a condition that predates it.
+
+**Rules.**
+
+1. **A heartbeat turn finishes inside its cadence.** The hard ceiling is
+   `timeoutSeconds: 1500` — past that, `cron: job execution timed out` throws the
+   turn's completed work away (`heartbeat-deadline-and-provider-rate-limit`). Target
+   ≤ 20 minutes of wall time; the cadence is 30m.
+2. **Prefer the cheap discovery paths.** The retro-notes hand-off line from the
+   previous pass names the next instance of a swept class and costs one read; a
+   whole-tree grep sweep costs many tool calls and is the single biggest time sink in
+   Step 3.
+3. **Do not start a new code-garden finding once the pass is past 20 minutes.** This
+   is a budget, not a fourth skip reason: code garden is still the required action
+   under Step 3, and the work carries to the next pass.
+4. **Stage and carry, do not abandon.** If the sweep cannot be finished inside the
+   budget, record the candidate finding, the branch and the prepared change in this
+   pass's memory file and open the PR at the next pass. The task/PR dedupe guard
+   already resumes a branch that exists without a PR — a staged sweep is a resumable
+   sweep.
+
+---
+
 ---
 
 ## Escalate on Failure
