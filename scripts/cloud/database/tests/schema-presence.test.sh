@@ -62,14 +62,21 @@ cat > "$BIN/psql" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--version" ]]; then echo "psql (PostgreSQL) 18.2"; exit 0; fi
 cmd=""
+dbname=""
+probe_role=""
 for arg in "$@"; do
   case "$arg" in
     --command=*) cmd="${arg#--command=}" ;;
+    --dbname=*)  dbname="${arg#--dbname=}" ;;
+    --variable=probe_role=*) probe_role="${arg#--variable=probe_role=}" ;;
   esac
 done
 echo "SQL: $cmd" >> "$PSQL_SQL_LOG"
 # Normalise whitespace for matching.
 flat="$(printf '%s' "$cmd" | tr -s '[:space:]' ' ')"
+
+# The role the "connection" uses, read out of the DSN it was called with.
+conn_role="$(printf '%s' "$dbname" | sed -E 's#^[a-z0-9+.-]+://([^:@/]*)(:[^@]*)?@.*#\1#')"
 
 case "$flat" in
   *"information_schema.schemata"*"schema_name = 'tasks_api'"*)
@@ -96,22 +103,68 @@ case "$flat" in
         printf '%s\n' "0"
       fi ;;
   *"information_schema.schemata"*"schema_name IN"*)
-      # restore.sh issues this exact query twice: once as the pre-flight
-      # guard and once as the post-restore verification. Answer the first
-      # with the starting state, the second with the post-restore state.
-      _n="$(cat "$PSQL_SCHEMA_IN_COUNT" 2>/dev/null || printf '0')"
-      _n=$((_n + 1)); printf '%s' "$_n" > "$PSQL_SCHEMA_IN_COUNT"
-      if [[ "$_n" -eq 1 ]]; then
-        printf '%s\n' "${PSQL_RESTORE_SCHEMA_LIST:-}"
-      else
-        printf '%s\n' "${PSQL_RESTORE_SCHEMA_AFTER:-tasks_api,content_scheduler}"
-      fi ;;
+      # restore.sh's pre-flight schema-presence guard. It is issued
+      # once per destination DSN, and it is a PRE-flight check only:
+      # the post-restore verification reads pg_namespace instead, so
+      # this query always reports the pre-flight state.
+      printf '%s\n' "${PSQL_RESTORE_SCHEMA_LIST:-}" ;;
   *"information_schema.tables"*"table_schema = 'tasks_api'"*)
       printf '%s\n' "${PSQL_TASKS_TABLE_COUNT:-0}" ;;
   *"information_schema.tables"*"table_schema = 'content_scheduler'"*)
       printf '%s\n' "${PSQL_CONTENT_SCHEDULER_TABLE_COUNT:-0}" ;;
   *"information_schema.tables"*"table_schema IN"*)
       printf '%s\n' "${PSQL_RESTORE_TABLE_COUNT:-0}" ;;
+  *"CREATE SCHEMA tasks_api"*)
+      # Record who created the schema: the connecting role becomes its
+      # owner, which is the invariant restore.sh asserts after the
+      # restore.
+      printf '%s' "$conn_role" > "$PSQL_STUB_STATE_DIR/owner_tasks_api"
+      printf '%s\n' "CREATE SCHEMA" ;;
+  *"CREATE SCHEMA content_scheduler"*)
+      printf '%s' "$conn_role" > "$PSQL_STUB_STATE_DIR/owner_content_scheduler"
+      printf '%s\n' "CREATE SCHEMA" ;;
+  *"pg_get_userbyid"*)
+      # The owner of the schema named in the query. Defaults to the
+      # role that created it; a test can override to simulate a
+      # restore that handed the schema to the wrong role.
+      _schema="tasks_api"
+      case "$flat" in *"nspname = 'content_scheduler'"*) _schema="content_scheduler";; esac
+      case "$_schema" in
+        tasks_api) _override="${PSQL_SCHEMA_OWNER_TASKS:-}" ;;
+        *)        _override="${PSQL_SCHEMA_OWNER_CONTENT_SCHEDULER:-}" ;;
+      esac
+      if [[ -n "$_override" ]]; then
+        printf '%s\n' "$_override"
+      else
+        printf '%s\n' "$(cat "$PSQL_STUB_STATE_DIR/owner_${_schema}" 2>/dev/null || printf '%s' "$conn_role")"
+      fi ;;
+  *"has_schema_privilege"*)
+      # Resolve the privilege the way the server would: the schema's
+      # owner holds it, a different role holds it only when the test
+      # says so (the cross-schema drift the isolation assertion exists
+      # to catch). `current_user` is the role the connection runs as.
+      _schema="tasks_api"; _priv="USAGE"
+      case "$flat" in
+        *"'content_scheduler'"*) _schema="content_scheduler" ;;
+        *"'tasks_api'"*)        _schema="tasks_api" ;;
+      esac
+      case "$flat" in *"'CREATE'"*) _priv="CREATE" ;; esac
+      _owner="$(cat "$PSQL_STUB_STATE_DIR/owner_${_schema}" 2>/dev/null || printf '%s' "$conn_role")"
+      if [[ -n "$conn_role" && "$conn_role" == "$_owner" ]]; then
+        printf '%s\n' "t"
+      else
+        case "$_schema" in
+          tasks_api)        _cross="${PSQL_PRIVILEGE_CONTENT_SCHEDULER_ROLE_ON_TASKS:-f}" ;;
+          *)                _cross="${PSQL_PRIVILEGE_TASKS_ROLE_ON_CONTENT_SCHEDULER:-f}" ;;
+        esac
+        printf '%s\n' "$_cross"
+      fi ;;
+  *"current_user"*)
+      printf '%s\n' "$conn_role" ;;
+  *"pg_namespace"*"nspname = 'tasks_api'"*)
+      printf '%s\n' "${PSQL_NSP_TASKS_COUNT:-1}" ;;
+  *"pg_namespace"*"nspname = 'content_scheduler'"*)
+      printf '%s\n' "${PSQL_NSP_CONTENT_SCHEDULER_COUNT:-1}" ;;
   *"DROP SCHEMA"*)
       printf '%s\n' "DROP SCHEMA" ;;
   *)
@@ -160,7 +213,7 @@ fi
 # both destinations).
 # ---------------------------------------------------------------------------
 
-mkdir -p "$WORK/secrets" "$WORK/artifacts"
+mkdir -p "$WORK/secrets" "$WORK/artifacts" "$WORK/stub_state"
 printf 'postgres://u:p@source-host.internal:5432/sindustries_staging_source?sslmode=require\n' \
   > "$WORK/secrets/source.dsn"
 printf 'postgres://u:p@dest-tasks.internal:5432/sindustries_staging_dest_tasks?sslmode=require\n' \
@@ -343,6 +396,7 @@ restore_out="$(
   PATH="$BIN:$PATH" \
   PSQL_SQL_LOG="$WORK/sql.log" PSQL_SCHEMA_IN_COUNT="$WORK/count" \
   PSQL_PROBE_COUNTER_DIR="$WORK/probe_counts" \
+  PSQL_STUB_STATE_DIR="$WORK/stub_state" \
   CLOUD_DB_RUN_ID="$RUN_ID" \
   ENVIRONMENT=staging \
   PSQL_RESTORE_TABLE_COUNT=0 \
@@ -350,6 +404,7 @@ restore_out="$(
   bash "$RESTORE_SH" \
     --source-dsn-file "$WORK/secrets/source.dsn" \
     --destination-dsn-file "$WORK/secrets/dest_tasks.dsn" \
+    --destination-content-scheduler-dsn-file "$WORK/secrets/dest_content-scheduler.dsn" \
     --archive "$archive" \
     --archive-sha256 "$sha" \
     --result-dir "$WORK/artifacts" 2>&1
@@ -384,11 +439,13 @@ restore_ok="$(
   PATH="$BIN:$PATH" \
   PSQL_SQL_LOG="$WORK/sql.log" PSQL_SCHEMA_IN_COUNT="$WORK/count" \
   PSQL_PROBE_COUNTER_DIR="$WORK/probe_counts" \
+  PSQL_STUB_STATE_DIR="$WORK/stub_state" \
   CLOUD_DB_RUN_ID="$RUN_ID" \
   ENVIRONMENT=staging \
   bash "$RESTORE_SH" \
     --source-dsn-file "$WORK/secrets/source.dsn" \
     --destination-dsn-file "$WORK/secrets/dest_tasks.dsn" \
+    --destination-content-scheduler-dsn-file "$WORK/secrets/dest_content-scheduler.dsn" \
     --archive "$archive" \
     --archive-sha256 "$sha" \
     --result-dir "$WORK/artifacts" 2>&1

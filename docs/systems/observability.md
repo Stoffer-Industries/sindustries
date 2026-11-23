@@ -1,11 +1,11 @@
 # Hosted Observability and Migration Alerts — handover document
 
 **Type:** System reference (handover)
-**Status:** Runtime artefacts shipped on branch `task-31233a0a-hosted-observability-runtime-evidence` (PR #724, DRAFT); AC1-AC3 evidence gates on Quinn's Grafana Cloud + Fly + Neon credentials landing (Tom-owned authorisation).
-**Last updated:** 2026-09-23
+**Status:** Live (hosted Grafana Cloud backend + Fly health probe, staging and production). Runtime artefacts shipped via PR #756 (merged 2026-10-05); the earlier draft PR #724 was closed without merging.
+**Last updated:** 2026-11-22
 **Owner:** Rowan (engineering); Quinn owns the live Grafana Cloud account and Fly.io secrets
 **Repos:** `Stoffer-Industries/sindustries`
-**App:** Staging target on Fly.io (Sydney region); production rollout is tracked under the broader cloud migration plan
+**App:** Fly health probe in Sydney — its own app per environment (`sindustries-health-probe-staging`, `sindustries-health-probe-production`), with one shared Grafana Cloud tenant behind both; the wider platform production cutover is tracked under the broader cloud migration plan.
 
 > **Naming history:** this workstream was originally scoped as a separate "Hosted Observability and Migration Alerts" spec (task `4b3d6e9c`). The artefacts land under `infra/cloud/observability/` plus two handover docs (`docs/systems/observability.md` and `infra/cloud/observability/README.md`); the prior per-alert response runbook (`docs/runbooks/cloud-alerts-response.md`) was retired in PR #583 — its per-alert content lives in the AC3/AC4 sections of `docs/specs/hosted-observability-migration-alerts-tech-design.md` and in this document's "Alert ownership" + "Runbook for each alert" sections. The local observability stack documented in `infra/docker-compose.observability.yml` was decommissioned on 2026-11-15 (task `a7938522`): the local Tempo, Prometheus and Grafana services were removed, and the local collector now forwards every span and metric to the Grafana Cloud tenant. See "Local collector → Grafana Cloud" in `infra/cloud/observability/README.md`.
 
@@ -44,7 +44,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Failure injection                | 10 scenario names with --dry-run; 4 usable, 4 refused, 2 unusable (redis-down/up, db-down/up usable; tasks-api-down/up, budget-api-down/up refuse — service-scoped child drills are unavailable since staging is one app; deploy-failed/deploy-restored have no live alert — that alert file was removed) | Quinn  | `infra/cloud/observability/failure-inject.sh`    |
 | CI deploy                        | GitHub Actions, path-filtered, canary (`deploy-staging-health-probe.yml`)                    | Rowan  | `.github/workflows/deploy-staging-health-probe.yml` |
 | Secrets                          | Fly app secrets + GH repo secrets                        | Quinn  | `fly secrets set …` (operator CLI); `secrets.FLY_API_TOKEN`   |
-| Alert response runbook           | One section per alert; on-call, severity, mitigation      | Quinn  | Retired with PR #583 (was `docs/runbooks/cloud-alerts-response.md`). Re-create at `~/.openclaw/workspace/docs/infra/runbooks/cloud-alerts-response.md` when an alert fires for the first time and needs its own step list; for now the "Alert ownership" table below + the AC4 section of `docs/specs/hosted-observability-migration-alerts-tech-design.md` carry the same expectation. |
+| Alert response runbook           | One section per alert; on-call, severity, mitigation      | Quinn  | Retired with PR #583 (was `docs/runbooks/cloud-alerts-response.md`). Re-create at `~/.openclaw/workspace/infra/runbooks/cloud-alerts-response.md` (canonical workspace location per `agents/definitions/README.md` "Where operational runbooks live"; add a row to that repo's `infra/RUNBOOKS.md` when it is written) when an alert fires for the first time and needs its own step list; for now the "Alert ownership" table below + the AC4 section of `docs/specs/hosted-observability-migration-alerts-tech-design.md` carry the same expectation. |
 | Operator-facing artefact index   | README mapping each artefact to its purpose               | Rowan  | `infra/cloud/observability/README.md`                         |
 | Contract tests                   | Two offline shell tests run in CI: provisioning + bootstrap | Rowan  | `infra/cloud/scripts/tests/observability-{provisioning,bootstrap}.test.sh` |
 | Backward compatibility           | None required (no prior hosted telemetry)                | —      | —                                                             |
@@ -306,7 +306,7 @@ A future operator should be able to:
    The `sindustries-tasks-api-down` and `sindustries-budget-api-down`
    **alerts are still live** and must still fire on a real outage — only
    the synthetic drill that used to produce one is gone.
-6. Capture the AC1-AC3 evidence pack via `bash infra/cloud/observability/evidence-capture.sh --format md > evidence.md` and paste it into PR #724 body to flip AC1-AC3 + complete AC4 of task `31233a0a`.
+6. Capture the AC1-AC3 evidence pack via `bash infra/cloud/observability/evidence-capture.sh --format md > evidence.md` and attach it as a comment on task `31233a0a` (the closing PR was #756; the earlier draft PR #724 was closed without merging, so it is not a target).
 7. Read the "Alert ownership" table below for the on-call response expectation of each alert (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583).
 
 If any of those seven steps fails, the gap is filed as a follow-on feature task under the `4b3d6e9c` parent or as a new `infra` task depending on scope.
@@ -481,5 +481,5 @@ The auth reporting surface is **context-only**. Callers reduce the provider enve
 - [`docs/systems/cloud-platform.md`](cloud-platform.md) — the cloud platform this hosted stack is built on.
 - [`docs/systems/agent-incidents.md`](agent-incidents.md) — the local agent-incident reporting flow; future work may route agent incidents through the same alerting machinery.
 - [`infra/cloud/observability/README.md`](../../infra/cloud/observability/README.md) — operator-facing index of the artefacts.
-- `~/.openclaw/workspace/docs/infra/runbooks/cloud-alerts-response.md` — per-alert response runbook (was at `docs/runbooks/cloud-alerts-response.md`; retired in PR #583 — re-create in workspace the first time an alert fires and needs its own step list; for now the "Alert ownership" table above is the source of truth).
+- `~/.openclaw/workspace/infra/runbooks/cloud-alerts-response.md` — per-alert response runbook (canonical workspace location per `agents/definitions/README.md` "Where operational runbooks live"; was at `docs/runbooks/cloud-alerts-response.md`; retired in PR #583 — re-create there, with a row in that repo's `infra/RUNBOOKS.md`, the first time an alert fires and needs its own step list; for now the "Alert ownership" table above is the source of truth).
 - [`infra/cloud/README.md`](../../infra/cloud/README.md) — parent index of `infra/cloud/` artefacts.

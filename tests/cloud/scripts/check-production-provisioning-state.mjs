@@ -155,7 +155,7 @@ const OPERATOR_REQUIRED_ROWS = [
     owner: 'Quinn (operator)',
     label: 'Production API health responses',
     reason:
-      'The per-surface health routes live in the staging preflight harness, and the production hostnames do not resolve until the DNS step; the operator records the HTTPS responses with the black-box smoke run.',
+      'The per-surface health routes live in the staging preflight harness and this checker does no network I/O, so the operator records the HTTPS responses with the black-box smoke run. The production DNS step has landed (the production records were published 2026-11-16, verified live 2026-11-23), so the production hostnames resolve and present their certificates.',
   },
   {
     gate: 'dns.resolution-and-tls-readback',
@@ -294,6 +294,7 @@ export function processGroupNames(configText) {
  * @param {string} [options.healthProbeApp]
  * @param {string[]} [options.requiredSourceNames]
  * @param {string[]} [options.expectedSchemas]
+ * @param {{accepted: boolean, roles: string[]}} [options.expectedSharedAccess]
  * @param {string} [options.expectedPlatformEnvironmentId]
  * @param {object} [options.expectedPlatformCorsOrigins]
  * @param {string[]} [options.expectedPlatformProcessGroups]
@@ -539,6 +540,68 @@ export function evaluateProvisioningState(state, options = {}) {
     neonSeparationCoverage.covered &&
     neonDecisionCoverage.covered &&
     neonDecisionControlKnown;
+
+  // -------------------------------------------------------------------------
+  // `neon.service-role-scope.accepted-shared-access` — the DECLARED topology
+  // and the RECORDED gate evidence must agree on WHICH pair of roles the
+  // accepted shared access covers.
+  //
+  // The gate used to assert something that is not true and cannot be made
+  // true in this environment: that each production service role holds no
+  // cross-schema access. Per-schema confinement is not enforceable in the
+  // Neon role model (both service roles are members of `neon_superuser`,
+  // which carries `pg_read_all_data` / `pg_write_all_data`), and Tom
+  // accepted that shared access on 2026-11-23 rather than revoke the
+  // membership (task f2c23e26).
+  //
+  // An accepted deviation is only safe if it is NAMED on both sides. The
+  // environment manifest declares the accepted pair; the recorded
+  // role-scope proof declares the pair it actually read back. If the two
+  // disagree — or if the evidence claims an acceptance the manifest does
+  // not declare — the gate is unmet, because a checker that agreed with a
+  // drifted record would report a green light on a topology nobody
+  // approved.
+  //
+  // It is a SEPARATE gate from `neon.service-role-scope` (the operator
+  // obligation that the read-back exists at all): one says "somebody read
+  // this back", the other says "the read-back agrees with the topology
+  // the repository declares".
+  // -------------------------------------------------------------------------
+  const expectedSharedAccess = options.expectedSharedAccess ?? { accepted: false, roles: [] };
+  const expectedSharedRoles = [...(expectedSharedAccess.roles ?? [])].sort();
+  const recordedSharedAccess =
+    state.operatorEvidence?.neonServiceRoleScopeProof?.acceptedSharedAccess ?? null;
+  const recordedSharedRoles = Array.isArray(recordedSharedAccess?.roles)
+    ? [...recordedSharedAccess.roles].sort()
+    : [];
+  const sharedAccessAgrees = expectedSharedAccess.accepted
+    ? recordedSharedRoles.length === expectedSharedRoles.length &&
+      expectedSharedRoles.every((role, index) => recordedSharedRoles[index] === role)
+    : recordedSharedAccess === null;
+
+  if (expectedSharedAccess.accepted) {
+    add(
+      row('neon.service-role-scope.accepted-shared-access', sharedAccessAgrees ? 'met' : 'unmet', {
+        step: 'Slice D step 2',
+        owner: 'Quinn (operator)',
+        label: 'Accepted production shared access',
+        reason: sharedAccessAgrees
+          ? `the declared topology and the recorded role-scope proof agree that the cross-schema access between ${expectedSharedRoles.join(' and ')} is ACCEPTED, because per-schema confinement is not enforceable in the Neon role model`
+          : `the declared topology accepts shared access between ${expectedSharedRoles.join(' and ') || '(no roles declared)'}, but the recorded role-scope proof names ${recordedSharedRoles.length > 0 ? recordedSharedRoles.join(' and ') : 'no accepted pair'}; the declared topology and the recorded evidence have drifted apart`,
+      }),
+    );
+  } else {
+    add(
+      row('neon.service-role-scope.accepted-shared-access', sharedAccessAgrees ? 'met' : 'unmet', {
+        step: 'Slice D step 2',
+        owner: 'Quinn (operator)',
+        label: 'Accepted production shared access',
+        reason: sharedAccessAgrees
+          ? 'the declared topology accepts no shared access between the production service roles, so any cross-schema access is a refusal'
+          : `the recorded role-scope proof claims an accepted shared access between ${recordedSharedRoles.join(' and ')} that the declared topology does not declare; the recorded evidence has drifted from the declared topology`,
+      }),
+    );
+  }
 
   if (providerCaptured('neon')) {
     const neon = providers.neon;
@@ -2429,6 +2492,10 @@ export async function loadProductionExpectations(repoRoot = DEFAULTS) {
     healthProbeApp: environment.healthProbeApp,
     requiredSourceNames: manifest.requiredSourceNames(environment),
     expectedSchemas: Object.values(environment.schemas ?? {}),
+    expectedSharedAccess: {
+      accepted: Boolean(environment.databaseServiceRoleSharedAccess?.accepted),
+      roles: [...(environment.databaseServiceRoleSharedAccess?.roles ?? [])],
+    },
     expectedPlatformSecretNames: [...provisioner.PLATFORM_SECRET_NAMES],
     expectedProbeCadence,
     expectedProductionHostFingerprints,

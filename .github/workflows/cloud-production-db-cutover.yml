@@ -7,6 +7,10 @@
 # data move is an operator action with a deliberate window, not something
 # a merge can start.
 #
+# The source databases are bound to the Mac mini's prodlike Postgres. This
+# workflow therefore runs only on that host's dedicated cutover runner; a
+# GitHub-hosted runner has no network path to the source endpoint.
+#
 # THREE INDEPENDENT KEYS must all line up before a single row moves:
 #
 #   1. The `production` GitHub Environment. Its reviewers are the
@@ -25,6 +29,17 @@
 #   * CONTENT_SCHEDULER_API_SOURCE_DSN   — read-only DSN for source content_scheduler
 #   * TASKS_API_DEST_DSN      — owner DSN for destination tasks_api
 #   * CONTENT_SCHEDULER_API_DEST_DSN     — owner DSN for destination content_scheduler
+#   * NEONDB_OWNER_DSN        — the production DATABASE OWNER connection
+#                               (neondb_owner). The production schemas are
+#                               owned by that role, so DROP SCHEMA and
+#                               CREATE SCHEMA are owner-only statements:
+#                               run as a service role the cleanup fails
+#                               closed with "must be owner of schema", and
+#                               run as a service role the restore would
+#                               make that role the schema's owner. The
+#                               destructive DDL runs on this connection;
+#                               the service roles keep their own
+#                               DML-scoped connections for the data load.
 #   * RECOVERY_TASKS_API_DSN  — owner DSN for the recovery database
 #                               (only required when --recovery)
 #   * RECOVERY_CONTENT_SCHEDULER_API_DSN — owner DSN for the recovery database
@@ -80,14 +95,27 @@ concurrency:
 jobs:
   cutover:
     name: Production cutover
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, self-hosted-production-cutover]
     environment: production
     timeout-minutes: 90
+    defaults:
+      run:
+        shell: /opt/homebrew/bin/bash --noprofile --norc -e -o pipefail {0}
     env:
       ENVIRONMENT: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prepare the Mac mini toolchain
+        run: |
+          set -euo pipefail
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          /opt/homebrew/bin/bash --version | grep -q 'version [4-9]\.'
+          /opt/homebrew/bin/psql --version | grep -q '18\.'
+          /opt/homebrew/bin/pg_dump --version | grep -q '18\.'
+          test -x /opt/homebrew/bin/pg_restore
+          test -x /opt/homebrew/bin/shellcheck
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -98,19 +126,6 @@ jobs:
       - name: Install repository deps
         run: npm ci
 
-      - name: Install PostgreSQL 18 client and shellcheck
-        run: |
-          set -euo pipefail
-          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client-18 shellcheck
-          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
-
       - name: Lint cloud database scripts
         run: npm run lint:cloud-db
 
@@ -120,11 +135,12 @@ jobs:
           CONTENT_SCHEDULER_SOURCE: ${{ secrets.CONTENT_SCHEDULER_API_SOURCE_DSN }}
           TASKS_DEST: ${{ secrets.TASKS_API_DEST_DSN }}
           CONTENT_SCHEDULER_DEST: ${{ secrets.CONTENT_SCHEDULER_API_DEST_DSN }}
+          NEONDB_OWNER: ${{ secrets.NEONDB_OWNER_DSN }}
           TASKS_RECOVERY: ${{ secrets.RECOVERY_TASKS_API_DSN }}
           CONTENT_SCHEDULER_RECOVERY: ${{ secrets.RECOVERY_CONTENT_SCHEDULER_API_DSN }}
         run: |
           set -euo pipefail
-          required=(TASKS_SOURCE CONTENT_SCHEDULER_SOURCE TASKS_DEST CONTENT_SCHEDULER_DEST)
+          required=(TASKS_SOURCE CONTENT_SCHEDULER_SOURCE TASKS_DEST CONTENT_SCHEDULER_DEST NEONDB_OWNER)
           if [[ "${{ inputs.recovery }}" == "true" ]]; then
             required+=(TASKS_RECOVERY CONTENT_SCHEDULER_RECOVERY)
           fi
@@ -134,6 +150,10 @@ jobs:
               exit 11
             fi
           done
+          if [[ -z "${NEONDB_OWNER:-}" ]]; then
+            echo "NEONDB_OWNER_DSN is required: the production schemas are owned by neondb_owner, so the destructive DDL (DROP SCHEMA) and the schema creation (CREATE SCHEMA) must run on that connection" >&2
+            exit 11
+          fi
           mkdir -p "$RUNNER_TEMP/cloud-production-secrets"
           chmod 0700 "$RUNNER_TEMP/cloud-production-secrets"
           for pair in \
@@ -162,6 +182,11 @@ jobs:
             chmod 0600 "$RUNNER_TEMP/cloud-production-secrets/tasks-recovery.dsn"
             chmod 0600 "$RUNNER_TEMP/cloud-production-secrets/content-scheduler-recovery.dsn"
           fi
+          # The schema-OWNER connection for the destructive DDL. Written
+          # like every other credential here: mode 0600, in the runner's
+          # temp dir, never in a log line.
+          printf '%s' "$NEONDB_OWNER" > "$RUNNER_TEMP/cloud-production-secrets/dest-owner.dsn"
+          chmod 0600 "$RUNNER_TEMP/cloud-production-secrets/dest-owner.dsn"
 
       - name: Pre-flight safety checks
         env:
@@ -224,11 +249,19 @@ jobs:
           fi
           RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 3)"
           export CLOUD_DB_RUN_ID="$RUN_ID"
+          # The accepted shared access is DERIVED from the environment
+          # manifest, not restated here: a workflow that carried its own
+          # copy of the accepted role pair could agree with a drifted
+          # topology. When the manifest declares no acceptance, the two
+          # exports are empty and the harness refuses cross-schema access
+          # exactly as it did before.
+          eval "$(node infra/cloud/scripts/print-accepted-shared-access.mjs)"
           ./scripts/cloud/database/drill.sh \
             --source-tasks-dsn-file  "$SEC/tasks-source-tasks.dsn" \
             --source-content-scheduler-dsn-file "$SEC/content-scheduler-source-content-scheduler.dsn" \
             --dest-tasks-dsn-file    "$SEC/tasks-dest-tasks-dest.dsn" \
             --dest-content-scheduler-dsn-file   "$SEC/content-scheduler-dest-content-scheduler-dest.dsn" \
+            --dest-owner-dsn-file    "$SEC/dest-owner.dsn" \
             --environment production \
             --expected-host "$SOURCE_HOST" \
             --expected-host "$DESTINATION_HOST" \

@@ -49,13 +49,16 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import urllib.error
 import urllib.request
 from typing import Any
 
 from common import invoke_llm_json
-from x_author_tweet import parse_x_link
+from x_author_tweet import (
+    DEFAULT_CONTENT_SCHEDULER_API_BASE_URL,
+    content_scheduler_api_base_url,
+    parse_x_link,
+)
 
 logger = logging.getLogger("bookmark.x_author_mention_tweets")
 
@@ -85,6 +88,7 @@ class ItemsApiUnreachableError(RuntimeError):
 
 __all__ = [
     "parse_x_link",
+    "DEFAULT_CONTENT_SCHEDULER_API_BASE_URL",
     "QUEUED",
     "SKIPPED",
     "ERROR",
@@ -100,14 +104,13 @@ __all__ = [
 
 # --- Env / config --------------------------------------------------------
 
-DEFAULT_CONTENT_SCHEDULER_API_BASE_URL = "http://localhost:4003/api/v1"
 _TIMEOUT_SECONDS = 10
 _ACTOR = "bookmark-mention-helper"
 
 
 def _base_url(override: str | None = None) -> str:
-    base = (override or os.getenv("CONTENT_SCHEDULER_API_BASE_URL") or DEFAULT_CONTENT_SCHEDULER_API_BASE_URL).strip()
-    return base.rstrip("/")
+    """Resolve the Content Scheduler base URL (shared with x_author_tweet)."""
+    return content_scheduler_api_base_url(override)
 
 
 # --- Tweet composition (LLM) --------------------------------------------

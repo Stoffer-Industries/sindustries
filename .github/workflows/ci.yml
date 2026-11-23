@@ -1484,6 +1484,88 @@ jobs:
       - name: Run cloud database schema-presence contract test
         run: bash scripts/cloud/database/tests/schema-presence.test.sh
 
+      # Task 020f423e: the production restore writes BOTH schemas from ONE
+      # archive, and the production profile gives each schema its OWN
+      # service role. Restoring through a single DSN hands both schemas to
+      # one role: the content-scheduler service role loses access to its
+      # own schema, and the tasks role gains the cross-schema access the
+      # platform's own `neon.service-role-scope` gate forbids. The restore
+      # succeeded and the failure surfaced one step later, at
+      # `prisma migrate deploy`, as `permission denied for schema
+      # content_scheduler` -- after the live schema had already been
+      # dropped and recreated with the wrong owner. This test pins the
+      # per-schema restore and the ownership/isolation assertions that
+      # make that end state impossible to miss.
+      - name: Run cloud database per-schema-restore contract test
+        run: bash scripts/cloud/database/tests/per-schema-restore.test.sh
+
+      # Task f2c23e26: the restore asserted the per-schema isolation
+      # invariant, but only AFTER pg_restore -- so a destination whose ROLE
+      # MODEL cannot confine one service role to its own schema was
+      # discovered only once the live schemas had already been dropped and
+      # recreated. That access is a property of the roles, not of the data
+      # (a role in a group carrying pg_read_all_data / pg_write_all_data
+      # holds USAGE, and read and write, on every schema, and no explicit
+      # GRANT can withdraw it). So the same assertion now runs BEFORE the
+      # first destructive statement, and a mis-provisioned destination
+      # refuses with both schemas still in place. This test pins that
+      # ordering, and pins that the predicate is NOT narrowed to the
+      # schemas' explicit ACL list, which reads CLEAN while the access is
+      # real.
+      # Task f2c23e26: per-schema confinement is NOT enforceable in the
+      # production Neon role model -- both service roles are members of
+      # neon_superuser, which carries pg_read_all_data / pg_write_all_data,
+      # so each holds USAGE on every schema and no explicit GRANT can
+      # withdraw it. Tom accepted that shared access on 2026-11-23 (recorded
+      # by Quinn) rather than revoke the membership, so the cross-schema
+      # assertion now accepts ONE named pair, in production runs, with a
+      # recorded reason -- and still refuses every other pairing. This test
+      # pins that narrowing: the acceptance applies, an acceptance for a
+      # different pair does not, an acceptance without a reason does not, and
+      # a staging run is not covered by it.
+      - name: Run cloud database cross-schema-isolation-preflight contract test
+        run: bash scripts/cloud/database/tests/cross-schema-isolation-preflight.test.sh
+
+      # Task f2c23e26: the production schemas are owned by the database
+      # owner role (neondb_owner), NOT by the service roles, so DROP SCHEMA
+      # and CREATE SCHEMA are owner-only statements. Run as a service role
+      # the cleanup fails closed with "must be owner of schema"; run as a
+      # service role the restore would make that role the schema's owner --
+      # a topology change the accepted shared-access decision did not
+      # authorise. The destructive DDL therefore runs on an optional
+      # schema-OWNER connection, and the owner grants the service role
+      # USAGE, CREATE on its own schema for the data load. This test pins
+      # WHICH connection runs the destructive statement, and that the
+      # behaviour without an owner connection is unchanged.
+      - name: Run cloud database owner-DDL contract test
+        run: bash scripts/cloud/database/tests/owner-ddl.test.sh
+
+      # Task f2c23e26: the cutover workflow DERIVES the accepted shared
+      # access from the environment manifest rather than restating it, and
+      # this test pins that bridge: the exported pair is the declared
+      # pair, it is exactly the two production service roles, and every
+      # export line is safely quoted for `eval`.
+      - name: Run accepted shared-access export contract test
+        run: node --test tests/cloud/tests/print-accepted-shared-access.test.mjs
+
+      # Task f2c23e26: the restore copies the source schema wholesale --
+      # every table, every row, including tables the repository's
+      # schema.prisma does not model. The cleanup step drops the live
+      # destination schemas first, so an unmodelled source table lands in
+      # production as permanent drift that no later `prisma migrate` run
+      # ever reconciles or prunes, and it lands AFTER the destination has
+      # already been destroyed. Measured on the live prodlike source
+      # (read-only, 2026-11-23): the tasks_api schema carries
+      # ContentSchedulerItem (29 rows, orphaned by the schema split) and
+      # Task_blocked_ready_backup (48 rows, left behind by the
+      # rolled-back add_blocked_ready_columns migration). The gate is
+      # read-only and runs BEFORE the destructive cleanup, so a source that
+      # does not match the model refuses while the live destination is
+      # still intact. This test pins the comparison, the read-only
+      # property, and the ORDERING that makes the gate worth having.
+      - name: Run cloud database source-schema-model-match contract test
+        run: bash scripts/cloud/database/tests/source-schema-model-match.test.sh
+
       # Task 020f423e: the cutover manifest validator and the route adapter's
       # compare-and-set, plan, read-back and history rules. A malformed
       # manifest — one that carries a credential, one with an unset

@@ -269,7 +269,7 @@ Both can produce **content signals** that flow into the Content Pipeline.
 ```mermaid
 flowchart LR
   subgraph lox_side[Lox side]
-    lox_check[Daily health check] -->|anomaly| lox_runbook[workspace docs/infra/runbooks/]
+    lox_check[Daily health check] -->|anomaly| lox_runbook[workspace infra/runbooks/]
     lox_check -->|incident| lox_ir[workspace docs/infra/incident-reviews/]
     lox_ir -->|severity high| lox_alert[Telegram alert]
   end
@@ -304,7 +304,7 @@ flowchart LR
 
 **Key files**
 - Lox logs: workspace `docs/infra/lox-daily-YYYY-MM-DD.md`
-- Lox runbooks: `~/.openclaw/workspace/docs/infra/runbooks/` (moved out of this repo in PR #583 — see `agents/definitions/README.md` "Where operational runbooks live")
+- Lox runbooks: `~/.openclaw/workspace/infra/runbooks/` (moved out of this repo in PR #583 — see `agents/definitions/README.md` "Where operational runbooks live")
 - Lox incident reviews: workspace `docs/infra/incident-reviews/`
 - Lox notify: `agents/skills/ops/notify-soft-fail/`
 - Quinn ops state: `quinn-ops-state.json` (in workspace root)
@@ -323,7 +323,8 @@ flowchart LR
 | `brain/posts/` | Public content (blog, social) | Ivy |
 | `brain/ops/notes/` | Daily content signals (feeds weekly review) | Quinn / Lox |
 | `brain/content/sindustries-weekly-content/` | Weekly review files for Tom triage | Quinn |
-| workspace `docs/infra/` | Runbooks and setup docs | Quinn / Lox |
+| workspace `infra/runbooks/` | Operational runbooks — the canonical home, indexed by that repo's `infra/RUNBOOKS.md` (see `agents/definitions/README.md` "Where operational runbooks live") | Quinn / Lox |
+| workspace `docs/infra/` | Incident reviews, Lox daily logs and setup docs — its legacy `runbooks/` subdirectory is not the runbook home | Quinn / Lox |
 | `docs/systems/` (in sindustries repo) | Current system references and operational workflow docs | Quinn |
 | `docs/specs/` (in sindustries repo) | Build-against specs and older planning artifacts | Quinn |
 
@@ -335,7 +336,7 @@ flowchart LR
 - daily content signal → `brain/ops/notes/`
 - weekly review for triage → `brain/content/sindustries-weekly-content/`
 - system / workflow reference → `docs/systems/`
-- current system / runbook → workspace `docs/infra/`
+- current system / runbook → workspace `infra/runbooks/` (indexed by that repo's `infra/RUNBOOKS.md`)
 
 ---
 

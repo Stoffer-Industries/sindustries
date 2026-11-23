@@ -16,6 +16,11 @@
 // for the operator-facing view of this contract (every key, owner, rotation
 // expectation, source of truth, failure mode). See docs/specs/cloud-readiness-
 // production-runtime-configuration-tech-design.md for the design rationale.
+//
+// That path is the workspace repo's legacy runbook directory. The canonical
+// home is infra/runbooks/ (indexed by infra/RUNBOOKS.md — see
+// agents/definitions/README.md "Where operational runbooks live"); this
+// runbook still sits in the legacy directory and has no index row yet.
 
 import { z } from 'zod';
 

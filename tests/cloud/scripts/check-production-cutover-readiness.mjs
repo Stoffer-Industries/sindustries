@@ -84,6 +84,26 @@ export const CUTOVER_DSN_SECRET_NAMES = Object.freeze([
   'RECOVERY_CONTENT_SCHEDULER_API_DSN',
 ]);
 
+/**
+ * The PRODUCTION-ONLY cutover secrets.
+ *
+ * `NEONDB_OWNER_DSN` is the database owner connection (neondb_owner).
+ * The production schemas are owned by that role, so `DROP SCHEMA` and
+ * `CREATE SCHEMA` are owner-only statements: run as a service role the
+ * cleanup fails closed with "must be owner of schema", and run as a
+ * service role the restore would make that role the schema's owner.
+ * Staging restores both schemas with ONE role, which owns its own
+ * schemas, so it has no owner DSN to register — this secret is
+ * deliberately NOT part of the shared six.
+ */
+export const PRODUCTION_CUTOVER_SECRET_NAMES = Object.freeze(['NEONDB_OWNER_DSN']);
+
+/** Every secret a production cutover needs. */
+export const ALL_CUTOVER_SECRET_NAMES = Object.freeze([
+  ...CUTOVER_DSN_SECRET_NAMES,
+  ...PRODUCTION_CUTOVER_SECRET_NAMES,
+]);
+
 /** The DSN secrets that must exist even for a run without --recovery. */
 const REQUIRED_WITHOUT_RECOVERY = CUTOVER_DSN_SECRET_NAMES.filter(
   (name) => !name.startsWith('RECOVERY_'),
@@ -144,15 +164,22 @@ export function evaluateCutoverReadiness(state) {
 
   // --- Gate 2: the cutover's DSN secrets --------------------------------
   const secretNames = new Set(asArray(github.secretNames).filter(Boolean));
-  const missing = CUTOVER_DSN_SECRET_NAMES.filter((name) => !secretNames.has(name));
+  const missing = ALL_CUTOVER_SECRET_NAMES.filter((name) => !secretNames.has(name));
   const missingRequired = REQUIRED_WITHOUT_RECOVERY.filter((name) => !secretNames.has(name));
+  const missingProductionOnly = PRODUCTION_CUTOVER_SECRET_NAMES.filter(
+    (name) => !secretNames.has(name),
+  );
 
-  if (missingRequired.length > 0) {
+  if (missingRequired.length > 0 || missingProductionOnly.length > 0) {
     rows.push(
       row('github.cutover-dsn-secrets', 'unmet', {
         owner: 'Quinn (operator)',
         label: 'The cutover DSN secrets are registered on the Environment',
-        reason: `the production Environment is missing ${missing.length} cutover secret(s): ${missing.join(', ')} — ${missingRequired.length} of them (${missingRequired.join(', ')}) are required for every run, so a dispatch today fails closed at the workflow's secret check (exit 11) instead of moving data`,
+        reason: `the production Environment is missing ${missing.length} cutover secret(s): ${missing.join(', ')} — ${missingRequired.length} of them (${missingRequired.join(', ')}) are required for every run, so a dispatch today fails closed at the workflow's secret check (exit 11) instead of moving data${
+          missingProductionOnly.length > 0
+            ? `, and ${missingProductionOnly.join(', ')} is the production DATABASE OWNER connection: the production schemas are owned by neondb_owner, so the destructive DDL must run on that connection`
+            : ''
+        }`,
       }),
     );
   } else if (missing.length > 0) {
@@ -168,7 +195,7 @@ export function evaluateCutoverReadiness(state) {
       row('github.cutover-dsn-secrets', 'met', {
         owner: 'Quinn (operator)',
         label: 'The cutover DSN secrets are registered on the Environment',
-        reason: `all ${CUTOVER_DSN_SECRET_NAMES.length} cutover DSN secret(s) are registered on the production Environment`,
+        reason: `all ${ALL_CUTOVER_SECRET_NAMES.length} cutover secret(s) are registered on the production Environment`,
       }),
     );
   }

@@ -62,6 +62,8 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
+import { getPlatformEnvironment } from './platform-environments.mjs';
+
 /**
  * The controls that can bound production spend, and what each one is.
  *
@@ -99,15 +101,26 @@ export const SPEND_BOUND_CONTROLS = {
  * deliberately remains on Free, so an IP allowlist cannot be the control
  * for AC2 on this account. The accepted replacement is the isolation the
  * live branch already exposes: one login role per production schema, each
- * confined to that schema, with staging and dev credentials proved unable
+ * scoped to that schema, with staging and dev credentials proved unable
  * to connect to the production branch.
  *
  * The control is named so the record cannot claim an IP restriction that
  * was never configured. An unknown control is refused rather than trusted.
+ *
+ * ONE DEVIATION FROM "CONFINED TO THAT SCHEMA", AND IT IS NAMED. Per-schema
+ * confinement is not enforceable in the production Neon role model: both
+ * service roles are members of `neon_superuser`, which carries
+ * `pg_read_all_data` and `pg_write_all_data`, so each holds USAGE on every
+ * schema and no explicit GRANT can withdraw it. Tom accepted that shared
+ * access on 2026-11-23 (recorded by Quinn, task f2c23e26) instead of
+ * revoking the membership. The deviation is recorded in the role-scope
+ * proof's `acceptedSharedAccess` block and is checked against the
+ * environment manifest's `databaseServiceRoleSharedAccess` declaration, so
+ * it cannot be widened silently.
  */
 export const NEON_CONNECTIVITY_CONTROLS = {
   'schema-scoped-service-roles':
-    'one login role per production schema, confined to that schema, with staging and dev connections to the production branch denied',
+    'one login role per production schema, scoped to that schema, with staging and dev connections to the production branch denied; the cross-schema access between the two production service roles is a recorded, accepted deviation because per-schema confinement is not enforceable in the Neon role model',
 };
 
 /**
@@ -195,8 +208,11 @@ export const OPERATOR_EVIDENCE_SLOTS = [
     label: 'Production service-role scope proof',
     step: 'Slice D step 2',
     owner: 'Quinn (operator)',
+    // This slot carries the accepted shared access, because the read-back
+    // it records is the one that establishes the deviation.
+    carriesSharedAccess: true,
     hint:
-      'the read-back proving each production service role can write only inside its own schema and has no cross-schema access',
+      'the read-back proving each production service role is scoped to its own production schema, that the schemas are owned by the database owner role, and that the cross-schema access between the two production service roles is recorded as an ACCEPTED deviation (per-schema confinement is not enforceable in the Neon role model) rather than asserted as isolation',
   },
   {
     slot: 'neonFreeTierIsolationAcceptance',
@@ -245,7 +261,26 @@ export const OPERATOR_EVIDENCE_SLOT_NAMES = OPERATOR_EVIDENCE_SLOTS.map(
 );
 
 /** The fields a slot may carry. */
-const SLOT_FIELDS = ['recorded', 'readBackAt', 'scope', 'evidenceRef', 'targets', 'control'];
+const SLOT_FIELDS = [
+  'recorded',
+  'readBackAt',
+  'scope',
+  'evidenceRef',
+  'targets',
+  'control',
+  'acceptedSharedAccess',
+];
+
+/**
+ * The accepted cross-schema access a recorded slot may carry.
+ *
+ * An accepted deviation is only safe when it is NAMED: the roles it
+ * covers and the decision that accepted it. A malformed block is refused
+ * rather than trusted, because a block that cannot be compared with the
+ * declared topology proves nothing about what was accepted.
+ */
+const SAFE_SHARED_ACCESS_ROLES = /^[A-Za-z0-9_]{1,64}$/;
+const SAFE_SHARED_ACCESS_REF = /^[A-Za-z0-9 ._:/-]{1,200}$/;
 
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
@@ -442,6 +477,35 @@ export function validateOperatorEvidence(value, options = {}) {
       }
     }
 
+    // The accepted shared access this slot carries. It is a NAMED
+    // deviation, so it must name the role pair it covers and the
+    // decision that accepted it; a malformed block is refused rather
+    // than trusted, because it cannot be compared with the declared
+    // topology.
+    const sharedAccess = entry.acceptedSharedAccess;
+    if (sharedAccess !== undefined && sharedAccess !== null) {
+      const roles = sharedAccess.roles;
+      if (!Array.isArray(roles) || roles.length !== 2) {
+        problems.push(
+          `the operator evidence slot "${slot}" carries an "acceptedSharedAccess" block that does not name exactly two roles`,
+        );
+      } else if (!roles.every((role) => typeof role === 'string' && SAFE_SHARED_ACCESS_ROLES.test(role))) {
+        problems.push(
+          `the operator evidence slot "${slot}" carries an unusable role name in "acceptedSharedAccess"`,
+        );
+      }
+      const decisionRef = sharedAccess.decisionRef;
+      if (
+        decisionRef !== undefined &&
+        decisionRef !== null &&
+        (typeof decisionRef !== 'string' || !SAFE_SHARED_ACCESS_REF.test(decisionRef))
+      ) {
+        problems.push(
+          `the operator evidence slot "${slot}" carries an unusable "acceptedSharedAccess.decisionRef"`,
+        );
+      }
+    }
+
     // A slot that is explicitly NOT recorded is a statement, not a defect:
     // the operator has not done that step yet.
     if (entry.recorded !== true) {
@@ -543,8 +607,46 @@ export function operatorEvidenceTemplate(expectedTargets) {
     if (Array.isArray(entry.controls) && entry.controls.length > 0) {
       template[entry.slot].control = null;
     }
+    // A slot that records an ACCEPTED deviation carries the accepted
+    // pair, pre-filled from the declared topology. The operator confirms
+    // it against their read-back; the checker refuses a record that names
+    // a different pair than the declared topology does.
+    if (entry.carriesSharedAccess === true) {
+      template[entry.slot].acceptedSharedAccess = {
+        roles: [...declaredSharedAccessRoles()],
+        decisionRef: declaredSharedAccessDecisionRef(),
+      };
+    }
   }
   return template;
+}
+
+/**
+ * The role pair the production topology declares as an accepted shared
+ * access.
+ *
+ * The manifest is the single source of truth: a template that carried its
+ * own copy of the pair could agree with a drifted topology, which is the
+ * defect class the operator-evidence contract exists to prevent.
+ *
+ * @returns {string[]}
+ */
+export function declaredSharedAccessRoles() {
+  const declaration = getPlatformEnvironment('production')?.databaseServiceRoleSharedAccess;
+  if (!declaration || declaration.accepted !== true) return [];
+  return Array.isArray(declaration.roles) ? [...declaration.roles] : [];
+}
+
+/**
+ * The decision reference the production topology records for the accepted
+ * shared access.
+ *
+ * @returns {string|null}
+ */
+export function declaredSharedAccessDecisionRef() {
+  const declaration = getPlatformEnvironment('production')?.databaseServiceRoleSharedAccess;
+  if (!declaration || declaration.accepted !== true) return null;
+  return typeof declaration.decisionRef === 'string' ? declaration.decisionRef : null;
 }
 
 /**

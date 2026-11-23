@@ -581,5 +581,85 @@
     ],
     "evidence": "The startup path now fails before serving when required migrations or schema objects are missing. A follow-up fixed the repository-root Prisma hoist case in the migration helper.",
     "visibility": "published"
+  },
+  {
+    "title": "GymTrack telemetry real-app resilience proof",
+    "slug": "gymtrack-telemetry-real-app-resilience-proof",
+    "releasedAt": "2026-11-16",
+    "summary": "Three browser tests now prove that a failed telemetry export cannot break GymTrack sign-in, sign-up, or authenticated navigation.",
+    "type": "product",
+    "links": [],
+    "evidence": "The tests exercise GymTrack's real screens, router, and authentication client while failing only the telemetry network request; negative controls catch unclaimed provider calls.",
+    "visibility": "published"
+  },
+  {
+    "title": "GymTrack Supabase auth rollback path fix",
+    "slug": "gymtrack-supabase-auth-rollback-path-fix",
+    "releasedAt": "2026-11-16",
+    "summary": "GymTrack's Supabase authentication fallback runs again after removing a Clerk-only client option from that provider path.",
+    "type": "product",
+    "links": [],
+    "evidence": "The shared client now applies provider-specific options only to Clerk, leaving Supabase authentication available as a working rollback path.",
+    "visibility": "published"
+  },
+  {
+    "title": "Staging and production Redis isolation",
+    "slug": "staging-production-redis-isolation",
+    "releasedAt": "2026-11-17",
+    "summary": "Staging and production now use separate managed Redis databases, removing shared cache and queue state between environments.",
+    "type": "system",
+    "links": [],
+    "evidence": "Provider inventory and health checks verified separate managed Redis databases before the previous shared staging database was retired.",
+    "visibility": "published"
+  },
+  {
+    "title": "Grafana Cloud observability cutover",
+    "slug": "grafana-cloud-observability-cutover",
+    "releasedAt": "2026-11-17",
+    "summary": "Traces and metrics now flow to hosted Grafana Cloud, replacing the local observability stack.",
+    "type": "system",
+    "links": [],
+    "evidence": "Live trace and metrics queries verified the hosted path before the local Grafana, Prometheus, and Tempo services were removed.",
+    "visibility": "published"
+  },
+  {
+    "title": "SIndustries production go-live",
+    "slug": "sindustries-production-go-live",
+    "releasedAt": "2026-11-18",
+    "summary": "SIndustries now has an end-to-end production surface across its application platform, database, DNS, Mission Control, and Tasks app.",
+    "type": "system",
+    "links": [],
+    "evidence": "Production hostnames, certificates, deployments, frontend configuration, and health checks were read back from the live services on 2026-11-18.",
+    "visibility": "published"
+  },
+  {
+    "title": "Production-capable database transfer harness",
+    "slug": "production-capable-database-transfer-harness",
+    "releasedAt": "2026-11-19",
+    "summary": "Database transfers now use environment profiles, endpoint allowlists, typed production confirmation, sealed run manifests, and a cutover runbook.",
+    "type": "system",
+    "links": [],
+    "evidence": "The transfer path refuses undeclared endpoints, requires a second production acknowledgement, and records each run in a sealed manifest.",
+    "visibility": "published"
+  },
+  {
+    "title": "CTO Craft tweet-draft import fix",
+    "slug": "cto-craft-tweet-draft-import-fix",
+    "releasedAt": "2026-11-19",
+    "summary": "The weekly Tech Manager Weekly import is producing tweet drafts again after a persistent TLS fingerprint failure had reduced runs to no-ops.",
+    "type": "system",
+    "links": [],
+    "evidence": "The repaired fetch path completed a real run and produced five drafts on 2026-11-19.",
+    "visibility": "published"
+  },
+  {
+    "title": "Production cloud cutover route harness",
+    "slug": "production-cloud-cutover-route-harness",
+    "releasedAt": "2026-11-20",
+    "summary": "Production route changes now abort on ambiguous read-back, excessive errors, or excessive latency instead of continuing with incomplete evidence.",
+    "type": "system",
+    "links": [],
+    "evidence": "The cutover checks enforce error-rate and latency thresholds, exclude the retained rollback caller from route proof, and fail closed when the route state is unclear.",
+    "visibility": "published"
   }
 ]

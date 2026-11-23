@@ -77,8 +77,12 @@ export default function App() {
           possibly on a different device than the one that started the flow.
           The page is stateless (no server callback); the connecting app is
           responsible for exchanging the code at /oauth/token. See
-          docs/runbooks/gymtrack-agent-connect.md for the loopback-vs-hosted
-          split rationale. */}
+          docs/specs/gymtrack-oauth-mcp-ux-tech-design.md § "Ownership
+          boundary check" ("Why a hosted page, not a CLI callback shim" /
+          "Why two redirect URIs, not one") for the loopback-vs-hosted split
+          rationale. The operator runbook this comment used to name
+          (docs/runbooks/gymtrack-agent-connect.md) was retired in PR #583
+          and was never regenerated, so it no longer resolves. */}
       <Route path="/oauth/callback" element={<AgentOAuthCallbackPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

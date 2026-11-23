@@ -3,20 +3,31 @@
 
 When Tom approves an X-sourced bookmark and at least one task ID is created,
 this module composes a short reply tweet at the original author's handle and
-posts it via the tasks-api `POST /api/v1/x/tweets` route. Failures are
-recorded back to the bookmark state under `tweetLog` and never block the
+posts it via the Content Scheduler's `POST /api/v1/x/tweets` route. Failures
+are recorded back to the bookmark state under `tweetLog` and never block the
 underlying approval transition (AC3 best-effort contract).
+
+Route ownership: `POST /x/tweets` and `GET /x/tweets/:id/author` moved out of
+the Tasks API when the Content Scheduler was extracted (PR #507) and now live
+at `services/content-scheduler-api/src/routes/xTweet.ts`. This helper used to
+target the Tasks API base URL, so every quote-post 404'd and AC1 of task
+55ac9240 could never pass. Both routes are mounted unauthenticated — the
+Content Scheduler's mutation auth gate covers `/api/v1/content-scheduler/items*`
+and `/api/v1/content-scheduler/reorder` only — so no credential is sent here.
+The Content Scheduler must stay on the same host as the lobster for that to
+hold; see the route's own file header.
 
 Module surface:
     - parse_x_link(url)                       -> (handle, status_id) | None
     - parse_x_status_id(url)                  -> status_id | None (no handle required;
                                                  also matches `x.com/i/web/status/<id>`)
+    - content_scheduler_api_base_url(...)     -> str   (resolved service base URL)
     - resolve_tweet_author(status_id, ...)    -> handle | None (best-effort GET via
-                                                 tasks-api `/x/tweets/:id/author`)
+                                                 Content Scheduler `/x/tweets/:id/author`)
     - compose_author_tweet(state_item)        -> str   (≤280 chars; raises TweetComposeError)
     - call_x_tweets_route(text, status_id)    -> {"url", "postedAt"} | raises XApiError
                                                  | CredentialsMissingError
-                                                 | TasksApiUnreachableError
+                                                 | ContentSchedulerUnreachableError
     - try_post_author_tweet(state_item, ...)  -> dict  (the tweetLog payload to merge)
 
 AC mapping (task 55ac9240-d54a-4b2c-88c4-8bb8af85d2b2):
@@ -57,15 +68,15 @@ class TweetComposeError(RuntimeError):
 
 
 class CredentialsMissingError(RuntimeError):
-    """tasks-api `getXClient()` returned null — no X credentials configured."""
+    """Content Scheduler `getXClient()` returned null — no X credentials configured."""
 
 
 class XApiError(RuntimeError):
-    """tasks-api `POST /x/tweets` returned a 4xx/5xx."""
+    """Content Scheduler `POST /x/tweets` returned a 4xx/5xx."""
 
 
-class TasksApiUnreachableError(RuntimeError):
-    """tasks-api itself is unreachable (DNS / connection refused / timeout)."""
+class ContentSchedulerUnreachableError(RuntimeError):
+    """Content Scheduler itself is unreachable (DNS / connection refused / timeout)."""
 
 
 # --- URL parsing ---------------------------------------------------------
@@ -198,14 +209,30 @@ def compose_author_tweet(state_item: dict[str, Any]) -> str:
     return tweet
 
 
-# --- tasks-api HTTP helper -----------------------------------------------
+# --- Content Scheduler HTTP helper ---------------------------------------
 
-DEFAULT_TASKS_API_BASE_URL = "http://localhost:4001/api/v1"
+DEFAULT_CONTENT_SCHEDULER_API_BASE_URL = "http://localhost:4004/api/v1"
 _TIMEOUT_SECONDS = 10
 
 
-def _tasks_api_base_url(override: str | None = None) -> str:
-    base = (override or os.getenv("TASKS_API_BASE_URL") or DEFAULT_TASKS_API_BASE_URL).strip()
+def content_scheduler_api_base_url(override: str | None = None) -> str:
+    """Resolve the Content Scheduler API base URL.
+
+    Resolution order: explicit override, then ``CONTENT_SCHEDULER_API_BASE_URL``,
+    then ``CONTENT_SCHEDULER_BASE_URL`` with ``/api/v1`` appended, then the
+    prodlike default. ``CONTENT_SCHEDULER_BASE_URL`` is the origin the runtime
+    owns (``~/.openclaw/.env``); the ``/api/v1`` form is the convention the
+    Content Scheduler skills already use.
+    """
+    base = (override or "").strip()
+    if not base:
+        base = (os.getenv("CONTENT_SCHEDULER_API_BASE_URL") or "").strip()
+    if not base:
+        origin = (os.getenv("CONTENT_SCHEDULER_BASE_URL") or "").strip().rstrip("/")
+        if origin:
+            base = origin if origin.endswith("/api/v1") else f"{origin}/api/v1"
+    if not base:
+        base = DEFAULT_CONTENT_SCHEDULER_API_BASE_URL
     return base.rstrip("/")
 
 
@@ -220,9 +247,9 @@ def call_x_tweets_route(
     Raises:
         CredentialsMissingError — 503 MISSING_CREDENTIALS (AC5 reframed).
         XApiError               — other 4xx/5xx (AC3).
-        TasksApiUnreachableError— connection / DNS / timeout failures.
+        ContentSchedulerUnreachableError — connection / DNS / timeout failures.
     """
-    url = f"{_tasks_api_base_url(base_url)}/x/tweets"
+    url = f"{content_scheduler_api_base_url(base_url)}/x/tweets"
     body = json.dumps({"text": text, "in_reply_to_tweet_id": status_id}).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -248,21 +275,21 @@ def call_x_tweets_route(
             raise CredentialsMissingError(f"missing_credentials:{message}") from exc
         raise XApiError(f"x_api_{exc.code}:{message}") from exc
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
-        # Tasks-api down / DNS / refused / timeout — degrade gracefully.
+        # Content Scheduler down / DNS / refused / timeout — degrade gracefully.
         reason = getattr(exc, "reason", None) or str(exc) or exc.__class__.__name__
-        raise TasksApiUnreachableError(f"tasks_api_unreachable:{reason}") from exc
+        raise ContentSchedulerUnreachableError(f"content_scheduler_unreachable:{reason}") from exc
 
 
 def resolve_tweet_author(status_id: str, *, base_url: str | None = None) -> str | None:
-    """Best-effort GET of a tweet's author handle via tasks-api.
+    """Best-effort GET of a tweet's author handle via the Content Scheduler.
 
     Returns ``None`` on any failure (missing credentials, tweet not found,
-    X API error, tasks-api unreachable) rather than raising — callers use
+    X API error, Content Scheduler unreachable) rather than raising — callers use
     this to fill in a handle for links like `x.com/i/web/status/<id>` that
     don't carry one, and fall back to the existing `missing_x_link` skip
     when resolution doesn't produce a usable handle.
     """
-    url = f"{_tasks_api_base_url(base_url)}/x/tweets/{status_id}/author"
+    url = f"{content_scheduler_api_base_url(base_url)}/x/tweets/{status_id}/author"
     req = urllib.request.Request(url, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
@@ -286,7 +313,7 @@ def _error(reason: str) -> dict[str, Any]:
 def try_post_author_tweet(
     state_item: dict[str, Any],
     *,
-    tasks_api_base_url: str | None = None,
+    content_scheduler_api_base_url: str | None = None,
 ) -> dict[str, Any]:
     """Return the ``tweetLog`` payload to merge into a bookmark state item.
 
@@ -296,7 +323,7 @@ def try_post_author_tweet(
         - LLM compose failure         → error
         - 503 MISSING_CREDENTIALS     → skipped (AC5 reframed)
         - other 4xx/5xx               → error (AC3)
-        - tasks-api unreachable       → error
+        - Content Scheduler unreachable → error
         - success                     → posted (url + postedAt)
 
     The caller is responsible for persisting the returned dict as
@@ -322,7 +349,9 @@ def try_post_author_tweet(
         status_id = parse_x_status_id(state_item.get("link"))
         if status_id is None:
             return _skipped("missing_x_link")
-        resolved_handle = resolve_tweet_author(status_id, base_url=tasks_api_base_url)
+        resolved_handle = resolve_tweet_author(
+            status_id, base_url=content_scheduler_api_base_url
+        )
         if not resolved_handle:
             return _skipped("missing_x_link")
         state_item = {**state_item, "authorHandle": resolved_handle}
@@ -344,12 +373,14 @@ def try_post_author_tweet(
         return _error(f"llm_compose_failed:over_280_chars:{len(text)}")
 
     try:
-        result = call_x_tweets_route(text, status_id, base_url=tasks_api_base_url)
+        result = call_x_tweets_route(
+            text, status_id, base_url=content_scheduler_api_base_url
+        )
     except CredentialsMissingError:
         return _skipped("missing_credentials")
     except XApiError as exc:
         return _error(str(exc))
-    except TasksApiUnreachableError as exc:
+    except ContentSchedulerUnreachableError as exc:
         return _error(str(exc))
 
     return {
@@ -366,7 +397,9 @@ __all__ = [
     "TweetComposeError",
     "CredentialsMissingError",
     "XApiError",
-    "TasksApiUnreachableError",
+    "ContentSchedulerUnreachableError",
+    "DEFAULT_CONTENT_SCHEDULER_API_BASE_URL",
+    "content_scheduler_api_base_url",
     "parse_x_link",
     "parse_x_status_id",
     "compose_author_tweet",

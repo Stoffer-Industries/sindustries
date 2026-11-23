@@ -1,12 +1,16 @@
 ---
-status: draft
+status: shipped
 task_id: 2850c5ac-252e-404a-863b-b83755b2f618
 product_spec: brain/tasks/specs/open/cloud-staging-environment.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "695, 770, 771"
+shipped_date: 2026-10-08
 ---
 
 # Deploy cloud staging environment and verify representative workflows
+
+**Superseded as an operator runbook (2026-11-07 staging consolidation; verified live 2026-11-23).** This is a design-time document for task `2850c5ac` (done 2026-10-09; delivery PRs #695, #770, #771), and it is the one staging design in this class that carried no supersession marker. The staging environment it deployed has since been replaced: the four per-service staging Fly apps it assumes were destroyed at the consolidation (task `219fb673`) — verified live 2026-11-23, all four retired provider hosts (`sindustries-tasks-api-staging.fly.dev`, `sindustries-budget-api-staging.fly.dev`, `sindustries-content-scheduler-api-staging.fly.dev` and `sindustries-auto-post-worker-staging.fly.dev`) answer HTTP 502, while the three stable staging hostnames (`https://tasks-api.staging.sindustries.co.nz/health`, `https://budget-api.staging.sindustries.co.nz/health` and `https://content-scheduler-api.staging.sindustries.co.nz/health`) each answer HTTP 200. Staging now runs ONE consolidated platform app (`sindustries-platform-staging`, `infra/cloud/fly/platform.fly.toml`) carrying the four services as supervisor children behind the in-container nginx router, so everything below is the design-time record of what it replaced, not the live topology.
+
+The paths this design names that no longer exist are `infra/cloud/environments/staging/` (the live staging deployment inputs are `infra/cloud/fly/`), `docs/runbooks/cloud-staging.md` (the live staging rollback runbook is `docs/runbooks/platform-consolidation-rollback.md`) and `docs/systems/cloud-runtime.md` (the live consolidated cloud system doc is `docs/systems/cloud-platform.md`). The live sources of truth for an operator are `docs/systems/cloud-platform.md`, `infra/cloud/hostname-matrix.json` and `docs/runbooks/platform-consolidation-rollback.md`. The sibling designs in this class are `docs/specs/cloud-deployment-foundation-tech-design.md`, `docs/specs/fly-staging-deploy-fixes-tech-design.md`, `docs/specs/add-stable-app-name-hostnames-tech-design.md` and `docs/specs/fly-staging-service-consolidation-tech-design.md`.
 
 ## Links and delivery metadata
 
@@ -67,7 +71,7 @@ This is an **infra/workflow boundary**. Provider manifests and environment topol
 - `services/tasks-api` continues to own task/workflow state. It also temporarily owns Content Scheduler persistence/routes as documented in `docs/systems/content-scheduler.md`; this task does not deepen that coupling.
 - `services/budget-api` owns budget sessions and finance-domain data.
 - Redis is derived execution state for Content Scheduler. PostgreSQL remains the source of truth; worker startup reconciliation rebuilds missing delayed jobs.
-- `infra/cloud/environments/staging/` owns staging-only deployment inputs and references to provider secret names, never secret values.
+- `infra/cloud/environments/staging/` owns staging-only deployment inputs and references to provider secret names, never secret values. **Superseded (2026-11-07 consolidation; verified live 2026-11-23):** that directory does not exist on `main` — the live staging deployment inputs are `infra/cloud/fly/` (the consolidated platform spec) and the secret-name mapping is `infra/cloud/platform/platform-services.mjs`.
 - `tests/cloud/staging-workflows.mjs` owns the black-box validation contract. It consumes only public service endpoints and short-lived synthetic credentials.
 
 The durable provider deployment boundary is approximately the same effort as ad-hoc console deployment, so this design requires the repo-owned deploy interface now. A one-off manual deployment would create avoidable drift before production cutover.
@@ -86,6 +90,8 @@ staging edge/routes
 all processes ── OTLP/logs/metrics ── hosted staging observability
 ```
 
+**Superseded (2026-11-07 consolidation; verified live 2026-11-23).** The tree above is the design-time topology. The four per-service staging Fly apps it assumes were destroyed at the cutover; staging now runs ONE consolidated platform app (`sindustries-platform-staging`) whose four supervisor children are `tasks-api`, `budget-api`, `content-scheduler-api` and `auto-post-worker` behind the in-container nginx router (`infra/cloud/platform/platform-services.mjs`). The two frontends in the tree are not platform processes at all — `tasks-app` and `mission-control` are Vercel-hosted surfaces with their own staging Vercel projects (`infra/cloud/hostname-matrix.json`).
+
 The API and worker use the same staging PostgreSQL and Redis endpoints, but each service keeps its existing schema ownership. Security groups/network policy allow only workload identities and an operator-controlled migration/validation runner.
 
 ## Implementation plan and file scope
@@ -94,11 +100,11 @@ The API and worker use the same staging PostgreSQL and Redis endpoints, but each
 
 Extend the provider-specific staging environment created by the foundation task:
 
-- `infra/cloud/environments/staging/` — service definitions, resource references, replica counts, health checks, and staging route outputs.
+- `infra/cloud/environments/staging/` — service definitions, resource references, replica counts, health checks, and staging route outputs. **Superseded (2026-11-07 consolidation; verified live 2026-11-23):** this directory does not exist on `main`; the deployed equivalent is `infra/cloud/fly/platform.fly.toml` plus `infra/cloud/platform/`.
 - `infra/cloud/bin/deploy` — consume the prerequisite deploy command; pin an immutable image/commit, wait for rollout, and print non-secret deployment identifiers.
 - `infra/cloud/bin/status` and `infra/cloud/bin/rollback` — verify all process types and allow rollback to the preceding image.
 
-Required staging process types are `tasks-api`, `budget-api`, `content-scheduler-worker`, `tasks-app`, and `mission-control`. The worker is independently restartable. Deployment uses immutable commit/image identifiers; `latest` is forbidden.
+Required staging process types are `tasks-api`, `budget-api`, `content-scheduler-worker`, `tasks-app`, and `mission-control`. The worker is independently restartable. Deployment uses immutable commit/image identifiers; `latest` is forbidden. **Superseded (2026-11-07 consolidation; verified live 2026-11-23):** the live platform app's four supervisor children are `tasks-api`, `budget-api`, `content-scheduler-api` and `auto-post-worker` — the worker named `content-scheduler-worker` above is now the `content-scheduler-api` process, `auto-post-worker` joined the platform, and the two frontends are Vercel-hosted surfaces rather than platform process types.
 
 ### 2. Add staging-safe service configuration
 
@@ -137,9 +143,9 @@ The drill has an explicit cleanup trap and maximum duration. It refuses to run u
 ### 5. Workflow and evidence
 
 - Add `.github/workflows/cloud-staging-validate.yml` as `workflow_dispatch` only, protected by the GitHub `staging` environment and concurrency group `cloud-staging`. It deploys an immutable commit, runs health/smoke checks, optionally runs the failure drill, and uploads the raw redacted JSON artifact.
-- Add `docs/runbooks/cloud-staging.md` with prerequisites, deploy, rollback, validation, fixture cleanup, failure-drill, and escalation steps.
+- Add `docs/runbooks/cloud-staging.md` with prerequisites, deploy, rollback, validation, fixture cleanup, failure-drill, and escalation steps. **Superseded (2026-11-07 consolidation; verified live 2026-11-23):** this runbook does not exist on `main`; the live staging rollback runbook is `docs/runbooks/platform-consolidation-rollback.md`.
 - Add the execution record at `docs/infra/cloud-staging-validation-<YYYY-MM-DD>.md`. It links the workflow run/artifact and records only redacted summaries, blockers, accepted limitations, operator, and timestamps.
-- Update the cloud-runtime system doc created by the foundation task (expected `docs/systems/cloud-runtime.md`) with shipped staging topology and runbook links. If the prerequisite chooses another consolidated cloud system doc, update that doc instead of creating a duplicate.
+- Update the cloud-runtime system doc created by the foundation task (expected `docs/systems/cloud-runtime.md`) with shipped staging topology and runbook links. If the prerequisite chooses another consolidated cloud system doc, update that doc instead of creating a duplicate. **Superseded (2026-11-07 consolidation; verified live 2026-11-23):** the prerequisite chose another consolidated cloud system doc, exactly as this clause allows — `docs/systems/cloud-runtime.md` was never created, and the live doc is `docs/systems/cloud-platform.md`.
 
 This is one mergeable implementation cut because meaningful acceptance requires the deployed environment and its evidence together. The smoke harness and safety guard can be reviewed before execution in the same draft PR; no separate interim local shim is needed.
 

@@ -42,7 +42,7 @@ Project creation, Vercel authentication, optional custom-domain assignment, and 
 4. Replace the obsolete Fly-specific frontend Dockerfiles, Fly app specs, nginx config, and env examples. Fly assets for APIs and workers remain unchanged.
 5. Remove `apps/tasks/pnpm-lock.yaml`. The repository is npm-managed, and Vercel otherwise gives the nearer stale pnpm lockfile precedence over the active npm lockfile, producing a different dependency graph and a failed shared-package CSS import.
 6. Update the Mission Control system document and add a structural CI test that rejects reintroduction of the retired Fly frontend artefacts or the stale Tasks pnpm lockfile.
-7. Create and deploy both Vercel projects. Record the stable URLs and live checks in the task; do not claim the staging API integration is complete until that API has a live release.
+7. Create and deploy both Vercel projects. Record the stable URLs and live checks in the task; do not claim the staging API integration is complete until that API has a live release. **Superseded (verified live 2026-11-23).** Both projects were created and deployed — PR #592, merged 2026-09-08 — and the staging API does now have a live release, so the step's caution is discharged; the stable URLs and the live checks are recorded in the task (`9a53b122`) and in `docs/systems/mission-control.md`.
 
 ## Contracts
 
@@ -56,7 +56,7 @@ SPA routing uses a catch-all rewrite to `/index.html`. A successful `GET /` plus
 
 ## Workflow and operational changes
 
-Vercel deployments are operator-triggered for the first rollout. Git integration can be enabled after the projects exist; it must preserve one project per app and use the repository root as the build context. Fly deployment workflows remain scoped to APIs and workers only.
+Vercel deployments are operator-triggered for the first rollout. Git integration can be enabled after the projects exist; it must preserve one project per app and use the repository root as the build context. Fly deployment workflows remain scoped to APIs and workers only. **Superseded (verified live 2026-11-23).** Both Vercel projects exist — the staging rollout shipped as PR #592, merged 2026-09-08 — so the projects-are-not-there premise is discharged. Deployments remain operator-triggered for a different reason: Vercel's GitHub integration still cannot access the private repository, so the CLI-driven dispatch is still the only path. The one-project-per-app and repository-root build-context constraints are unchanged.
 
 ## Verification matrix
 
@@ -70,10 +70,10 @@ Automated fallback coverage is `infra/cloud/scripts/tests/mission-control-deploy
 
 ## Risks and open questions
 
-- The staging Tasks API currently has no live Fly release. AC2 stays open until that dependency is deployed and authenticated flows succeed.
+- The staging Tasks API currently has no live Fly release. AC2 stays open until that dependency is deployed and authenticated flows succeed. **Superseded (2026-11-07 staging consolidation; verified live 2026-11-23).** The staging Tasks API is live. The per-service `sindustries-tasks-api-staging` Fly app this clause waited on was destroyed ahead of the 2026-11-07 staging consolidation (task `219fb673`); the API is now a supervisor child of the one consolidated platform app and is reached at `tasks-api.staging.sindustries.co.nz`, which answers HTTP 200 on `/health` (verified live 2026-11-23). AC2's end-to-end authenticated workflow verification was completed on 2026-11-15 by the staging-validation runner (run `43606147320`, `verdict: pass`, 15/15): create, read, comment, patch, archive and list-excludes-archived all passed through that hostname. Task `9a53b122` closed `done` on 2026-09-15 with its `spec`, `tech_design`, `qa_agent` and `accepted` approvals all granted.
 - Mission Control's bookmark-state Vite plugin is development-only. Production bookmark data needs `VITE_BOOKMARK_STATE_BASE_URL` backed by a hosted source before that tab can show live data.
-- The Content Scheduler needs a hosted API URL before its Mission Control tab can complete an end-to-end staging smoke test.
-- Custom domains are optional for staging; the stable `*.vercel.app` project aliases satisfy the initial URL contract and can later receive DNS aliases without rebuilding the apps.
+- The Content Scheduler needs a hosted API URL before its Mission Control tab can complete an end-to-end staging smoke test. **Superseded (verified live 2026-11-23).** The Content Scheduler has a hosted staging API: `content-scheduler-api.staging.sindustries.co.nz` answers HTTP 200 on `/health` (verified live 2026-11-23), and the same 2026-11-15 staging-validation run passed its auto-post health, create, approve and unapprove legs through that hostname. The Mission Control tab's own end-to-end smoke flow is not separately recorded, so that residual is stated here rather than closed.
+- Custom domains are optional for staging; the stable `*.vercel.app` project aliases satisfy the initial URL contract and can later receive DNS aliases without rebuilding the apps. **Superseded (landed; verified live 2026-11-23).** The DNS aliases this clause left as a future step have landed: `mission-control.staging.sindustries.co.nz` and `tasks.staging.sindustries.co.nz` both CNAME to `cname.vercel-dns.com` and answer HTTP 200 (verified live 2026-11-23), and `docs/systems/mission-control.md` records the `*.vercel.app` aliases as the documented provider fallback.
 - Vercel's GitHub integration cannot currently access the private repository. The first deployment is CLI-driven; automatic preview/production deployments remain blocked until that provider integration is granted repository access.
 
 ## First deployment evidence — 2026-09-08
@@ -84,3 +84,5 @@ Automated fallback coverage is `infra/cloud/scripts/tests/mission-control-deploy
 - Mission Control's production bundle contains the stable Tasks-app alias and both bundles contain the intended staging Tasks API base URL.
 - A second Mission Control release was deployed and the project was successfully rolled back to deployment `dpl_4zNHCs4PURZAxYqHPYFkRN1Dx5ji`; the stable alias remained healthy.
 - The staging Tasks API hostname did not resolve, so AC2's end-to-end authenticated workflow verification remains open.
+
+**Superseded (verified live 2026-11-23).** The bullet above records the state at the 2026-09-08 first deployment: the per-service staging Fly app's hostname did not resolve then, and the end-to-end authenticated workflow verification it left open was completed on 2026-11-15 by the staging-validation runner (run `43606147320`, `verdict: pass`, 15/15) against the consolidated platform app's stable hostname `tasks-api.staging.sindustries.co.nz`, which answers HTTP 200 on `/health` (verified live 2026-11-23). The 2026-09-08 evidence above is preserved as recorded.

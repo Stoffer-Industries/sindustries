@@ -35,6 +35,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
 import {
+  ALL_CUTOVER_SECRET_NAMES,
   CUTOVER_DSN_SECRET_NAMES,
   evaluateCutoverReadiness,
 } from '../scripts/check-production-cutover-readiness.mjs';
@@ -67,6 +68,23 @@ test('the unmodified artifact passes every gate', () => {
     rows.map((entry) => entry.status),
     ['met', 'met', 'met', 'met'],
   );
+});
+
+test('the cutover workflow is pinned to the Mac mini runner contract', () => {
+  const workflow = readFileSync(WORKFLOW, 'utf8');
+
+  assert.match(
+    workflow,
+    /runs-on:\s*\[self-hosted, macOS, ARM64, self-hosted-production-cutover\]/,
+  );
+  assert.match(
+    workflow,
+    /shell: \/opt\/homebrew\/bin\/bash --noprofile --norc -e -o pipefail \{0\}/,
+  );
+  assert.match(workflow, /echo "\/opt\/homebrew\/bin" >> "\$GITHUB_PATH"/);
+  assert.match(workflow, /\/opt\/homebrew\/bin\/pg_dump --version/);
+  assert.doesNotMatch(workflow, /runs-on:\s*ubuntu-latest/);
+  assert.doesNotMatch(workflow, /apt-get/);
 });
 
 test('a missing required DSN secret fails and names the secret', () => {
@@ -263,8 +281,8 @@ test("the checker's secret list matches the workflow's secret reads", () => {
 
   assert.deepEqual(
     [...read].sort(),
-    [...CUTOVER_DSN_SECRET_NAMES].sort(),
-    'the checker and the cutover workflow must agree on the DSN secret names',
+    [...ALL_CUTOVER_SECRET_NAMES].sort(),
+    'the checker and the cutover workflow must agree on the secret names',
   );
 });
 

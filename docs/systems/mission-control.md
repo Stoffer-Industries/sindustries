@@ -2,7 +2,7 @@
 
 **Type:** Architecture decision record (system reference)
 **Status:** Accepted
-**Last updated:** 2026-09-08
+**Last updated:** 2026-11-21 (Vercel frontend hosting shape, task 5044e708)
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** `apps/mission-control/`
@@ -139,11 +139,13 @@ authentication lands.
 
 ## Production
 
-Mission Control and Tasks deploy to **cloud-hosted staging** as two
-independent Vercel projects. PR #565 previously added Fly frontend
-scaffolding but no live Fly release; PR #573 then established the
-workload-fit rule that static Vite SPAs use Vercel while APIs and workers
-remain on Fly. Task `9a53b122` owns the migration and live deployment.
+Mission Control and Tasks deploy to Vercel as four independent projects —
+two staging and two production, one pair per app. PR #565 previously added
+Fly frontend scaffolding but no live Fly release; PR #573 then established
+the workload-fit rule that static Vite SPAs use Vercel while APIs and
+workers remain on Fly. Task `9a53b122` owned the original staging
+deployment and completed 2026-09-15; task `5044e708` provisioned the
+production pair and bound their custom domains on 2026-11-18.
 
 ### Chosen shape — separate Vercel projects, iframe architecture preserved
 
@@ -151,6 +153,8 @@ remain on Fly. Task `9a53b122` owns the migration and live deployment.
 | --- | --- |
 | `sindustries-mission-control-staging` | Mission Control shell; embeds Tasks via iframe |
 | `sindustries-tasks-app-staging` | Tasks app SPA, standalone and iframeable |
+| `sindustries-mission-control` | Production Mission Control shell; embeds Tasks via iframe |
+| `sindustries-tasks` | Production Tasks app SPA, standalone and iframeable |
 
 Each project sets its Root Directory to the matching app directory and uses the
 co-located `vercel.json`. Vercel's monorepo checkout preserves access to the
@@ -190,9 +194,13 @@ URL pair is stable.
 
 - **Build configs:** `apps/mission-control/vercel.json` and
   `apps/tasks/vercel.json`.
-- **Stable aliases:** the project-level `*.vercel.app` production aliases are
-  the initial staging URLs. Optional custom domains can be added later without
-  rebuilding either SPA.
+- **Stable aliases:** each project serves a stable custom domain under
+  `sindustries.co.nz` — `mission-control.staging.sindustries.co.nz` and
+  `tasks.staging.sindustries.co.nz` for staging, `mission-control.sindustries.co.nz`
+  and `tasks.sindustries.co.nz` for production. The project-level
+  `*.vercel.app` aliases are the documented provider fallback, not the live
+  URL; the source of truth for the mapping is
+  `infra/cloud/hostname-matrix.json`.
 - **Health:** `GET /` and a referenced hashed asset must both return `200`.
   The check verifies static hosting and bundle availability; API health remains
   a separate backend signal.
@@ -209,9 +217,16 @@ URL pair is stable.
   routes, and hashed assets have been smoke-tested at HTTP 200. A second
   Mission Control release was deployed and rolled back successfully to prove
   the provider rollback path.
-- **Current blocker:** Vercel's GitHub integration lacks access to the private
-  repository, leaving frontend deploys CLI-triggered until that access is
-  granted. The staging hostnames themselves are live: the three stable API
+- **Current blocker:** Vercel's GitHub integration is not linked to the
+  private repository on any of the four projects (verified live 2026-11-21:
+  the Vercel API reports no git link for `sindustries-mission-control`,
+  `sindustries-tasks`, `sindustries-mission-control-staging` or
+  `sindustries-tasks-app-staging`), so Vercel cannot auto-deploy on push.
+  The production pair does not depend on that integration: it deploys through
+  the manually dispatchable `deploy-production-vercel-frontends.yml` workflow
+  using `VERCEL_TOKEN` from the `production` environment (added 2026-11-18).
+  The staging pair has no workflow path and is still deployed from the CLI.
+  The staging hostnames themselves are live: the three stable API
   hostnames (`tasks-api`, `budget-api`, `content-scheduler-api`) each resolve
   to the consolidated platform app and answer HTTP 200 on `/health`
   (re-verified live 2026-11-20), and the representative authenticated staging
@@ -220,10 +235,13 @@ URL pair is stable.
   `docs/systems/cloud-platform.md` for the full AC5 staging evidence.
 - **Production cutover** is a separate workstream (task `020f423e`,
   spec `brain/tasks/specs/in-progress/sindustries-cloud-migration.md`).
-  This ADR only commits to the staging shape; production decisions
-  (custom domain strategy, prod Tasks API URL, prod Content Scheduler
-  URL, prod observability hooks) inherit the same two-app shape but
-  are not finalised here.
+  This ADR commits to the two-app shape, which both environments now use.
+  The frontend half of the production decisions is finalised: the custom
+  domain strategy and the prod Tasks API / Content Scheduler URLs are set
+  and live (task `5044e708`, 2026-11-18 — see the production rows in
+  `docs/cloud/production-blockers.md` and `infra/cloud/vercel-env-matrix.json`).
+  The runtime cutover of the services and their callers remains open under
+  task `020f423e`; the prod observability hooks are not finalised here.
 
 ---
 

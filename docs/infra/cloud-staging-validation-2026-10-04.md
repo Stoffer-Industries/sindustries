@@ -158,6 +158,25 @@ NZST):
    `FLY_API_TOKEN`-gated preflight and the SHA-pinned `flyctl` install).
 3. Re-trigger `cloud-staging-validate` (workflow_dispatch) once `services.fly.app/status` reports `Ready` and the public URL returns 200 on `/health` within the harness's 15s budget.
 
+**Superseded (2026-11-07 staging consolidation; verified live 2026-11-23).** The
+three apps named in step 1 were destroyed ahead of the consolidation (task
+`219fb673`), and PR #680's `deploy-staging-<service>.yml` workflows have had
+their deploy jobs removed from `ci.yml` since 2026-11-07 — they are
+`workflow_call`-only with no caller, and `ci.yml` calls only
+`deploy-staging-platform.yml` and `deploy-staging-health-probe.yml`. Verified
+live 2026-11-23: the three retired per-service staging hosts answer HTTP 502
+(no app behind them), while the three stable staging hostnames
+(`https://tasks-api.staging.sindustries.co.nz/health`,
+`https://budget-api.staging.sindustries.co.nz/health` and
+`https://content-scheduler-api.staging.sindustries.co.nz/health`) and the
+consolidated platform host's three path-prefix routes all answer HTTP 200.
+The live equivalents of steps 1–2 are `fly status --app
+sindustries-platform-staging` and `infra/cloud/bin/deploy <service>`, which
+resolves every service name to the one consolidated platform app and runs
+`fly deploy --strategy canary --wait-timeout 600` against it; step 3's
+`cloud-staging-validate` workflow is unchanged. This record's own run verdict,
+check results and accepted limitations are unchanged.
+
 ## What is NOT a blocker for this run
 
 - Code side on PR #695: 20 commits ahead of `origin/main`, CI green on the

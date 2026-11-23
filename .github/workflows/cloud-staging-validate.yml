@@ -10,10 +10,13 @@
 # Stable hostname contract (task 5cb4a8fe; source of truth:
 # infra/cloud/hostname-matrix.json). The env vars STAGING_TASKS_API_URL,
 # STAGING_BUDGET_API_URL, and STAGING_SCHEDULER_API_URL below are
-# bound to the matrix's stable staging hostnames (Quinn registers
-# them in the staging GitHub environment once the CNAMEs + certs
-# land). The harness under tests/cloud/staging-workflows.mjs is what
-# the AC2 black-box phase exercises against those URLs.
+# bound to the matrix's stable staging hostnames. The CNAMEs + certs
+# landed on 2026-11-10 and Quinn registered the three vars in the
+# staging GitHub environment; each binds its own
+# https://<service>.staging.sindustries.co.nz (verified live 2026-11-23,
+# all three answer HTTP 200 on /health). The harness under
+# tests/cloud/staging-workflows.mjs is what the AC2 black-box phase
+# exercises against those URLs.
 #
 # Required environment secrets (Quinn-owned):
 #   FLY_API_TOKEN                       — flyctl auth + machine control
