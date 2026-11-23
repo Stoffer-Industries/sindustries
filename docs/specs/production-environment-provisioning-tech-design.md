@@ -8,6 +8,8 @@ shipped_date: 2026-11-17
 
 # Production Environment Provisioning — tech design
 
+**Superseded (production provisioning shipped 2026-11-17 — PR #979; verified live 2026-11-23).** This document is the design of record for the production environment provisioning task (`fb1240c0`, PR #979, merged 2026-11-17) and is design-time: the production destination it planned now exists, and the production hostnames are live. The live sources of truth are `docs/systems/cloud-platform.md` (the staging-and-production handover document), `docs/cloud/production-blockers.md` (the production blocker register, whose rows record the landed state), `infra/cloud/platform/platform-environments.mjs` (the environment manifest that owns the per-environment app names and secret-name prefixes) and `infra/cloud/hostname-matrix.json` (the hostname matrix). The remaining production work — the route cutover, the runtime configuration and the hosted observability stack — is tracked under tasks `020f423e` (cutover), `f2c23e26` (data migration) and the broader cloud migration plan (`206927ed`, `2850c5ac`, `d37681e1`, `4b3d6e9c`). The superseded clauses below are annotated in place rather than rewritten, so the design's history stays readable.
+
 ## 1. Product intent and task boundary
 
 The approved product spec asks for the production destination to exist and be reachable **before** production data is migrated or traffic is cut over. It deliberately reuses the consolidated Fly packaging proven in staging: one application Machine, with `tasks-api`, `budget-api`, `content-scheduler-api`, and the queue-bound `auto-post-worker` as separate child processes.
@@ -68,6 +70,17 @@ The repository currently has production destination names in `infra/cloud/hostna
 - `.github/workflows/deploy-staging-platform.yml` deploys the staging app;
 - `infra/cloud/scripts/bootstrap-staging.sh` is explicitly staging-only and refuses app-name overrides;
 - the health-probe Fly config is staging-only and uses daily `DB_PROBE_INTERVAL_SECONDS` / `FLY_APP_PROBE_INTERVAL_SECONDS` values.
+
+**Superseded (2026-11-17 production provisioning shipped — PR #979; verified live 2026-11-23).** Every gap listed above was closed by the task this document designs; the list is the design-time state, not the current one. The live production artefacts are:
+
+- `infra/cloud/fly/platform.production.overlay.toml` — sets `app = 'sindustries-platform-production'` over `platform.fly.toml`, so the production app name is no longer hard-coded to the staging one;
+- `infra/cloud/platform/platform-environments.mjs` — the environment manifest owns both environments (`PLATFORM_ENVIRONMENTS.staging.platformApp` = `sindustries-platform-staging`, `.production.platformApp` = `sindustries-platform-production`). `platform-services.mjs` now resolves the app name through it (`PLATFORM_APP` is derived from `PLATFORM_ENVIRONMENTS.staging.platformApp`; `platformAppFor(environmentId)` returns the app name for any environment) rather than exporting a fixed staging name;
+- `infra/cloud/platform/platform-provision-secrets.mjs` — resolves the target through `resolveEnvironment()` → `getPlatformEnvironment(environmentId)` (the CLI takes `--environment`), so the secret names come from the environment manifest instead of being hard-coded `STAGING_*` reads;
+- `.github/workflows/deploy-production-platform.yml` and `.github/workflows/deploy-production-health-probe.yml` — the two live production deploy surfaces, alongside `deploy-production-vercel-frontends.yml`, `cloud-production-db-cutover.yml` and `production-cloud-cutover.yml`;
+- `infra/cloud/scripts/bootstrap-platform.sh` (environment-aware) and `infra/cloud/scripts/bootstrap-production.sh` — the production bootstrap path, alongside the staging-only `bootstrap-staging.sh` this section described;
+- `infra/cloud/observability/health-probe/fly.production.overlay.toml` — sets `app = 'sindustries-health-probe-production'` with the tightened cadence (`FLY_APP_PROBE_INTERVAL_SECONDS = '120'`, `DB_PROBE_INTERVAL_SECONDS = '3600'`), where the staging `fly.toml` still carries the daily `86400` values this section described.
+
+Verified live 2026-11-23: `dig +short @1.1.1.1 <host> CNAME` returns `sindustries-platform-production.fly.dev` for `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz` and `content-scheduler-api.sindustries.co.nz`, and `sindustries-health-probe-production.fly.dev` for `health-probe.sindustries.co.nz`; all four answer HTTP 200 (`/health` on the three API surfaces, `/healthz` on the probe).
 
 The product-spec requirement to populate **every** production runtime value means the current staging provisioner cannot simply be called with different environment variables: it also must preserve non-colliding service secrets, derive production schemas safely, and prove that no staging URL or placeholder was copied into production.
 
@@ -201,6 +214,8 @@ Expected files:
 
 ### Slice D — live provisioning and operator evidence
 
+**Superseded (2026-11-17 production provisioning shipped — PR #979; verified live 2026-11-23).** These operator steps were executed: the production environment they describe exists, and its evidence was captured on the task (`fb1240c0`) and in `docs/cloud/production-blockers.md`. The list is kept as the record of how the production destination was created, not as an instruction to run it again — re-running step 3 or step 8 would target a Fly app and DNS records that already exist.
+
 After the repository contract is approved, the operator executes the production setup in this order:
 
 1. Create a dedicated Neon production project/branch and service roles.
@@ -321,7 +336,7 @@ The production deploy workflow itself is the final integration test. It must not
 This task provisions a new destination; it does not move traffic. Therefore rollback is primarily “do not expose or stop using the new destination”:
 
 1. Before DNS/public exposure, failure means leave the production app stopped/unexposed and correct the contract before retrying.
-2. After API DNS records are created but before traffic cutover, remove only the three records created by this task. Staging/dev records are not touched.
+2. After API DNS records are created but before traffic cutover, remove only the three records created by this task. Staging/dev records are not touched. **Superseded (2026-11-17 production provisioning shipped — PR #979; verified live 2026-11-23):** the three production API DNS records were created and are live — `tasks-api.sindustries.co.nz`, `budget-api.sindustries.co.nz` and `content-scheduler-api.sindustries.co.nz` all CNAME at `sindustries-platform-production.fly.dev` and answer HTTP 200 on `/health` — so this step is no longer available as a rollback and must not be executed against the live zone. The production route cutover itself is still open under task `020f423e`; the live rollback path for the production platform app is app-wide (`fly releases rollback --app sindustries-platform-production`, recorded in `docs/systems/cloud-platform.md`).
 3. Never destroy the production app, Neon branch, or role configuration automatically. Preserve them for diagnosis and the successor task.
 4. Migrations are forward-only and run against an empty production branch. If they fail, fix the branch/schema before retrying; do not delete evidence.
 5. The production spend bound stays in place even if deployment fails.
