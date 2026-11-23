@@ -571,12 +571,19 @@ Base path: `/api/v1`
 | Consumer | Base URL | Use |
 |---|---|---|
 | `apps/tasks` (frontend) | `http://localhost:4000/api/v1` (dev) | Human task management UI |
-| `agents/skills/ops/tasks-api/tasks_api_client.py` | `http://localhost:4001/api/v1` | Agent automation (Quinn heartbeat, Rowan workflow, feature factory) |
-| `agents/workflows/feature-task/run.py` | `http://localhost:4001/api/v1` | Feature factory lobster orchestration |
-| `agents/workflows/code-task/run.py` | `http://localhost:4001/api/v1` | Code-task lobster orchestration |
-| `agents/workflows/content-tasks/run.py` | `http://localhost:4001/api/v1` | Content task lobster orchestration |
+| `agents/skills/ops/tasks-api/tasks_api_client.py` | `TASKS_API_BASE_URL` (required) | Agent automation (Quinn heartbeat, Rowan workflow, feature factory) |
+| `agents/workflows/feature-task/run.py` | `TASKS_API_BASE_URL` (prodlike is the fallback) | Feature factory lobster orchestration |
+| `agents/workflows/feature-task/code-task.lobster.yaml` | `TASKS_API_BASE_URL` | Code-task lobster orchestration |
+| `agents/workflows/content-tasks/run.py` | `TASKS_API_BASE_URL` (via the shared client) | Content task lobster orchestration |
 
-Agent tooling always targets **prodlike** (`4001`). The dev stack (`4000`) is for Rowan's implementation work only.
+Agent tooling targets the **live route** in `TASKS_API_BASE_URL`, which is owned by `~/.openclaw/.env`. Since the 2026-11-23 production cutover that route is `https://tasks-api.sindustries.co.nz/api/v1`. `http://localhost:4001/api/v1` is the **prodlike local-dev fallback only** — it is what a caller gets when the runtime environment carries no route. The dev stack (`4000`) is for Rowan's implementation work only.
+
+Two mechanisms keep that true, and both are mechanical:
+
+- `agents/skills/ops/tasks-api/tasks_api_client.py` **requires** `TASKS_API_BASE_URL` and exits rather than silently falling back to prodlike.
+- `node tests/cloud/scripts/check-agent-caller-routes.mjs` fails CI when a caller hard-assigns a prodlike origin, curls one, or pairs a request method with a prodlike URL. It allows the origin as the *default* of a route variable, and allows prose that merely mentions one. It scans `agents/crons`, `agents/definitions`, `agents/skills` and `agents/workflows` — the trees an agent or a cron actually executes.
+
+Note the boundary: that gate checks for a caller **pinning** an origin, not for a document **claiming** one. A doc that says agent tooling targets prodlike passes CI while sending the next reader to the wrong stack.
 
 ### Runbook
 
