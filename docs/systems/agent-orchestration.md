@@ -209,7 +209,7 @@ stateDiagram-v2
 
 **Key files**
 - API client: `agents/skills/ops/tasks-api/tasks_api_client.py`
-- Prodlike API: `http://localhost:4001/api/v1`
+- Tasks API: `TASKS_API_BASE_URL` — the live route, owned by `~/.openclaw/.env`. Since the 2026-11-23 production cutover this is `https://tasks-api.sindustries.co.nz/api/v1`; `http://localhost:4001/api/v1` (prodlike) is the local-dev fallback only.
 
 ---
 
