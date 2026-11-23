@@ -40,6 +40,10 @@ Required:
   --dest-tasks-dsn-file <path>       Destination tasks_api DSN file.
   --dest-content-scheduler-dsn-file <path>      Destination content_scheduler DSN file.
   --dest-owner-dsn-file <path>   Optional. Destination SCHEMA-OWNER DSN file.
+                                 Forwarded to cleanup-destination.sh as
+                                 --dest-owner-dsn-file and to restore.sh as
+                                 --destination-owner-dsn-file, which is the
+                                 name restore.sh accepts.
                                  The production schemas are owned by the
                                  database owner role (neondb_owner), so the
                                  destructive DDL (DROP SCHEMA) and the
@@ -134,9 +138,28 @@ cloud_db_assert_production_ack
 # scripts that run DDL against the destination. The recovery target is
 # NOT included: its DSNs are already owner DSNs for that separate
 # temporary database, so the connecting role owns its schemas there.
+#
+# The two destination scripts spell this option DIFFERENTLY, and the
+# difference is load-bearing:
+#
+#   cleanup-destination.sh   --dest-owner-dsn-file
+#   restore.sh                --destination-owner-dsn-file
+#
+# They are not interchangeable. drill.sh used to build ONE array and
+# forward it to both, so the cleanup-destination.sh spelling reached
+# restore.sh, which hard-refuses an unknown argument. The drill
+# therefore died AT THE RESTORE STEP -- after cleanup-destination.sh
+# had already dropped both destination schemas. The destination was
+# left empty with no restore, which is exactly the state the drill
+# exists to prevent.
+#
+# Each array below is named for the script that consumes it, so the
+# spelling can never be forwarded to the wrong script again.
 DEST_OWNER_FLAGS=()
+RESTORE_OWNER_FLAGS=()
 if [[ -n "$DEST_OWNER_FILE" ]]; then
   DEST_OWNER_FLAGS=(--dest-owner-dsn-file "$DEST_OWNER_FILE")
+  RESTORE_OWNER_FLAGS=(--destination-owner-dsn-file "$DEST_OWNER_FILE")
 fi
 
 # Every sub-script receives the same environment label and the same
@@ -280,7 +303,7 @@ RESTORE_OUT="$(
     --source-dsn-file "$SRC_TASKS_FILE" \
     --destination-dsn-file "$DEST_TASKS_FILE" \
     --destination-content-scheduler-dsn-file "$DEST_CONTENT_SCHEDULER_FILE" \
-    "${DEST_OWNER_FLAGS[@]}" \
+    "${RESTORE_OWNER_FLAGS[@]}" \
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
     --result-dir "$ARCHIVE_DIR" \

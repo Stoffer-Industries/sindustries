@@ -1540,6 +1540,20 @@ jobs:
       - name: Run cloud database owner-DDL contract test
         run: bash scripts/cloud/database/tests/owner-ddl.test.sh
 
+      # Task 020f423e: drill.sh orchestrates the production cutover -- it drops
+      # the destination schemas with cleanup-destination.sh and then restores
+      # the archive with restore.sh. The two scripts spell the schema-owner
+      # option differently (--dest-owner-dsn-file vs
+      # --destination-owner-dsn-file), and drill.sh once forwarded the cleanup
+      # spelling to restore.sh, which hard-refuses an unknown argument. The
+      # drill then died AT THE RESTORE STEP, after cleanup-destination.sh had
+      # already dropped both destination schemas, so the destination was left
+      # empty with no restore. This test pins that each script is handed its
+      # own spelling, that the owner DSN still reaches restore.sh, and that
+      # the two spellings can never be mixed up again.
+      - name: Run cloud database restore flag-contract test
+        run: bash scripts/cloud/database/tests/restore-flag-contract.test.sh
+
       # Task f2c23e26: the cutover workflow DERIVES the accepted shared
       # access from the environment manifest rather than restating it, and
       # this test pins that bridge: the exported pair is the declared
