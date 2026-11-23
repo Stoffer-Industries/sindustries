@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: bd755ad4-314e-410d-84ec-0083178a7ea2
 product_spec: n/a (security task from repo-audit-2026-W36, tag `repo-audit-2026-w36`)
-shipped_pr: null
-shipped_date: null
+shipped_pr: "555, 557"
+shipped_date: 2026-09-02
 ---
 
 # Content-scheduler-api: authenticate mutations with service credentials
@@ -19,6 +19,7 @@ shipped_date: null
 - Sibling pattern: `docs/specs/tasks-api-mutations-auth-tech-design.md` (task `0719a8e3`) — same shape, same "browser session OR service credential" primitive, applied to tasks-api mutations
 - Sibling pattern: PR #316 (budget-api sessions middleware, task `ec42d3a1`), PR #341 (budget-api encrypted tokens, task `f1175b18`) — already adopted for budget-api; this task ports the pattern to content-scheduler-api
 - Follow-up (cloud auth): task `206927ed-d851-47af-8864-0056487e0c4e` — "Define and secure production runtime configuration" — the seam is the middleware boundary; the credential-verification implementation can be swapped without touching route handlers
+- Shipped: PR #555 (this tech design) and PR #557 (wiring `requireAuthenticatedUser` onto the user-facing write routes, with the write-method scoping fix folded in), merged 2026-09-02. The middleware is live in `services/content-scheduler-api/src/app.ts` (`methodGate(WRITE_METHODS, requireAuthenticatedUser)` on the user-facing mutations, with the service-to-service routes left on the shared-secret path). The task record `bd755ad4` no longer resolves in the Tasks API — `GET /tasks/bd755ad4-314e-410d-84ec-0083178a7ea2` returns 404 and the task is not listable — so the delivery evidence here is the merged PRs and the live wiring rather than a task-side approval record.
 
 ## Problem statement
 
