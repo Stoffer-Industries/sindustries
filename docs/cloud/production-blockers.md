@@ -453,6 +453,7 @@ bundle against the production values.
 | `deploy-staging-tasks-api.yml` | Retired at the 2026-11-07 consolidation — `workflow_call`-only, no caller, Fly app destroyed; retained pending the §5 cleanup | Rowan |
 | `deploy-staging-budget-api.yml` | Retired at the 2026-11-07 consolidation — `workflow_call`-only, no caller, Fly app destroyed; retained pending the §5 cleanup | Rowan |
 | `deploy-staging-content-scheduler-api.yml` | Retired at the 2026-11-07 consolidation — `workflow_call`-only, no caller, Fly app destroyed; retained pending the §5 cleanup | Rowan |
+| deploy-staging-auto-post-worker.yml | Retired at the 2026-11-07 consolidation — `workflow_call`-only, no caller, Fly app destroyed; retained pending the §5 cleanup | Rowan |
 | `deploy-production-platform.yml` | Merged (PR #979, 2026-11-17) — one consolidated production app, not one app per service | Rowan |
 | `deploy-production-health-probe.yml` | Merged (PR #979, 2026-11-17) — the probe keeps its own app and its own gate | Rowan |
 | `deploy-production-vercel-frontends.yml` | Live production deploy surface — the manually dispatched Vercel frontend deploy for Mission Control and the Tasks app (PR #1017, 2026-11-18); one surface per dispatch | Rowan |
