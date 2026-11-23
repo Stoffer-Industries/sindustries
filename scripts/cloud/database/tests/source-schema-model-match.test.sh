@@ -270,9 +270,32 @@ fi
 # ---------------------------------------------------------------------------
 # Case 5: the drill runs the gate BEFORE the destructive cleanup
 # ---------------------------------------------------------------------------
+#
+# The lookup must find the first EXECUTABLE reference to each script, not
+# the first MENTION of its name. The drill's usage text and its comments
+# are allowed to name either script -- and must, because the two scripts
+# spell the owner-DSN option differently and only a reader who can see
+# both spellings can tell the contract apart. A lookup that took the
+# first mention would read the usage block's prose as if it were the
+# cleanup invocation, and would then report an ordering violation that
+# does not exist. Comments and the usage heredoc are therefore skipped;
+# what remains is executable code, where the first reference to a script
+# is where the drill runs it.
+first_invocation_line() {
+  # first_invocation_line <script-basename> -> line number, or empty
+  awk -v script="$1" '
+    /^[[:space:]]*#/ { next }
+    in_usage {
+      if ($0 ~ /^USAGE[[:space:]]*$/) { in_usage = 0 }
+      next
+    }
+    /<<.*USAGE/ { in_usage = 1; next }
+    index($0, script) { print NR; exit }
+  ' "$DRILL_SH"
+}
 
-gate_line="$(grep -n 'assert-source-schema-matches-model.sh' "$DRILL_SH" | head -1 | cut -d: -f1)"
-cleanup_line="$(grep -n 'cleanup-destination.sh' "$DRILL_SH" | head -1 | cut -d: -f1)"
+gate_line="$(first_invocation_line 'assert-source-schema-matches-model.sh')"
+cleanup_line="$(first_invocation_line 'cleanup-destination.sh')"
 
 if [[ -z "$gate_line" || -z "$cleanup_line" ]]; then
   fail "the drill must invoke both the gate and the destination cleanup"
