@@ -155,7 +155,7 @@ const OPERATOR_REQUIRED_ROWS = [
     owner: 'Quinn (operator)',
     label: 'Production API health responses',
     reason:
-      'The per-surface health routes live in the staging preflight harness, and the production hostnames do not resolve until the DNS step; the operator records the HTTPS responses with the black-box smoke run.',
+      'The per-surface health routes live in the staging preflight harness and this checker does no network I/O, so the operator records the HTTPS responses with the black-box smoke run. The production DNS step has landed (the production records were published 2026-11-16, verified live 2026-11-23), so the production hostnames resolve and present their certificates.',
   },
   {
     gate: 'dns.resolution-and-tls-readback',
