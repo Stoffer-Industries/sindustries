@@ -42,7 +42,16 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _task(*, task_id: str, status: str, task_type, created_at: datetime, title: str = "T", description: str = "") -> dict:
+def _task(
+    *,
+    task_id: str,
+    status: str,
+    task_type,
+    created_at: datetime,
+    title: str = "T",
+    description: str = "",
+    tags: list[str] | None = None,
+) -> dict:
     return {
         "id": task_id,
         "title": title,
@@ -50,6 +59,10 @@ def _task(*, task_id: str, status: str, task_type, created_at: datetime, title: 
         "status": status,
         "taskType": task_type,
         "createdAt": _iso(created_at),
+        "tags": list(tags) if tags is not None else [
+            "source:bookmark-review-pipeline",
+            f"bookmark:{task_id}",
+        ],
     }
 
 
@@ -128,6 +141,58 @@ class SelectStaleUntypedTests(unittest.TestCase):
 
     def test_empty_input(self):
         self.assertEqual(btr.select_stale_untyped([], now=NOW), [])
+
+    def test_excludes_tasks_without_bookmark_origin_tag(self):
+        # The API-side tag filter is an exact match, but a payload that carries
+        # tags and none of the bookmark markers is not a bookmark-origin task.
+        tasks = [
+            _task(
+                task_id="a",
+                status="open",
+                task_type=None,
+                created_at=EIGHT_DAYS_AGO,
+                tags=["topic:brain", "spec-task:xyz"],
+            ),
+        ]
+        self.assertEqual(btr.select_stale_untyped(tasks, now=NOW), [])
+
+    def test_keeps_tasks_tagged_with_bookmark_id_marker(self):
+        tasks = [
+            _task(
+                task_id="a",
+                status="open",
+                task_type=None,
+                created_at=EIGHT_DAYS_AGO,
+                tags=["bookmark:abc123"],
+            ),
+        ]
+        self.assertEqual([t["id"] for t in btr.select_stale_untyped(tasks, now=NOW)], ["a"])
+
+    def test_keeps_tasks_without_any_tag_information(self):
+        # No tags at all → not filtered out (defensive against payload drift).
+        task = _task(task_id="a", status="open", task_type=None, created_at=EIGHT_DAYS_AGO)
+        task["tags"] = []
+        self.assertEqual([t["id"] for t in btr.select_stale_untyped([task], now=NOW)], ["a"])
+
+
+class TagAndProxyDefaultsTests(unittest.TestCase):
+    def test_default_tag_is_the_pipeline_source_tag(self):
+        # `tag=bookmarks` matched nothing — the Tasks API tag filter is an
+        # exact match and the pipeline stamps `source:bookmark-review-pipeline`.
+        self.assertEqual(btr.DEFAULT_TAG, "source:bookmark-review-pipeline")
+
+    def test_direct_opener_does_not_use_environment_proxies(self):
+        with patch.object(
+            btr.urllib.request, "build_opener", wraps=btr.urllib.request.build_opener
+        ) as build_opener:
+            btr._direct_opener()
+        proxy_handlers = [
+            c for c in build_opener.call_args[0]
+            if isinstance(c, btr.urllib.request.ProxyHandler)
+        ]
+        self.assertTrue(proxy_handlers, "expected an explicit ProxyHandler")
+        for handler in proxy_handlers:
+            self.assertEqual(handler.proxies, {})
 
 
 class FormatReportTests(unittest.TestCase):
@@ -401,7 +466,11 @@ class SendTelegramContractTests(unittest.TestCase):
             captured["timeout"] = timeout
             return _FakeResp({"ok": True, "result": {"message_id": 7}})
 
-        with patch.object(btr.urllib.request, "urlopen", side_effect=fake_urlopen):
+        class _FakeOpener:
+            def open(self, req, timeout=20):
+                return fake_urlopen(req, timeout=timeout)
+
+        with patch.object(btr, "_direct_opener", return_value=_FakeOpener()):
             result = btr.send_telegram("hello", chat_id="42", bot_token="abc")
 
         self.assertIn("/botabc/sendMessage", captured["url"])
@@ -419,7 +488,11 @@ class SendTelegramContractTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-        with patch.object(btr.urllib.request, "urlopen", return_value=_FakeResp()):
+        class _FakeOpener:
+            def open(self, req, timeout=20):
+                return _FakeResp()
+
+        with patch.object(btr, "_direct_opener", return_value=_FakeOpener()):
             with self.assertRaises(RuntimeError) as ctx:
                 btr.send_telegram("hello", chat_id="42", bot_token="abc")
         self.assertIn("not-ok", str(ctx.exception))

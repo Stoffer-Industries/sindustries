@@ -7,7 +7,8 @@ visible in a recurring check, so they don't sit unnoticed the way today's
 untyped bookmark tasks do.
 
 This script:
-  1. Queries the Tasks API for tasks tagged `bookmarks` (bookmark-origin).
+  1. Queries the Tasks API for tasks tagged `source:bookmark-review-pipeline`
+     (bookmark-origin).
   2. Filters client-side for `taskType IS NULL` (untyped) AND `status == open`
      AND `createdAt < now - STALE_AFTER_DAYS` days.
   3. If any match, posts a Telegram message via the direct Bot API to a
@@ -19,8 +20,20 @@ script is intentionally standalone so Quinn can wire it without further code
 changes — see `[openclaw-needed]` comment on task 536e04fc.
 
 Design choices:
-  - Tag filter via the API (`tag=bookmarks`) is the canonical "bookmark-origin"
-    marker; the bookmark pipeline tags every task it creates with `bookmarks`.
+  - Tag filter via the API (`tag=source:bookmark-review-pipeline`) is the
+    canonical "bookmark-origin" marker; the bookmark pipeline tags every task
+    it creates with `source:bookmark-review-pipeline` plus a `bookmark:<id>`
+    tag. The Tasks API `tag` filter is an exact match, so the previous
+    `bookmarks` default matched only unrelated feature-factory tasks and the
+    report was silently empty. A client-side origin check backs this up.
+  - Every HTTP call opts out of the ambient proxy environment. The OpenClaw
+    secret egress proxy MITMs TLS with a chain that fails Python's
+    verification ("Missing Authority Key Identifier"), so urllib raises
+    `URLError` on every proxied request. urllib honours HTTP(S)_PROXY
+    unconditionally, so both the Tasks API call and the Telegram delivery use
+    a proxy-free opener — the same fix as
+    `agents/skills/ops/tasks-api/tasks_api_client.py` and
+    `agents/workflows/feature-task/run.py`.
   - `taskType` filter is intentionally absent: the Tasks API rejects `null`
     / empty values for `taskType` (see `services/tasks-api/src/routes/tasks.ts`),
     so we fetch all bookmark-tagged tasks and filter client-side.
@@ -60,9 +73,45 @@ del _sys, _p, _w
 
 DEFAULT_STALE_AFTER_DAYS = 7
 DEFAULT_LIMIT = 100
-DEFAULT_TAG = "bookmarks"
+DEFAULT_TAG = "source:bookmark-review-pipeline"
 DEFAULT_STATUS = "open"
 TELEGRAM_API_BASE = "https://api.telegram.org"
+
+# Tag markers the bookmark pipeline stamps on every task it creates.
+BOOKMARK_SOURCE_TAG = "source:bookmark-review-pipeline"
+BOOKMARK_ID_TAG_PREFIX = "bookmark:"
+
+
+def _direct_opener() -> urllib.request.OpenerDirector:
+    """Opener that bypasses the ambient proxy environment.
+
+    urllib's default opener honours HTTP(S)_PROXY unconditionally. Under the
+    OpenClaw secret egress proxy every call would be tunnelled through the
+    proxy, whose MITM certificate fails Python's chain verification
+    ("Missing Authority Key Identifier"), so both destinations this script
+    needs raise `URLError` and the cron dies with an unhandled traceback.
+    Direct egress works for both. Same fix as
+    `agents/skills/ops/tasks-api/tasks_api_client.py`.
+    """
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _is_bookmark_origin(task: dict) -> bool:
+    """True when a task carries a bookmark-origin tag marker.
+
+    The API-side `tag` filter is an exact match, so it is already scoped to
+    the pipeline. This is the client-side belt-and-braces check: a payload
+    that carries tags but none of the bookmark markers is not a
+    bookmark-origin task and must not show up in a bookmark triage report.
+    A payload with no tag information at all is not filtered out.
+    """
+    tags = task.get("tags") or []
+    if not tags:
+        return True
+    return any(
+        str(t) == BOOKMARK_SOURCE_TAG or str(t).startswith(BOOKMARK_ID_TAG_PREFIX)
+        for t in tags
+    )
 
 
 def _api_base_url() -> str:
@@ -97,7 +146,7 @@ def fetch_bookmark_tasks(
     params = urllib.parse.urlencode({"tag": tag, "status": status, "limit": str(limit)})
     url = f"{base}/tasks?{params}"
     req = urllib.request.Request(url, headers=_auth_headers(), method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _direct_opener().open(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8")
     payload = json.loads(body) if body else {}
     if isinstance(payload, dict) and isinstance(payload.get("data"), list):
@@ -120,6 +169,9 @@ def select_stale_untyped(
     cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=stale_after_days)
     stale: list[dict] = []
     for t in tasks or []:
+        # Origin filter — only bookmark-origin tasks belong in this report.
+        if not _is_bookmark_origin(t):
+            continue
         # Status filter — the API filter narrows the initial fetch, but we
         # re-check defensively in case the caller passes a pre-fetched set.
         if (t.get("status") or "").strip() != "open":
@@ -227,7 +279,7 @@ def send_telegram(message: str, *, chat_id: str, bot_token: str, timeout: float 
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _direct_opener().open(req, timeout=timeout) as resp:
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
@@ -342,6 +394,19 @@ def main(argv: list[str] | None = None) -> int:
         # missing. Re-emit the message and exit non-zero so cron surfaces it.
         print(str(exc), file=sys.stderr)
         return 2
+    except urllib.error.HTTPError as exc:
+        # The Tasks API answered with an error status. Report it as a plain
+        # message rather than a traceback so the cron caller gets something
+        # actionable. Exit 1 = the run failed before it could report.
+        body = exc.read().decode("utf-8", errors="replace").strip() if exc.fp else ""
+        detail = f": {body}" if body else ""
+        print(f"tasks api http {exc.code}{detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        # The Tasks API was unreachable (connection refused, DNS, timeout, TLS
+        # verification failure).
+        print(f"tasks api unreachable: {exc.reason}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(result, indent=2))
     elif args.dry_run:
