@@ -200,15 +200,32 @@ translate them into tasks.
 Take the highest-score entry from the combined Step 0 + Step 3 ranking (skip any entry that lacks a
 `suggested-action` field — those are observation-only).
 
-Build a feature task:
+Build a structured feature task. A raw retro-note body is not a valid feature-task body: the feature-task lobster requires a workspace-relative `**Spec:**` line, unchecked acceptance-criteria checkboxes, and a `**Workstreams**` block before the task can pass `spec_check` / `ready_checks`.
+
+1. Choose a slug from the suggested action and write a spec at `brain/tasks/specs/open/<slug>-YYYY-MM-DD.md`. Include the problem, observable ACs, non-goals, and a Rowan workstream. The spec must exist before the task is created.
+2. Write a temporary workstreams YAML file:
+
+```yaml
+- Owner: Rowan
+  ACs: AC1, AC2, AC3
+  Branch: (pending)
+  PR: (pending)
+```
+
+3. Create the task with the client flags that compose the required structure:
 
 ```bash
   python3 agents/skills/ops/tasks-api/tasks_api_client.py create \
     --title "<suggested-action, one line, title-case, max 80 chars>" \
-    --description "<observation + count + evidence links + pattern-slug>" \
-    --taskType feature \
+    --spec "brain/tasks/specs/open/<slug>-YYYY-MM-DD.md" \
+    --workstreams /tmp/factory-retro-workstreams.yaml \
+    --description "<observation + count + root cause + evidence + pattern-slug>" \
+    --type feature \
     --priority medium
 ```
+
+4. Read the created task back and fail closed if its description does not contain the exact `**Spec:**` line, at least one `- [ ] AC` checkbox, and `**Workstreams**` with `Branch:` and `PR:` placeholders. Never leave a malformed auto-created task for the lobster to discover later.
+
 
 Notes on what gets passed in:
 - **Title**: the pattern's `suggested-action` (one line, title-case). Truncate at 80 chars.
@@ -216,7 +233,7 @@ Notes on what gets passed in:
   **root cause** line (quality vs capacity, per Step 4 — not just the symptom restated), the
   evidence links (task IDs / PR numbers / file paths), and the original `pattern-slug` in a
   callout. Tom approves via brain spec per the normal feature-task flow.
-- **taskType**: `feature` — so it lands in the brain-spec approval queue, not the ops queue.
+- **type**: `feature` — so it lands in the brain-spec approval queue, not the ops queue.
 - **priority**: `medium` by default. Promote to `high` only if the top pattern's `bad` tag comes
   with `severity: high` or equivalent in the retro-notes row.
 - **assignee**: leave unset — Tom picks during brain-spec approval.
