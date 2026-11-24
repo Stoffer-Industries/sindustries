@@ -11,7 +11,7 @@ describe('approval browser sessions', () => {
     db.approvalSession.create.mockResolvedValue({});
     const res = await request(createApp()).post('/api/v1/auth/session').send({ username: 'tom', password: 'correct horse' });
     expect(res.status).toBe(201); expect(res.body.data.actor).toBe('Tom');
-    expect(res.headers['set-cookie'][0]).toMatch(/tasks_api_session=.*HttpOnly.*SameSite=Lax/);
+    expect(res.headers['set-cookie'][0]).toMatch(/tasks_api_session=.*Domain=\.example\.test.*HttpOnly.*SameSite=Lax/);
     const data = db.approvalSession.create.mock.calls[0][0].data;
     expect(data.tokenHash).toMatch(/^[0-9a-f]{64}$/); expect(data).not.toHaveProperty('token');
   });

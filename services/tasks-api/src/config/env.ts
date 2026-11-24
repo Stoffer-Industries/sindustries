@@ -70,6 +70,10 @@ const schema = z.object({
   TASKS_API_APPROVAL_USERS: jsonStringSchema('TASKS_API_APPROVAL_USERS'),
   TASKS_API_APPROVAL_SERVICE_CREDENTIALS: jsonStringSchema('TASKS_API_APPROVAL_SERVICE_CREDENTIALS'),
   TASKS_API_APPROVAL_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(28800),
+  // Set to the environment's shared parent domain so the browser session
+  // issued by tasks-api is also sent to content-scheduler-api. Leave empty
+  // for local development, where localhost is intentionally host-scoped.
+  TASKS_API_APPROVAL_SESSION_COOKIE_DOMAIN: z.string().default(''),
 
   // Content Scheduler — X (Twitter) publishing.
   X_CLIENT: z.enum(['fake', 'real']).default('fake'),

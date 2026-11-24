@@ -31,7 +31,8 @@ function maxAgeMs() {
 }
 function cookieOptions(req) {
   const secure = config.NODE_ENV === 'production' || req.secure;
-  return { httpOnly: true, secure, sameSite: 'lax' as const, path: '/', maxAge: maxAgeMs() };
+  const domain = config.TASKS_API_APPROVAL_SESSION_COOKIE_DOMAIN || undefined;
+  return { httpOnly: true, secure, sameSite: 'lax' as const, path: '/', maxAge: maxAgeMs(), ...(domain ? { domain } : {}) };
 }
 function rawCookie(req): string | null {
   for (const part of (req.headers.cookie ?? '').split(';')) {
