@@ -29,6 +29,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  CREDENTIAL_SOURCE_NAMES,
   PLATFORM_APP,
   SOURCE_NAMES,
   main,
@@ -52,8 +53,8 @@ function stagingEnv(overrides = {}) {
     [SOURCE_NAMES.tasksDatabaseUrl]: TASKS_DSN,
     [SOURCE_NAMES.budgetDatabaseUrl]: BUDGET_DSN,
     [SOURCE_NAMES.redisUrl]: `content-scheduler=${REDIS_URL}`,
-    [SOURCE_NAMES.tasksApprovalToken]: TASKS_TOKEN,
-    [SOURCE_NAMES.schedulerApprovalToken]: SCHEDULER_TOKEN,
+    [CREDENTIAL_SOURCE_NAMES.tasks.platformToken]: TASKS_TOKEN,
+    [CREDENTIAL_SOURCE_NAMES.contentScheduler.platformToken]: SCHEDULER_TOKEN,
     ...overrides,
   };
 }

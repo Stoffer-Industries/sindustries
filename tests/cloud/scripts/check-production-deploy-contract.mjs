@@ -210,6 +210,7 @@ async function loadManifest() {
     return {
       environment,
       requiredSourceNames: environments.requiredSourceNames(environment),
+      allSourceNames: environments.allSourceNames(environment),
       deployGateVariable: facts.buildEnvironmentFacts('production').deployGateVariable,
       provisionGateVariable: facts.buildEnvironmentFacts('production').provisionGateVariable,
       healthProbeDeployGateVariable:
@@ -693,7 +694,15 @@ function checkPlatformWorkflow(manifest, matrix) {
   // workflow must not carry a source name the manifest does not know.
   // The names are read from the steps' `env:` blocks: a source name
   // mentioned only in a COMMENT is not a source the workflow carries.
-  const sourceNames = Object.values(manifest.environment.sourceNames);
+  //
+  // `allSourceNames` — not `sourceNames` — is the set here, because the
+  // approval-credential sources live in the manifest's
+  // `approvalCredentials` contract (task 3c004590). Reading only
+  // `sourceNames` would let the workflow drop the operator credential
+  // array without the check noticing, which is the exact regression the
+  // contract exists to catch: the deploy would then register a
+  // one-actor credential set and wipe every agent registration.
+  const sourceNames = manifest.allSourceNames;
   const steps = readSteps(text);
   const declaredNames = new Set(steps.flatMap((step) => stepEnvNames(step.text)));
   for (const name of sourceNames) {
@@ -801,6 +810,111 @@ function checkPlatformWorkflow(manifest, matrix) {
   checkNoSecretLogging(text, PLATFORM_WORKFLOW_PATH, sourceNames);
   checkProvisionGateOrdering(text, PLATFORM_WORKFLOW_PATH, manifest.provisionGateVariable);
   checkFlyOrgRequired(text, PLATFORM_WORKFLOW_PATH, manifest.environment.flyOrgVariable);
+  checkApprovalCredentialContract(manifest, steps);
+}
+
+/**
+ * The approval-credential contract must reach the production workflow.
+ *
+ * Three things have to hold, and each of them is a regression this
+ * check exists to catch (task 3c004590):
+ *
+ *   1. The manifest REQUIRES the operator credential array. A contract
+ *      whose operator source is optional would let the provisioner
+ *      register a credential set with no agent writers — the silent
+ *      wipe, one layer down.
+ *   2. The workflow provides the operator array as a GitHub Environment
+ *      SECRET, bound to the source name the manifest names. A workflow
+ *      that passed a single token where the array belongs would restore
+ *      exactly the replacement behaviour the task removes.
+ *   3. The live verifier runs AFTER the canary deploy. Before the
+ *      deploy the identity endpoint does not exist yet, so a verifier
+ *      placed earlier would either fail the deploy or — worse — be
+ *      skipped by a gate that never reaches it.
+ *
+ * @param {object} manifest
+ * @param {{name: string, text: string}[]} steps
+ */
+function checkApprovalCredentialContract(manifest, steps) {
+  if (!manifest) return;
+  const contracts = manifest.environment.approvalCredentials ?? {};
+  const required = new Set(manifest.requiredSourceNames ?? []);
+
+  for (const [service, contract] of Object.entries(contracts)) {
+    if (contract.operatorCredentialsRequired !== false) {
+      if (!required.has(contract.operatorCredentialsSource)) {
+        fail(
+          `the production manifest does not require the ${service} operator credential source ` +
+            `"${contract.operatorCredentialsSource}" — a deploy could then register a credential ` +
+            'set with no agent writers',
+        );
+      }
+    }
+
+    // The operator array must arrive as the Environment secret the
+    // manifest names, not as a single token under another name.
+    const bound = new RegExp(
+      `${contract.operatorCredentialsSource}:\\s*\\$\\{\\{\\s*secrets\\.${contract.operatorCredentialsSource}\\s*\\}\\}`,
+    );
+    if (!bound.test(steps.map((step) => step.text).join('\n'))) {
+      fail(
+        `${PLATFORM_WORKFLOW_PATH}: does not provide the ${service} operator credential array ` +
+          `"${contract.operatorCredentialsSource}" as the GitHub Environment secret of the same name`,
+      );
+    }
+
+    if (!Array.isArray(contract.operatorActors) || contract.operatorActors.length === 0) {
+      fail(
+        `the production manifest declares no operator actors for ${service}, so a deploy would ` +
+          'register a credential set with no agent writers',
+      );
+    }
+  }
+
+  // The live verifier, and its position.
+  const verifierIndex = steps.findIndex((step) =>
+    step.text.includes('verify-platform-approval-credentials.mjs'),
+  );
+  if (verifierIndex === -1) {
+    fail(
+      `${PLATFORM_WORKFLOW_PATH}: does not run the live approval-credential verifier ` +
+        '(infra/cloud/platform/verify-platform-approval-credentials.mjs). Fly exposes secret ' +
+        'digests, not values, so without this step nothing proves that the credentials the ' +
+        'deploy registered still authenticate as their intended actors.',
+    );
+    return;
+  }
+  const deployIndex = steps.findIndex((step) => step.text.includes('flyctl deploy'));
+  if (deployIndex === -1) {
+    fail(`${PLATFORM_WORKFLOW_PATH}: does not contain a canary deploy step`);
+    return;
+  }
+  if (verifierIndex < deployIndex) {
+    fail(
+      `${PLATFORM_WORKFLOW_PATH}: runs the approval-credential verifier BEFORE the canary deploy. ` +
+        'The identity endpoint only exists once the new code is serving, so the verifier must ' +
+        'run after the deploy.',
+    );
+  }
+  if (!steps[verifierIndex].text.includes('--environment production')) {
+    fail(
+      `${PLATFORM_WORKFLOW_PATH}: the approval-credential verifier does not target the ` +
+        'production environment (--environment production)',
+    );
+  }
+  for (const [service, contract] of Object.entries(contracts)) {
+    for (const source of [
+      contract.platformTokenSource,
+      contract.operatorCredentialsSource,
+    ]) {
+      if (!stepEnvNames(steps[verifierIndex].text).includes(source)) {
+        fail(
+          `${PLATFORM_WORKFLOW_PATH}: the approval-credential verifier does not receive the ` +
+            `${service} credential source "${source}", so it cannot verify those credentials`,
+        );
+      }
+    }
+  }
 }
 
 function checkProbeWorkflow(manifest, matrix) {

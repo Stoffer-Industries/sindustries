@@ -68,7 +68,11 @@ case "$1 $2" in
     done
     printf 'INVOKED: %s\n' "${names[*]}" >>"$FLY_LOG"
     for arg in "$@"; do
-      if [[ "$arg" == 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS=[{"token":"stub-tasks-token==","actor":"production-cloud-validate","approvalTypes":[]}]' ]]; then
+      # The VALUE has to survive byte-for-byte. The credential set is a
+      # MERGE of the platform actor and the operator actors, so this
+      # matches the platform token inside the array rather than the whole
+      # array: the assertion is about the env parser, not about the set.
+      if [[ "$arg" == TASKS_API_APPROVAL_SERVICE_CREDENTIALS=*'"token":"stub-tasks-token=="'* ]]; then
         : >"$FLY_TRAILING_EQUALS_PRESERVED"
       fi
       case "$arg" in
@@ -108,6 +112,32 @@ chmod +x "$TMP/bin/flyctl"
 # The values must NOT look like staging, dev or localhost: the production
 # separation guard refuses those, and this file exercises the happy path.
 
+# The operator credential array a service requires.
+#
+# It is DERIVED from the environment manifest rather than written out here:
+# the provisioner refuses an array that misses a declared actor, carries an
+# undeclared one, or widens an approval grant, so a hand-written copy of the
+# actor set would drift the moment the manifest changes. The declared actor
+# set is the manifest's; this file only supplies a distinct stub token per
+# actor, because one token shared by two actors is refused too.
+operator_array() {
+  local service="$1"
+  node "$FACTS_CLI" --environment production --field "approvalCredentials.${service}.operatorActors" \
+    | python3 -c '
+import json, sys
+actors = json.load(sys.stdin)
+entries = [
+    {
+        "token": "stub-operator-%s-token" % actor["actor"],
+        "actor": actor["actor"],
+        "approvalTypes": actor["approvalTypes"],
+    }
+    for actor in actors
+]
+print(json.dumps(entries, separators=(",", ":")))
+'
+}
+
 write_env() {
   local out="$1" tasks_url="${2:-postgres://stub:***@db.example-neon.tech:5432/prod}"
   cat >"$out" <<ENV
@@ -117,6 +147,8 @@ AUTO_POST_WORKER_DATABASE_URL=$tasks_url
 HEALTH_PROBE_REDIS=rediss://:stub@prod-example.upstash.io:6379
 TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-tasks-token
 CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-scheduler-token
+TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS=$(operator_array tasks)
+CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS=$(operator_array contentScheduler)
 ENV
 }
 
@@ -292,9 +324,13 @@ if [[ ! -f "$EXAMPLE" ]]; then
   echo "FAIL: case=example — $EXAMPLE is missing — the production source contract must be published" >&2
   exit 1
 fi
-python3 - "$EXAMPLE" "$TMP/.env.production.example" <<'PY'
+TASKS_OPERATOR_ARRAY="$(operator_array tasks)"
+SCHEDULER_OPERATOR_ARRAY="$(operator_array contentScheduler)"
+python3 - "$EXAMPLE" "$TMP/.env.production.example" \
+  "$TASKS_OPERATOR_ARRAY" "$SCHEDULER_OPERATOR_ARRAY" <<'PY'
 import re, sys
 src, dst = sys.argv[1], sys.argv[2]
+tasks_operators, scheduler_operators = sys.argv[3], sys.argv[4]
 out = []
 for line in open(src):
     m = re.match(r'^([A-Z0-9_]+)=\s*$', line.rstrip('\n'))
@@ -304,8 +340,16 @@ for line in open(src):
             value = 'postgres://stub:***@db.example-neon.tech:5432/prod'
         elif key.endswith('_REDIS'):
             value = 'rediss://:stub@prod-example.upstash.io:6379'
+        elif key == 'TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS':
+            value = tasks_operators
+        elif key == 'CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS':
+            value = scheduler_operators
         else:
-            value = 'stub-token'
+            # The services refuse a credential token shorter than 16
+            # characters at boot and the provisioner refuses to register
+            # one, so a short stub fails the payload validation BEFORE
+            # the script reaches the secrets step.
+            value = 'stub-approval-token-value'
         out.append(f'{key}={value}\n')
         continue
     if re.match(r'^#\s*FLY_APP_ORG=', line):

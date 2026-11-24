@@ -11,6 +11,7 @@ import { approvalSessionsRouter } from './routes/approvalSessions.ts';
 import { requiredApprovalsRouter } from './routes/requiredApprovals';
 import { tagsRouter } from './routes/tags';
 import { featureTaskAnalyticsRouter } from './routes/featureTaskAnalytics.ts';
+import { sendError } from './lib/http.ts';
 
 // Content Scheduler was extracted into its own backend service as part of
 // task 94d5e4fc (PR #2 in the series). The route mounts, adapter
@@ -108,6 +109,38 @@ export function createApp() {
       service: 'tasks-api',
       version: process.env.GIT_COMMIT_SHA ?? null
     });
+  });
+
+  // Runtime identity probe (task 3c004590). A non-mutating endpoint that
+  // lets a deployment prove that every registered service credential still
+  // authenticates as its intended actor.
+  //
+  // `requireAuthenticatedUser` is listed explicitly in the route chain
+  // rather than inherited from one of the method-scoped gates above. The
+  // task/tag/analytics surfaces keep their GETs public by design, so this
+  // route must NOT be swept into that rule — it always requires a
+  // credential. Registration happens before the routers are mounted so no
+  // later router can shadow the path.
+  //
+  // The response carries ONLY the caller's own identity: the actor name
+  // and the middleware's own `kind` discriminator ('service' for a Bearer
+  // service credential, 'browser_session' for a cookie session). It never
+  // returns token material, the configured credential list, other actors'
+  // names, approval types, or digests/hashes.
+  app.get('/api/v1/auth/principal', requireAuthenticatedUser, (req, res) => {
+    const user = req.user;
+    if (!user) {
+      // Defensive only: `requireAuthenticatedUser` always sets req.user on
+      // success and answers 401 AUTH_REQUIRED otherwise. Kept on the same
+      // uniform error body so the two failure paths cannot diverge.
+      return sendError(
+        res,
+        401,
+        'AUTH_REQUIRED',
+        'A valid session or service credential is required'
+      );
+    }
+    return res.status(200).json({ actor: user.actor, kind: user.kind });
   });
 
   app.use('/api/v1', healthRouter);

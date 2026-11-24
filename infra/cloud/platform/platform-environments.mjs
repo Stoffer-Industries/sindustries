@@ -56,6 +56,11 @@
  *   node --test infra/cloud/platform/tests/platform-environments.test.mjs
  */
 
+import {
+  TASKS_APPROVAL_TYPES,
+  assertApprovalCredentialContract,
+} from './platform-approval-credentials.mjs';
+
 /** The environments the consolidated platform can be provisioned for. */
 export const PLATFORM_ENVIRONMENTS = {
   staging: {
@@ -96,8 +101,6 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetDatabaseUrl: 'STAGING_BUDGET_API_DATABASE_URL',
       contentSchedulerDatabaseUrl: 'STAGING_CONTENT_SCHEDULER_API_DATABASE_URL',
       redisUrl: 'HEALTH_PROBE_REDIS',
-      tasksApprovalToken: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
-      schedulerApprovalToken: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
     },
     /** The public API base URLs of this environment. */
     apiBaseUrls: {
@@ -124,10 +127,74 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetApi: ['https://mission-control.staging.sindustries.co.nz'],
       contentSchedulerApi: ['https://mission-control.staging.sindustries.co.nz'],
     },
-    /** The actors the approval-service credentials act as. */
-    approvalActors: {
-      tasks: 'staging-cloud-validate',
-      contentScheduler: 'staging-cloud-validate',
+    /**
+     * The approval-credential contract for this environment.
+     *
+     * ONE contract owns every approval-credential fact for a service:
+     * the Fly secret the credential array is registered under, the
+     * GitHub Environment sources the values come from, the platform's
+     * own validation actor, and the exact operator actor set with the
+     * approval types each actor may carry.
+     *
+     * The provisioner MERGES the platform actor with the operator set.
+     * It used to REPLACE the live secret with a one-actor array, and
+     * because the platform deploy workflow runs on every merge to
+     * `main`, every routine merge silently wiped the agent
+     * registrations and every agent write on production then failed with
+     * `401 AUTH_REQUIRED` (task 3c004590).
+     *
+     * The operator set is deliberately SERVICE-SPECIFIC: registering the
+     * Tasks actor set on the Content Scheduler would widen production
+     * write access to callers that never write there. The set is
+     * recorded here so drift is detectable, and the operator credential
+     * array in the GitHub Environment must match it exactly — a missing
+     * actor, an unknown actor or a widened approval scope fails the
+     * deploy BEFORE anything is written to Fly.
+     */
+    approvalCredentials: {
+      tasks: {
+        /** The Fly app-level secret the merged array is registered under. */
+        targetSecret: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
+        /** The key of this service's base URL in `apiBaseUrls`. */
+        apiBaseUrlKey: 'tasksApi',
+        /** The source that carries the platform validation actor's token. */
+        platformTokenSource: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
+        /**
+         * The source that carries the COMPLETE operator credential array
+         * (`[{token, actor, approvalTypes}]`).
+         */
+        operatorCredentialsSource: 'TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS',
+        /** The actor the platform's own validation token acts as. */
+        platformActor: 'staging-cloud-validate',
+        /**
+         * Staging has NO agent writers today: its live credential set
+         * carries the platform validation actor alone, and the agent
+         * tooling writes to prodlike and production rather than to
+         * staging. The operator source is therefore NOT required here,
+         * and the operator set is empty.
+         *
+         * The shape is the same one production uses — same helper, same
+         * contract fields, same code path — so bringing staging to
+         * parity is ONE reviewed change: declare the actors here and
+         * register the array in the staging GitHub Environment.
+         */
+        operatorCredentialsRequired: false,
+        platformApprovalTypes: [],
+        /** The operator actors that must be present, in registration order. */
+        operatorActors: [],
+      },
+      contentScheduler: {
+        targetSecret: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
+        apiBaseUrlKey: 'contentSchedulerApi',
+        platformTokenSource: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
+        operatorCredentialsSource:
+          'CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS',
+        platformActor: 'staging-cloud-validate',
+        platformApprovalTypes: ['any'],
+        /** Staging has no agent writers — see the tasks contract above. */
+        operatorCredentialsRequired: false,
+        operatorActors: [],
+      },
     },
     /**
      * Value markers that must never appear in a secret value registered on
@@ -150,8 +217,6 @@ export const PLATFORM_ENVIRONMENTS = {
       'tasksDatabaseUrl',
       'budgetDatabaseUrl',
       'redisUrl',
-      'tasksApprovalToken',
-      'schedulerApprovalToken',
     ],
   },
 
@@ -247,9 +312,6 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetDatabaseUrl: 'PRODUCTION_BUDGET_API_DATABASE_URL',
       contentSchedulerDatabaseUrl: 'PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL',
       redisUrl: 'PRODUCTION_HEALTH_PROBE_REDIS',
-      tasksApprovalToken: 'PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
-      schedulerApprovalToken:
-        'PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
     },
     apiBaseUrls: {
       tasksApi: 'https://tasks-api.sindustries.co.nz/api/v1',
@@ -270,9 +332,82 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetApi: ['https://mission-control.sindustries.co.nz'],
       contentSchedulerApi: ['https://mission-control.sindustries.co.nz'],
     },
-    approvalActors: {
-      tasks: 'production-cloud-validate',
-      contentScheduler: 'production-cloud-validate',
+    /**
+     * The approval-credential contract for this environment.
+     *
+     * The production actor set is the one that was measured on
+     * 2026-11-24: production's Tasks API originally carried ONLY the
+     * platform's `production-cloud-validate` actor, which is why every
+     * agent token got a clean `401 AUTH_REQUIRED` on writes while reads
+     * kept working. The nine operator actors below are the set that was
+     * verified working live, and they are recorded HERE so the merge has
+     * an authoritative target and so drift is detectable.
+     *
+     * The set is service-specific: the Content Scheduler carries only
+     * the two actors that actually write to it. Registering the Tasks
+     * actor set there would widen production write access to callers
+     * that never write there.
+     */
+    approvalCredentials: {
+      tasks: {
+        /** The Fly app-level secret the merged array is registered under. */
+        targetSecret: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
+        /** The key of this service's base URL in `apiBaseUrls`. */
+        apiBaseUrlKey: 'tasksApi',
+        /** The source that carries the platform validation actor's token. */
+        platformTokenSource: 'PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
+        /**
+         * The source that carries the COMPLETE operator credential array
+         * (`[{token, actor, approvalTypes}]`).
+         */
+        operatorCredentialsSource:
+          'PRODUCTION_TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS',
+        /** The actor the platform's own validation token acts as. */
+        platformActor: 'production-cloud-validate',
+        /**
+         * The platform validation actor holds NO approval-row authority:
+         * it may use the ordinary authenticated routes, but every
+         * approval-row route fails closed with
+         * `403 APPROVAL_ACTOR_FORBIDDEN`.
+         */
+        platformApprovalTypes: [],
+        /**
+         * Production HAS agent writers, so the operator credential array
+         * is REQUIRED. Stated explicitly rather than left to the
+         * "required unless explicitly false" default, because the
+         * default is exactly the sort of thing a reader has to know to
+         * get right.
+         */
+        operatorCredentialsRequired: true,
+        /** The operator actors that must be present, in registration order. */
+        operatorActors: [
+          { actor: 'Quinn', approvalTypes: ['tech_design'] },
+          { actor: 'Rowan', approvalTypes: [] },
+          { actor: 'Ivy', approvalTypes: [] },
+          { actor: 'Lox', approvalTypes: [] },
+          { actor: 'Ash', approvalTypes: ['qa_agent'] },
+          { actor: 'feature_task_lobster', approvalTypes: [] },
+          { actor: 'bookmark_lobster', approvalTypes: [] },
+          { actor: 'Lobster', approvalTypes: [] },
+          { actor: 'brain_spec_reconciler', approvalTypes: ['spec'] },
+        ],
+      },
+      contentScheduler: {
+        targetSecret: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
+        apiBaseUrlKey: 'contentSchedulerApi',
+        platformTokenSource:
+          'PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
+        operatorCredentialsSource:
+          'PRODUCTION_CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS',
+        platformActor: 'production-cloud-validate',
+        platformApprovalTypes: ['any'],
+        /** See the tasks contract above: production requires the operator array. */
+        operatorCredentialsRequired: true,
+        operatorActors: [
+          { actor: 'Ivy', approvalTypes: [] },
+          { actor: 'tasks_app_browser', approvalTypes: [] },
+        ],
+      },
     },
     // Security decision: `production-cloud-validate` is deliberately NOT in
     // the Tasks API `ACTOR_PERMISSIONS` map. It can use the ordinary
@@ -352,8 +487,6 @@ export const PLATFORM_ENVIRONMENTS = {
       'tasksDatabaseUrl',
       'budgetDatabaseUrl',
       'redisUrl',
-      'tasksApprovalToken',
-      'schedulerApprovalToken',
     ],
   },
 };
@@ -498,13 +631,79 @@ export function resolveRuntimeEnvironment(env = {}) {
 /**
  * The source names of an environment that must be present.
  *
+ * The manifest's own `requiredSourceNames` list names the non-credential
+ * sources. The approval-credential sources are required TOO, and they
+ * are derived from the `approvalCredentials` contract rather than
+ * listed separately: a contract source that was not required would
+ * let the provisioner register a credential set built from a missing
+ * operator array.
+ *
  * @param {object} environment
  * @returns {string[]}
  */
 export function requiredSourceNames(environment) {
-  return (environment.requiredSourceNames ?? []).map(
+  const declared = (environment.requiredSourceNames ?? []).map(
     (key) => environment.sourceNames[key],
   );
+  const credentialSources = Object.values(environment.approvalCredentials ?? {}).flatMap(
+    (contract) => [
+      contract.platformTokenSource,
+      ...(contract.operatorCredentialsRequired === false
+        ? []
+        : [contract.operatorCredentialsSource]),
+    ],
+  );
+  return [...declared, ...credentialSources];
+}
+
+/**
+ * EVERY source name an environment reads, required or not.
+ *
+ * The deploy-contract drift check compares this set against the source
+ * names the deploy workflow actually provides. A source the manifest
+ * reads but the workflow does not provide is a missing value at deploy
+ * time; a source the workflow provides but the manifest does not read
+ * is an unused secret. Both are drift, and the check refuses both.
+ *
+ * @param {object} environment
+ * @returns {string[]}
+ */
+export function allSourceNames(environment) {
+  const declared = Object.values(environment.sourceNames ?? {});
+  const credentialSources = Object.values(environment.approvalCredentials ?? {}).flatMap(
+    (contract) => [contract.platformTokenSource, contract.operatorCredentialsSource],
+  );
+  return [...declared, ...credentialSources];
+}
+
+/**
+ * The approval-credential contract of an environment, per service.
+ *
+ * The contract is the ONE place that knows which actors a service's
+ * credential set must carry and which approval types each of them may
+ * hold (task 3c004590). It replaces the old
+ * `sourceNames.tasksApprovalToken` / `sourceNames.schedulerApprovalToken`
+ * / `approvalActors` triple, which described the credential shape in
+ * three places that could disagree.
+ *
+ * @param {object} environment
+ * @returns {Record<string, object>}
+ */
+export function approvalCredentialContracts(environment) {
+  return environment.approvalCredentials ?? {};
+}
+
+/**
+ * The credential source names of an environment.
+ *
+ * @param {object} environment
+ * @returns {string[]}
+ */
+export function credentialSourceNames(environment) {
+  return Object.values(approvalCredentialContracts(environment)).flatMap((contract) => [
+    contract.platformTokenSource,
+    contract.operatorCredentialsSource,
+  ]);
 }
 
 /**
@@ -550,6 +749,24 @@ export function assertEnvironmentManifest(environment) {
       );
     }
   }
+  // The approval-credential contract is a programming surface like the
+  // rest of the manifest: a contract with a duplicate actor, an empty
+  // operator list or two sources pointing at one value is rejected when
+  // the manifest is loaded, not at the first deploy.
+  const contracts = environment.approvalCredentials ?? {};
+  for (const [service, contract] of Object.entries(contracts)) {
+    assertApprovalCredentialContract(contract, {
+      label: `platform environment "${environment.id}" ${service} approval credential contract`,
+      allowedApprovalTypes:
+        service === 'tasks' ? [...TASKS_APPROVAL_TYPES] : null,
+    });
+    if (!environment.apiBaseUrls?.[contract.apiBaseUrlKey]) {
+      throw new Error(
+        `platform environment "${environment.id}" has no apiBaseUrls.${contract.apiBaseUrlKey} ` +
+          `for the ${service} approval credential contract`,
+      );
+    }
+  }
   for (const key of ['tasksApi', 'budgetApi', 'contentSchedulerApi']) {
     const origins = environment.corsAllowedOrigins?.[key];
     if (!Array.isArray(origins) || origins.length === 0) {
@@ -571,6 +788,20 @@ export function assertEnvironmentManifest(environment) {
     if (unlabelled.length > 0) {
       throw new Error(
         `production source names must carry the PRODUCTION_ label: ${unlabelled.join(', ')}`,
+      );
+    }
+    // The credential sources are labelled the same way: a production
+    // operator credential array read from an unlabelled source would be
+    // a staging credential array registered on production.
+    const credentialSourceNames = Object.values(environment.approvalCredentials ?? {}).flatMap(
+      (contract) => [contract.platformTokenSource, contract.operatorCredentialsSource],
+    );
+    const unlabelledCredentials = credentialSourceNames.filter(
+      (name) => !name.startsWith('PRODUCTION_'),
+    );
+    if (unlabelledCredentials.length > 0) {
+      throw new Error(
+        `production credential source names must carry the PRODUCTION_ label: ${unlabelledCredentials.join(', ')}`,
       );
     }
     if (environment.platformApp === staging.platformApp) {

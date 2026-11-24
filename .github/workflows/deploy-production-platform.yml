@@ -222,6 +222,13 @@ jobs:
           PRODUCTION_HEALTH_PROBE_REDIS: ${{ secrets.PRODUCTION_HEALTH_PROBE_REDIS }}
           PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          # The COMPLETE operator credential arrays (task 3c004590). The
+          # provisioner MERGES these with the platform's own validation
+          # actor instead of replacing the live secret with a one-actor
+          # array, so a routine merge to main no longer wipes every agent
+          # registration on production.
+          PRODUCTION_TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS: ${{ secrets.PRODUCTION_TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS }}
+          PRODUCTION_CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS }}
 
       # Render the effective production config from the shared config and
       # the production overlay. The renderer refuses any key or table the
@@ -319,3 +326,31 @@ jobs:
           exit 1
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # Verification 3 — every registered approval credential still
+      # authenticates as its INTENDED actor (task 3c004590).
+      #
+      # Fly exposes secret NAMES and digests, never values, so the
+      # provisioner's own checks can prove what it WROTE but not what the
+      # running service ACCEPTS. This step closes that gap: it presents
+      # each merged credential to its own service and requires the
+      # service to report the actor the credential claims.
+      #
+      # It runs AFTER the canary deploy because the identity endpoint
+      # only exists once the new code is serving; every membership and
+      # scope check still happens BEFORE the secret write, in the
+      # provisioner, so a broken credential set never reaches Fly at all.
+      #
+      # A failure here is loud on the merge that caused it, rather than
+      # silently later as `401 AUTH_REQUIRED` on every agent write.
+      - name: Verify the approval credentials authenticate as their intended actor
+        if: steps.deploy.outputs.enabled == 'true' && steps.provision.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          node infra/cloud/platform/verify-platform-approval-credentials.mjs \
+            --environment production
+        env:
+          PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          PRODUCTION_TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS: ${{ secrets.PRODUCTION_TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS }}
+          PRODUCTION_CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS }}

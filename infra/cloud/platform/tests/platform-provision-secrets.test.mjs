@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  CREDENTIAL_SOURCE_NAMES,
   DEFAULT_CONTENT_SCHEDULER_API_BASE_URL,
   SOURCE_NAMES,
   appExists,
@@ -42,8 +43,8 @@ function stagingEnv(overrides = {}) {
     [SOURCE_NAMES.tasksDatabaseUrl]: TASKS_DSN,
     [SOURCE_NAMES.budgetDatabaseUrl]: BUDGET_DSN,
     [SOURCE_NAMES.redisUrl]: `content-scheduler=${REDIS_URL}`,
-    [SOURCE_NAMES.tasksApprovalToken]: 'a'.repeat(32),
-    [SOURCE_NAMES.schedulerApprovalToken]: 'b'.repeat(32),
+    [CREDENTIAL_SOURCE_NAMES.tasks.platformToken]: 'a'.repeat(32),
+    [CREDENTIAL_SOURCE_NAMES.contentScheduler.platformToken]: 'b'.repeat(32),
     ...overrides,
   };
 }
@@ -147,16 +148,213 @@ describe('deriveDatabaseUrl', () => {
   });
 });
 
+/**
+ * A small contract with two operator actors, for the merge tests.
+ *
+ * The merge semantics are the thing this task exists to fix, so they
+ * are tested against an explicit contract rather than against a fixture
+ * that would have to be kept in sync with the production manifest. The
+ * production manifest's own contract is checked separately, in
+ * platform-environments.test.mjs.
+ *
+ * @param {object} [overrides]
+ * @returns {object} the contract
+ */
+function mergeContract(overrides = {}) {
+  return {
+    targetSecret: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
+    apiBaseUrlKey: 'tasksApi',
+    platformTokenSource: 'TEST_PLATFORM_TOKEN',
+    operatorCredentialsSource: 'TEST_OPERATOR_CREDENTIALS',
+    platformActor: 'platform-validate',
+    platformApprovalTypes: [],
+    operatorActors: [
+      { actor: 'Rowan', approvalTypes: [] },
+      { actor: 'Ash', approvalTypes: ['qa_agent'] },
+    ],
+    ...overrides,
+  };
+}
+
+/**
+ * An operator credential array for a contract.
+ *
+ * The tokens are obviously fake and unique per actor, because the merge
+ * refuses an array that shares one token between two actors.
+ *
+ * @param {object} contract
+ * @param {{actor: string, approvalTypes: string[]}[]} [actors]  the entries to carry
+ * @returns {string} the JSON array
+ */
+function operatorArray(contract, actors = null) {
+  const entries = actors ?? contract.operatorActors;
+  return JSON.stringify(
+    entries.map((entry) => ({
+      token: ('operator-' + entry.actor + '-token-0000000000').slice(0, 32),
+      actor: entry.actor,
+      approvalTypes: [...entry.approvalTypes],
+    })),
+  );
+}
+
 describe('buildServiceCredentials', () => {
-  it('wraps a token in the JSON array the services parse', () => {
-    const value = buildServiceCredentials('a'.repeat(32), 'staging-cloud-validate', []);
-    assert.deepEqual(JSON.parse(value), [
-      { token: 'a'.repeat(32), actor: 'staging-cloud-validate', approvalTypes: [] },
-    ]);
+  const PLATFORM_TOKEN = 'platform-token-value-00000000';
+
+  it('merges the platform actor with the operator set instead of replacing it', () => {
+    const contract = mergeContract();
+    const merged = buildServiceCredentials({
+      contract,
+      platformToken: PLATFORM_TOKEN,
+      operatorRaw: operatorArray(contract),
+      serviceLabel: 'tasks',
+    });
+    const entries = JSON.parse(merged.value);
+    assert.deepEqual(
+      entries.map((entry) => entry.actor),
+      ['platform-validate', 'Rowan', 'Ash'],
+    );
+    assert.equal(entries[0].token, PLATFORM_TOKEN);
+    assert.deepEqual(entries[1].approvalTypes, []);
+    assert.deepEqual(entries[2].approvalTypes, ['qa_agent']);
   });
 
-  it('rejects an empty token', () => {
-    assert.throws(() => buildServiceCredentials('', 'staging-cloud-validate', []), /empty approval token/);
+  it('is idempotent: the same inputs produce byte-identical output', () => {
+    const contract = mergeContract();
+    const options = {
+      contract,
+      platformToken: PLATFORM_TOKEN,
+      operatorRaw: operatorArray(contract),
+      serviceLabel: 'tasks',
+    };
+    assert.equal(
+      buildServiceCredentials(options).value,
+      buildServiceCredentials(options).value,
+    );
+  });
+
+  it('refuses an operator array that is missing an expected actor', () => {
+    const contract = mergeContract();
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: PLATFORM_TOKEN,
+          operatorRaw: operatorArray(contract, [contract.operatorActors[0]]),
+          serviceLabel: 'tasks',
+        }),
+      /missing the expected actor/,
+    );
+  });
+
+  it('refuses an operator array carrying an actor the manifest does not declare', () => {
+    const contract = mergeContract();
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: PLATFORM_TOKEN,
+          operatorRaw: operatorArray(contract, [
+            { actor: 'Smudge', approvalTypes: [] },
+            ...contract.operatorActors,
+          ]),
+          serviceLabel: 'tasks',
+        }),
+      /the manifest does not declare/,
+    );
+  });
+
+  it('refuses an operator array that widens an approval grant', () => {
+    const contract = mergeContract();
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: PLATFORM_TOKEN,
+          operatorRaw: operatorArray(contract, [
+            { actor: 'Rowan', approvalTypes: [] },
+            { actor: 'Ash', approvalTypes: ['qa_agent', 'accepted'] },
+          ]),
+          serviceLabel: 'tasks',
+        }),
+      /never unions grants/,
+    );
+  });
+
+  it('refuses an operator array that is empty', () => {
+    const contract = mergeContract();
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: PLATFORM_TOKEN,
+          operatorRaw: '[]',
+          serviceLabel: 'tasks',
+        }),
+      /empty array/,
+    );
+  });
+
+  it('refuses an operator array that is not JSON', () => {
+    const contract = mergeContract();
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: PLATFORM_TOKEN,
+          operatorRaw: 'not json at all',
+          serviceLabel: 'tasks',
+        }),
+      /not valid JSON/,
+    );
+  });
+
+  it('refuses an operator entry with no usable token', () => {
+    const contract = mergeContract();
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: PLATFORM_TOKEN,
+          operatorRaw: JSON.stringify([
+            { token: 'short', actor: 'Rowan', approvalTypes: [] },
+            { actor: 'Ash', approvalTypes: ['qa_agent'], token: 'operator-Ash-token-0000000000' },
+          ]),
+          serviceLabel: 'tasks',
+        }),
+      /no usable token/,
+    );
+  });
+
+  it('refuses one token shared between two actors', () => {
+    const contract = mergeContract();
+    const shared = 'shared-token-value-0000000000';
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: PLATFORM_TOKEN,
+          operatorRaw: JSON.stringify([
+            { token: shared, actor: 'Rowan', approvalTypes: [] },
+            { token: shared, actor: 'Ash', approvalTypes: ['qa_agent'] },
+          ]),
+          serviceLabel: 'tasks',
+        }),
+      /shares one token between actors/,
+    );
+  });
+
+  it('rejects an empty platform token', () => {
+    const contract = mergeContract();
+    assert.throws(
+      () =>
+        buildServiceCredentials({
+          contract,
+          platformToken: '',
+          operatorRaw: operatorArray(contract),
+          serviceLabel: 'tasks',
+        }),
+      /is missing or shorter than/,
+    );
   });
 });
 
@@ -269,8 +467,8 @@ describe('buildPlatformSecretPayload', () => {
     assert.ok(missing.includes(SOURCE_NAMES.tasksDatabaseUrl));
     assert.ok(missing.includes(SOURCE_NAMES.budgetDatabaseUrl));
     assert.ok(missing.includes(SOURCE_NAMES.redisUrl));
-    assert.ok(missing.includes(SOURCE_NAMES.tasksApprovalToken));
-    assert.ok(missing.includes(SOURCE_NAMES.schedulerApprovalToken));
+    assert.ok(missing.includes(CREDENTIAL_SOURCE_NAMES.tasks.platformToken));
+    assert.ok(missing.includes(CREDENTIAL_SOURCE_NAMES.contentScheduler.platformToken));
   });
 
   it('never puts a source value into the note text', () => {
