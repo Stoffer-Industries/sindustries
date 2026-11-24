@@ -227,7 +227,12 @@ for line in open(src):
         elif key.endswith('_REDIS'):
             value = 'redis://stub.example.upstash.io:6379'
         else:
-            value = 'stub-token'
+            # The services refuse a credential token shorter than 16
+            # characters at boot, and the platform provisioner refuses to
+            # register one, so a short stub fails the payload validation
+            # BEFORE the script reaches the secrets step. The stub has to
+            # be long enough to get there.
+            value = 'stub-approval-token-value'
         out.append(f'{key}={value}\n')
         continue
     # FLY_APP_ORG is optional and must keep its documented default.
