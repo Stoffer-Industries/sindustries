@@ -6,15 +6,34 @@ Run a backlog maintenance pass: find open tasks with no taskType and assign them
 
 Read both skills before starting.
 
-## Step 1 — Fetch untyped tasks
+## Runtime safety precondition
 
-Load the live route from the runtime environment. `TASKS_API_BASE_URL` is
-owned by `~/.openclaw/.env`; the prodlike default is a local-dev fallback only,
-so this cron follows the live route instead of pinning prodlike.
+Before any Tasks API call or task/spec mutation, load the configured route and
+fail closed if it is unavailable. Never substitute localhost or another default
+route:
 
 ```bash
-set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a
-TASKS_API_BASE_URL="${TASKS_API_BASE_URL:-http://localhost:4001/api/v1}"
+set -a
+[ -r "$HOME/.openclaw/.env" ] || { echo "Missing ~/.openclaw/.env" >&2; exit 1; }
+. "$HOME/.openclaw/.env"
+set +a
+: "${TASKS_API_BASE_URL:?TASKS_API_BASE_URL must be set in ~/.openclaw/.env}"
+```
+
+If this precondition fails, stop and report the run as blocked. Do not classify,
+patch, comment on, create, or reformat any task/spec.
+
+## Step 1 — Fetch untyped tasks
+
+Load the live route from `~/.openclaw/.env` using the Runtime safety
+precondition above. The route is required; this cron has no local-dev fallback.
+
+```bash
+set -a
+[ -r "$HOME/.openclaw/.env" ] || { echo "Missing ~/.openclaw/.env" >&2; exit 1; }
+. "$HOME/.openclaw/.env"
+set +a
+: "${TASKS_API_BASE_URL:?TASKS_API_BASE_URL must be set in ~/.openclaw/.env}"
 ```
 
 ```bash
@@ -34,9 +53,17 @@ Tasks with `source:bookmark-review-pipeline` tag are pre-feature candidates with
 
 ## Step 3 — Apply clear classifications
 
-PATCH the task type and post a comment: `[backlog-maintenance] Auto-typed as \`<type>\`. Rule: <one-line reason>.`
+For clear non-feature cases, PATCH only the task type and post a comment:
+`[backlog-maintenance] Auto-typed as \`<type>\`. Rule: <one-line reason>.`
 
-For every task typed as `feature`: follow the feature-task-create skill end-to-end (spec + description format + API). Only write a spec if one doesn't already exist at the linked path. Post comment: `[backlog-maintenance] Reformatted to feature format. Spec at <path>.`
+For every task classified as `feature`, do not rewrite its description, create or
+modify a spec, or otherwise reformat it in this cron pass. Route the task through
+the Tasks API by putting `Quinn` at `attentionOwners[0]` (preserving any later
+owners), and post: `[backlog-maintenance] Feature classification requires Quinn
+review before description/spec rewrite.` A routed owner is not approval: the cron
+must not infer approval from the route or from a substantive description. Quinn's
+normal workflow must explicitly authorize or perform the feature-task-create
+changes in a later pass.
 
 ## Step 4 — Handle ambiguous tasks without incident entries
 
@@ -50,6 +77,11 @@ source of truth for backlog work, not the agent incident registry.
 ## Step 5 — Spec integrity: feature tasks missing a spec
 
 ```bash
+set -a
+[ -r "$HOME/.openclaw/.env" ] || { echo "Missing ~/.openclaw/.env" >&2; exit 1; }
+. "$HOME/.openclaw/.env"
+set +a
+: "${TASKS_API_BASE_URL:?TASKS_API_BASE_URL must be set in ~/.openclaw/.env}"
 curl -s "${TASKS_API_BASE_URL}/tasks?status=open&taskType=feature&limit=1000" | python3 -c "
 import json, sys, re, os
 WORKSPACE = '/Users/quinnstoffer/.openclaw/workspace'
@@ -66,15 +98,30 @@ print(json.dumps(problems, indent=2))
 "
 ```
 
-For each problem, apply the feature-task-create skill. If the description has enough substance (what + why or ACs), write the spec and reformat the description. If too thin to derive a spec, post: `[backlog-maintenance] Description too thin to auto-write spec. Needs manual spec authoring.` If manual authoring or approval is required from a named person, route that task through `attentionOwners`; do not create an incident for the missing spec.
+For each problem, do not automatically write a spec or reformat the task
+description. Route the task through the Tasks API by putting `Quinn` at
+`attentionOwners[0]` (preserving any later owners), and post:
+`[backlog-maintenance] Feature spec repair requires Quinn review before
+description/spec rewrite.` If the description is too thin to derive a spec, append
+` Description too thin to auto-write spec.` Do not create an incident for the
+missing spec. The Quinn workflow may apply the feature-task-create skill only
+after explicit review/authorization; a later cron pass must not treat the route
+itself as authorization.
 
 ## Step 6 — Spec integrity: spec files with no task
 
 ```bash
+set -a
+[ -r "$HOME/.openclaw/.env" ] || { echo "Missing ~/.openclaw/.env" >&2; exit 1; }
+. "$HOME/.openclaw/.env"
+set +a
+: "${TASKS_API_BASE_URL:?TASKS_API_BASE_URL must be set in ~/.openclaw/.env}"
 python3 << 'EOF'
 import os, re, json, urllib.request
 WORKSPACE = '/Users/quinnstoffer/.openclaw/workspace'
-TASKS_API_BASE_URL = os.environ.get("TASKS_API_BASE_URL") or "http://localhost:4001/api/v1"
+TASKS_API_BASE_URL = os.environ.get("TASKS_API_BASE_URL")
+if not TASKS_API_BASE_URL:
+    raise SystemExit("TASKS_API_BASE_URL must be set in ~/.openclaw/.env; refusing local-dev fallback")
 SPEC_DIR = os.path.join(WORKSPACE, 'brain/tasks/specs/open')
 spec_files = []
 if os.path.isdir(SPEC_DIR):
