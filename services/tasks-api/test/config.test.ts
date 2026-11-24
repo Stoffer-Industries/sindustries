@@ -62,6 +62,7 @@ describe('tasks-api config schema', () => {
     expect(config.TASKS_API_APPROVAL_USERS).toBe('[]');
     expect(config.TASKS_API_APPROVAL_SERVICE_CREDENTIALS).toBe('[]');
     expect(config.TASKS_API_APPROVAL_SESSION_TTL_SECONDS).toBe(28800);
+    expect(config.TASKS_API_APPROVAL_SESSION_COOKIE_DOMAIN).toBe('.example.test');
     expect(config.TASKS_API_RATE_LIMIT_WINDOW_MS).toBe(900_000);
     expect(config.TASKS_API_RATE_LIMIT_MAX).toBe(100);
   });
