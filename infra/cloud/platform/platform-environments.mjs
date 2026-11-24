@@ -101,6 +101,7 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetDatabaseUrl: 'STAGING_BUDGET_API_DATABASE_URL',
       contentSchedulerDatabaseUrl: 'STAGING_CONTENT_SCHEDULER_API_DATABASE_URL',
       redisUrl: 'HEALTH_PROBE_REDIS',
+      clerkSecretKey: 'STAGING_BUDGET_API_CLERK_SECRET_KEY',
     },
     /** The public API base URLs of this environment. */
     apiBaseUrls: {
@@ -312,6 +313,7 @@ export const PLATFORM_ENVIRONMENTS = {
       budgetDatabaseUrl: 'PRODUCTION_BUDGET_API_DATABASE_URL',
       contentSchedulerDatabaseUrl: 'PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL',
       redisUrl: 'PRODUCTION_HEALTH_PROBE_REDIS',
+      clerkSecretKey: 'PRODUCTION_BUDGET_API_CLERK_SECRET_KEY',
     },
     apiBaseUrls: {
       tasksApi: 'https://tasks-api.sindustries.co.nz/api/v1',
@@ -487,6 +489,7 @@ export const PLATFORM_ENVIRONMENTS = {
       'tasksDatabaseUrl',
       'budgetDatabaseUrl',
       'redisUrl',
+      'clerkSecretKey',
     ],
   },
 };

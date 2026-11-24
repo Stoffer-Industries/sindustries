@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   AccountCardRow,
   BalanceAreaChart,
@@ -109,8 +109,7 @@ const demoBalancePoints = [10250, 10680, 10420, 11190, 11740, 11610, 12440].map(
 }));
 
 export function DashboardScreen({ navigation }: Props) {
-  const { session, setSession } = useSession();
-  const [email, setEmail] = useState('dev@example.com');
+  const { session, setSession, startSignIn, signOut } = useSession();
   const [balanceAccounts, setBalanceAccounts] = useState<BalanceAccount[]>([]);
   const [balancePoints, setBalancePoints] = useState<{ value: number }[]>(demoBalancePoints);
   const [syncVersion, setSyncVersion] = useState(0);
@@ -425,30 +424,14 @@ export function DashboardScreen({ navigation }: Props) {
         })}
       </View>
 
-      <MetricPanel title={session ? 'Akahu' : 'Dev sign in'} subtitle={akahuStatus || undefined}>
+      <MetricPanel title={session ? 'Akahu' : 'Sign in'} subtitle={akahuStatus || undefined}>
         {!session ? (
           <View style={styles.loginForm}>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              placeholder="email"
-              placeholderTextColor={b.text.disabled}
-              style={styles.input}
-            />
             <ActionButton
-              label="Dev login"
+              label="Sign in with Clerk"
               onPress={async () => {
                 try {
-                  const res = await apiFetch<{
-                    token: string;
-                    user: { id: string; email: string };
-                  }>('/session/dev-login', {
-                    method: 'POST',
-                    body: JSON.stringify({ email })
-                  });
-                  setSession({ token: res.token, user: res.user });
+                  await startSignIn();
                 } catch (e: any) {
                   Alert.alert('Login failed', e?.message ?? 'Unknown error');
                 }
@@ -478,7 +461,7 @@ export function DashboardScreen({ navigation }: Props) {
                 }
               }}
             />
-            <ActionButton label="Sign out" variant="secondary" onPress={() => setSession(null)} />
+            <ActionButton label="Sign out" variant="secondary" onPress={() => void signOut()} />
           </View>
         )}
       </MetricPanel>

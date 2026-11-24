@@ -47,3 +47,11 @@ The sync route reports whether the requested window was covered in full. The app
 ## E2E coverage
 
 No automated E2E coverage is currently defined for Budget Mobile. TestFlight install, Apple signing, and EAS Update delivery require Expo/Apple credentials plus a physical iPhone, so this task is covered by TypeScript validation and manual TestFlight/EAS verification.
+
+## Identity and API
+
+- The app uses Clerk hosted authentication for sign-in and sign-out; the active Clerk session is stored with Expo Secure Store.
+- Authenticated requests send the current Clerk bearer token to the cloud budget API.
+- The default API origin is https://budget-api.sindustries.co.nz/api/v1; local and staging builds may override it with EXPO_PUBLIC_API_BASE_URL.
+- The budget API verifies Clerk tokens server-side and links the verified Clerk subject to the existing budget user by verified email on first sign-in.
+- The development-only email login route is not used by the mobile app.

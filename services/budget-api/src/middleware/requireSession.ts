@@ -1,3 +1,4 @@
+import { createClerkClient, verifyToken } from '@clerk/backend';
 import type { NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { jsonError } from '../lib/http';
@@ -16,46 +17,54 @@ declare module 'express-serve-static-core' {
   }
 }
 
-/**
- * Express middleware that requires a valid `Authorization: Bearer <token>`
- * header. On success, attaches `req.session = { id, userId, expiresAt }` and
- * calls `next()`. On failure, responds with 401 UNAUTHORIZED before any
- * downstream handler runs.
- *
- * Currently the Session model has no `expiresAt` column; we expose it as
- * `null` so the contract is stable when column lands (sibling rate-limit task).
- *
- * Excludes nothing — register this only on routes that should be gated.
- * `/session/dev-login` (the login endpoint itself) and `/health` are mounted
- * separately in app.ts and never go through this middleware.
- */
+const clerkSecretKey = process.env.CLERK_SECRET_KEY;
+const clerkClient = clerkSecretKey ? createClerkClient({ secretKey: clerkSecretKey }) : null;
+
+async function resolveClerkSession(token: string): Promise<SessionContext | null> {
+  if (!clerkSecretKey || !clerkClient) return null;
+  const claims = await verifyToken(token, { secretKey: clerkSecretKey });
+  if (!claims.sub) return null;
+
+  const clerkUser = await clerkClient.users.getUser(claims.sub);
+  const email = clerkUser.primaryEmailAddress?.emailAddress ?? clerkUser.emailAddresses[0]?.emailAddress;
+  if (!email) return null;
+
+  let user = await prisma.user.findUnique({ where: { clerkUserId: claims.sub } });
+  if (!user) {
+    user = await prisma.user.findUnique({ where: { email } });
+    if (user) {
+      user = await prisma.user.update({ where: { id: user.id }, data: { clerkUserId: claims.sub, email } });
+    } else {
+      user = await prisma.user.create({ data: { clerkUserId: claims.sub, email } });
+    }
+  }
+
+  return { id: 'clerk:' + claims.sub, userId: user.id, expiresAt: null };
+}
+
+/** Accepts local database sessions and verified Clerk bearer tokens. */
 export const requireSession = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     const auth = req.header('Authorization');
-    const token =
-      auth && auth.startsWith('Bearer ')
-        ? auth.slice('Bearer '.length).trim()
-        : null;
-
-    if (!token) {
-      return jsonError(res, 401, 'UNAUTHORIZED', 'Missing bearer token');
-    }
+    const token = auth && auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : null;
+    if (!token) return jsonError(res, 401, 'UNAUTHORIZED', 'Missing bearer token');
 
     const session = await prisma.session.findUnique({
       where: { tokenHash: hashSessionToken(token) },
       select: { id: true, userId: true }
     });
-
-    if (!session) {
-      return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
+    if (session) {
+      req.session = { id: session.id, userId: session.userId, expiresAt: null };
+      return next();
     }
 
-    req.session = {
-      id: session.id,
-      userId: session.userId,
-      expiresAt: null
-    };
-
-    next();
+    try {
+      const clerkSession = await resolveClerkSession(token);
+      if (!clerkSession) return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
+      req.session = clerkSession;
+      return next();
+    } catch {
+      return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
+    }
   }
 );

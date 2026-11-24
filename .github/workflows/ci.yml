@@ -1977,6 +1977,8 @@ jobs:
         working-directory: apps/budget-mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_API_BASE_URL: https://budget-api.sindustries.co.nz/api/v1
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           MESSAGE="$(printf '%s' "$COMMIT_MESSAGE" | tr '\n\r' '  ' | tr -s ' ' | cut -c1-180)"

@@ -3,6 +3,8 @@ import { NavigationContainer, type NavigationContainerRef } from '@react-navigat
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ClerkProvider } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
 
 import { AppEdgeSwipeBack } from './src/components/AppEdgeSwipeBack';
 import { UpdateBanner } from './src/components/UpdateBanner';
@@ -14,14 +16,18 @@ import { TokenSpecimenScreen } from './src/screens/TokenSpecimenScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
 import { SessionProvider } from './src/state/SessionContext';
 import type { RootStackParamList } from './src/navigation/types';
+import { CLERK_PUBLISHABLE_KEY } from './src/config';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
+  if (!CLERK_PUBLISHABLE_KEY) throw new Error('EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is required');
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <SessionProvider>
           <NavigationContainer
@@ -88,6 +94,7 @@ export default function App() {
           </NavigationContainer>
         </SessionProvider>
       </SafeAreaProvider>
-    </GestureHandlerRootView>
+      </GestureHandlerRootView>
+    </ClerkProvider>
   );
 }

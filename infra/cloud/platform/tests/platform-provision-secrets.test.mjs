@@ -359,7 +359,7 @@ describe('buildServiceCredentials', () => {
 });
 
 describe('buildPlatformSecretPayload', () => {
-  it('maps the staging environment onto the fifteen platform value names', () => {
+  it('maps the staging environment onto the platform value names', () => {
     const { secrets, missing } = buildPlatformSecretPayload(stagingEnv());
     assert.deepEqual(missing, []);
     assert.deepEqual(
