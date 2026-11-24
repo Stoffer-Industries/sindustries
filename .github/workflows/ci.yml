@@ -1076,6 +1076,15 @@ jobs:
       - name: Run platform environment manifest and production separation tests
         run: node --test infra/cloud/platform/tests/platform-environments.test.mjs
 
+      # Task 3c004590 — the post-deploy verifier is the only value-level
+      # proof in the credential delivery: Fly exposes secret digests, never
+      # values, so the only way to prove every registered credential still
+      # authenticates as its intended actor is to call each service with
+      # each credential. A verifier no CI job runs would assert nothing, so
+      # it runs here with the rest of the platform suite.
+      - name: Run platform approval credential verifier tests
+        run: node --test infra/cloud/platform/tests/verify-platform-approval-credentials.test.mjs
+
       # Task fb1240c0, Slice B — the production Fly configs are OVERLAYS on
       # the shared config, not copies: an overlay may set the app name and
       # [env] values and nothing else, so it can never fork the topology.
