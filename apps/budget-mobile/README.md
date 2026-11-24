@@ -1,5 +1,11 @@
 # Budget Mobile
 
+## Cloud API and Clerk
+
+The app defaults to the production budget-api at https://budget-api.sindustries.co.nz/api/v1. Set EXPO_PUBLIC_API_BASE_URL for local or staging work.
+
+Sign-in is handled by Clerk hosted authentication. Set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in the Expo/EAS environment; the API verifies the resulting bearer token with its server-only CLERK_SECRET_KEY and links the verified Clerk user to the existing budget account by email on first sign-in.
+
 ## EAS Build + Update
 
 Budget Mobile ships iOS test builds through EAS Build/TestFlight and receives JS/asset changes through EAS Update on the `main` channel.

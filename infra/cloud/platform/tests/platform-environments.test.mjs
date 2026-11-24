@@ -105,6 +105,7 @@ function productionEnv(overrides = {}) {
     [tasksContract.operatorCredentialsSource]: operatorArray(tasksContract),
     [schedulerContract.platformTokenSource]: 'q'.repeat(32),
     [schedulerContract.operatorCredentialsSource]: operatorArray(schedulerContract),
+    [PRODUCTION.sourceNames.clerkSecretKey]: 'sk_live_fixture',
     ...overrides,
   };
 }
@@ -501,7 +502,7 @@ describe('assertEnvironmentValues', () => {
 });
 
 describe('buildPlatformSecretPayload for production', () => {
-  it('maps the production source names onto the same fifteen platform value names', () => {
+  it('maps the production source names onto the same platform value names', () => {
     const { secrets, missing } = buildPlatformSecretPayload(productionEnv(), {
       environment: 'production',
     });
@@ -512,6 +513,7 @@ describe('buildPlatformSecretPayload for production', () => {
         'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
         'PLATFORM_AUTO_POST_WORKER_CONTENT_SCHEDULER_REDIS_URL',
         'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
+        'PLATFORM_BUDGET_API_CLERK_SECRET_KEY',
         'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_BUDGET_API_DATABASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_BASE_URL',

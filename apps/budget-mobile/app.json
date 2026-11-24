@@ -41,6 +41,10 @@
     "owner": "tomstoffer",
     "updates": {
       "url": "https://u.expo.dev/291287e0-33cd-45fa-b7f7-786de56944fe"
-    }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "@clerk/expo"
+    ]
   }
 }

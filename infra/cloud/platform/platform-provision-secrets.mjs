@@ -215,6 +215,7 @@ export const PLATFORM_SECRET_NAMES = Object.freeze([
   // Database URLs — one per schema, all write-capable.
   'PLATFORM_TASKS_API_DATABASE_URL',
   'PLATFORM_BUDGET_API_DATABASE_URL',
+  'PLATFORM_BUDGET_API_CLERK_SECRET_KEY',
   'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
   // Redis — every live app shares the one value, so all six names take it.
   'PLATFORM_TASKS_API_REDIS_URL',
@@ -463,6 +464,7 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
   const budgetDsn = env[sourceNames.budgetDatabaseUrl];
   const schedulerDsn = env[sourceNames.contentSchedulerDatabaseUrl];
   const redisRaw = env[sourceNames.redisUrl];
+  const clerkSecretKey = env[sourceNames.clerkSecretKey];
 
   // Requiredness belongs to the manifest. Enforce the list generically so
   // adding a required source cannot become documentation-only metadata.
@@ -580,6 +582,15 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
     });
   }
 
+  // --- Clerk API verification secret -------------------------------
+  if (clerkSecretKey) {
+    secrets.push({
+      name: 'PLATFORM_BUDGET_API_CLERK_SECRET_KEY',
+      value: clerkSecretKey,
+      source: sourceNames.clerkSecretKey,
+    });
+  }
+
   // --- public base URL ----------------------------------------------
   if (contentSchedulerApiBaseUrl) {
     secrets.push({
@@ -627,7 +638,10 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
     );
   }
   if (missing.length === 0) {
-    const absent = PLATFORM_SECRET_NAMES.filter((name) => !emitted.has(name));
+    const expectedNames = PLATFORM_SECRET_NAMES.filter((name) =>
+      environment.id === 'production' || name !== 'PLATFORM_BUDGET_API_CLERK_SECRET_KEY',
+    );
+    const absent = expectedNames.filter((name) => !emitted.has(name));
     if (absent.length > 0) {
       throw new Error(
         `a payload built from complete sources is missing secret name(s): ${absent.join(', ')}`,
