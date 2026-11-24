@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 18256740-5f72-488b-82db-71066502e0e6
 product_spec: brain/tasks/specs/gymtrack-mvp-2026-07-07.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "206, 217"
+shipped_date: 2026-07-13
 ---
 
 # Shape GymTrack MVP from saved prototype — tech design
@@ -17,6 +17,7 @@ shipped_date: null
 - HealthKit spike (parallel, deferred): task `a1c8f88e` (not in this PR's scope; result feeds a follow-up task)
 - Existing monorepo web-app precedent: `apps/budget-mobile/` (newest web app in this repo — Vite + React + Supabase client pattern, deployed as a static SPA)
 - Mission Control tab registry (host for future "GymTrack" tab): `apps/mission-control/src/pulseTabs.js`
+- Shipped: PR #206 (this tech design) and PR #217 (the Vite + React + Supabase MVP rewrite), merged 2026-07-08 and 2026-07-13. Task `18256740` closed `done` on 2026-07-15 with its `spec`, `tech_design` and `accepted` approvals granted.
 
 ## Repositories
 

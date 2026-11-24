@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 72d7cc3b-eb7d-458f-809f-b9c627338e3a
 product_spec: brain/tasks/specs/in-progress/gymtrack-signup-social-login-2026-07-27.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "331"
+shipped_date: 2026-07-31
 ---
 
 # GymTrack Public Sign-Up with Social Login
@@ -14,6 +14,7 @@ shipped_date: null
 - Tech design: `docs/specs/gymtrack-public-signup-social-login-tech-design.md`
 - Task: `72d7cc3b-eb7d-458f-809f-b9c627338e3a`
 - Tasks API record: `http://localhost:4001/api/v1/tasks/72d7cc3b-eb7d-458f-809f-b9c627338e3a`
+- Shipped: PR #331 (the public sign-up path with Google and Apple social login), merged 2026-07-31. Task `72d7cc3b` closed `done` on 2026-08-03 with its `spec`, `tech_design` and `accepted` approvals granted.
 
 ## Repositories
 
