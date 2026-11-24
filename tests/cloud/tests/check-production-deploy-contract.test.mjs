@@ -57,6 +57,11 @@
 //      comment fails.
 //  26. A health-probe workflow that prints a secret fails.
 //  27. A health-probe workflow with a hard-coded probe URL fails.
+//  28. A CI workflow that drops the production platform caller fails.
+//  29. A CI workflow whose production platform caller runs on pull
+//      requests fails.
+//  30. A CI workflow whose production platform caller ignores the
+//      merge gate fails.
 //
 // Run with: node --test tests/cloud/tests/check-production-deploy-contract.test.mjs
 
@@ -92,6 +97,11 @@ const COPIED_FILES = [
   'infra/cloud/platform/render-fly-config.mjs',
   '.github/workflows/deploy-production-platform.yml',
   '.github/workflows/deploy-production-health-probe.yml',
+  // The CI workflow that CALLS the production deploy. Without it in
+  // the copy, every sentinel below would fail for the wrong reason:
+  // the checker would report a missing caller in a tree that never
+  // had one.
+  '.github/workflows/ci.yml',
 ];
 
 /**
@@ -536,6 +546,48 @@ test('a health-probe workflow with a hard-coded probe URL fails', async () => {
       ),
     );
     await expectRejected(root, 'does not resolve the probe origin');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a CI workflow that drops the production platform caller fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/ci.yml', (text) =>
+      text.replace(/  deploy-platform-production:\n[\s\S]*?    secrets: inherit\n\n/, ''),
+    );
+    await expectRejected(root, 'has no job calling deploy-production-platform.yml');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a CI workflow whose production platform caller runs on pull requests fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/ci.yml', (text) =>
+      text.replace(
+        /(  deploy-platform-production:[\s\S]*?)github\.event_name == 'push'/,
+        "$1github.event_name == 'pull_request'",
+      ),
+    );
+    await expectRejected(root, 'does not require a push event');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a CI workflow whose production platform caller ignores the merge gate fails', async () => {
+  const root = copyTree();
+  try {
+    edit(root, '.github/workflows/ci.yml', (text) =>
+      text.replace(
+        /(  deploy-platform-production:[\s\S]*?)needs\.merge-gate\.result == 'success'/,
+        "$1needs.merge-gate.result == 'skipped'",
+      ),
+    );
+    await expectRejected(root, 'does not wait for a green merge gate');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -436,11 +436,12 @@ The artifact directory is a local operator artifact. It is not a tracked file an
 
 ## 9. Production approval credential recovery
 
-The platform deploy runs on every merge to `main`, and it registers the
-production approval-credential set. Since task `3c004590` it MERGES the
-platform's own validation actor with the operator actor set instead of
-replacing the live secret, and it refuses to touch Fly at all when the
-operator credential array does not match the manifest contract.
+The platform deploy runs when the `platform` surface changes on a merge
+to `main`, and it registers the production approval-credential set.
+Since task `3c004590` it MERGES the platform's own validation actor
+with the operator actor set instead of replacing the live secret, and it
+refuses to touch Fly at all when the operator credential array does not
+match the manifest contract.
 
 That makes one failure mode loud instead of silent: an agent write that
 starts returning `401 AUTH_REQUIRED` on production means the credential

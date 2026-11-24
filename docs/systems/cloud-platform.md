@@ -831,13 +831,33 @@ array of `{token, actor, approvalTypes}` entries, and each entry is one
 actor the named service accepts writes as.
 
 **The provisioner MERGES that array; it never replaces it.** The
-platform deploy workflow runs on every merge to `main`, and the
-provisioner used to write a ONE-entry array holding only the platform's
-own `production-cloud-validate` actor. `flyctl secrets set` replaces the
-live secret outright, so every routine merge reset the credential set to
-a single actor and every agent write on production then failed with
-`401 AUTH_REQUIRED`. Reads kept working (they are unauthenticated by
-design), so the break was invisible until an agent tried to write.
+platform deploy workflow runs when the `platform` surface changes on a
+merge to `main`, and the provisioner used to write a ONE-entry array
+holding only the platform's own `production-cloud-validate` actor.
+`flyctl secrets set` replaces the live secret outright, so every routine
+merge reset the credential set to a single actor and every agent write
+on production then failed with `401 AUTH_REQUIRED`. Reads kept working
+(they are unauthenticated by design), so the break was invisible until
+an agent tried to write.
+
+**The deploy is called from CI.** `ci.yml` calls
+`deploy-production-platform.yml` from its `deploy-platform-production`
+job. That job runs only on a push to `main`, only when the `platform`
+surface changed, and only after the staging platform deploy succeeded
+and the merge gate was green. The workflow itself is `workflow_call` only,
+so before this caller existed the production platform was never
+deployed by a merge at all (GitHub reported zero runs for it) and the
+merged credential set was never applied. The caller's existence and its
+gates are checked by
+`tests/cloud/scripts/check-production-deploy-contract.mjs`, so removing
+the caller fails the merge gate instead of silently stopping
+production deploys.
+
+**The deploy fails closed, loudly.** When the operator credential arrays
+are absent from the protected `production` Environment the provisioner
+refuses to touch Fly and the run fails BEFORE any `flyctl secrets set`,
+naming the source that is missing. The live secrets are untouched and
+the services keep serving with whatever was registered last.
 
 ### Who owns what
 
