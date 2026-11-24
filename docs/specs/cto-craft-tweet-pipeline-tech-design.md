@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 9dfe56e4-13c4-4bb4-b53f-de7c77afd0d2
 product_spec: brain/tasks/specs/in-progress/cto-craft-tweet-pipeline.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "434, 487"
+shipped_date: 2026-08-19
 ---
 
 # CTO Craft recurring tweet-draft pipeline — LangGraph POC tech design
@@ -16,6 +16,7 @@ shipped_date: null
 - **Canonical checkout for runtime/cron commands:** `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`
 - **Product spec:** `brain/tasks/specs/in-progress/cto-craft-tweet-pipeline.md`
 - **Design intent:** use this bounded content workflow as the first production-shaped LangGraph proof of concept before considering LangGraph for incident response or broader workflow consolidation.
+- **Shipped:** PR #434 (the LangGraph POC pipeline this design describes) and PR #487 (the Tech Manager Weekly `/tmw-NNN/` URL-scheme parser fix), merged 2026-08-12 and 2026-08-19. The task's own `[implementer-prs]` record names the same two PRs, and task `9dfe56e4` closed `done` on 2026-09-08 with its `spec`, `tech_design` and `accepted` approvals granted.
 
 ## Product intent summary
 

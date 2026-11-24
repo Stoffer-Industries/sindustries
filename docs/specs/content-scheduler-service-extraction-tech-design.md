@@ -1,12 +1,16 @@
 ---
-status: draft
+status: shipped
 task_id: 94d5e4fc-1b31-4d04-a13b-4f69a7ec297a
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: "507, 509"
+shipped_date: 2026-08-22
 ---
 
 # Content Scheduler service extraction — tech design
+
+## Shipped
+
+- Shipped: PR #507 (the `services/content-scheduler-api` scaffold and the Content Scheduler backend extraction from `tasks-api`) and PR #509 (the WS2+WS3+WS5 extraction slices), merged 2026-08-22. The task's own `[implementer-prs]` record names the same two PRs, and task `94d5e4fc` closed `done` on 2026-09-08 with its `tech_design` and `accepted` approvals granted.
 
 ## Context
 
