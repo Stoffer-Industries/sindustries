@@ -141,9 +141,49 @@ LOCAL_SOURCE_MAP=(
   "CONTENT_SCHEDULER_API_DATABASE_URL:contentSchedulerDatabaseUrl"
   "HEALTH_PROBE_REDIS:redisUrl"
   "TASKS_API_CONTENT_SCHEDULER_REDIS_URL:redisUrl"
-  "TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN:tasksApprovalToken"
-  "CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN:schedulerApprovalToken"
 )
+
+# The LOCAL env-file key -> ENVIRONMENT FACT PATH mapping for the
+# approval-credential sources.
+#
+# These have no manifest source KEY any more: they belong to the
+# "approvalCredentials" contract, which owns the credential source NAMES
+# (task 3c004590). Reading the name out of the contract means a
+# credential rename is a manifest edit and not a script edit, so the two
+# cannot drift. A script that still asked for "sourceNames.tasksApprovalToken"
+# would read a fact path that no longer exists and would fail before it
+# provisioned anything.
+#
+# The third field is the service key, used to decide whether the source
+# is required in THIS environment.
+CREDENTIAL_SOURCE_MAP=(
+  "TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN:approvalCredentials.tasks.platformTokenSource:tasks"
+  "CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN:approvalCredentials.contentScheduler.platformTokenSource:contentScheduler"
+  "TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS:approvalCredentials.tasks.operatorCredentialsSource:tasks"
+  "CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS:approvalCredentials.contentScheduler.operatorCredentialsSource:contentScheduler"
+)
+
+# Is a credential source required for this environment?
+#
+# The platform token always is. The operator credential array is
+# required only where the contract says the environment has operator
+# writers: staging has none, so a staging bootstrap does not have to
+# carry one, and the same code path serves both environments.
+credential_source_required() {
+  local fact_path="$1" service_key="$2"
+  case "$fact_path" in
+    *operatorCredentialsSource)
+      # Required unless the contract says otherwise — the same rule the
+      # provisioner applies ("required unless explicitly false"), so the
+      # script and the provisioner cannot disagree about what a
+      # production bootstrap must carry.
+      [[ "$(fact "approvalCredentials.$service_key.operatorCredentialsRequired")" != "false" ]]
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
 
 usage() {
   sed -n '2,110p' "$0"
@@ -331,6 +371,9 @@ ENV_FILE_ALLOWED_KEYS=()
 for pair in "${LOCAL_SOURCE_MAP[@]}"; do
   ENV_FILE_ALLOWED_KEYS+=("${pair%%:*}")
 done
+for pair in "${CREDENTIAL_SOURCE_MAP[@]}"; do
+  ENV_FILE_ALLOWED_KEYS+=("${pair%%:*}")
+done
 ENV_FILE_ALLOWED_KEYS+=(
   "FLY_APP_ORG"
   "$FLY_ORG_VARIABLE"
@@ -467,6 +510,21 @@ for pair in "${LOCAL_SOURCE_MAP[@]}"; do
   source_name="$(fact "sourceNames.$source_key")"
   export "$source_name=$value"
   EXPORTED_SOURCE_KEYS="$EXPORTED_SOURCE_KEYS $source_key"
+done
+
+# The credential sources are exported the same way, but their names come
+# from the contract rather than from the source-name map, and a source
+# the manifest does not require in this environment is simply left unset.
+for pair in "${CREDENTIAL_SOURCE_MAP[@]}"; do
+  local_key="${pair%%:*}"
+  rest="${pair#*:}"
+  fact_path="${rest%:*}"
+  service_key="${rest##*:}"
+  value="${!local_key:-}"
+  source_name="$(fact "$fact_path")"
+  if [[ -n "$value" ]]; then
+    export "$source_name=$value"
+  fi
 done
 
 missing_sources=()

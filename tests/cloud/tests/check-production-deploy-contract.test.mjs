@@ -84,6 +84,11 @@ const COPIED_FILES = [
   'infra/cloud/observability/health-probe/fly.production.overlay.toml',
   'infra/cloud/platform/platform-environments.mjs',
   'infra/cloud/platform/platform-environment-facts.mjs',
+  // The manifest imports the approval-credential contract module (task
+  // 3c004590), so the copy has to carry it too. Without it the copied
+  // tree cannot even load the manifest, and every sentinel below fails
+  // for that reason instead of the reason it is testing.
+  'infra/cloud/platform/platform-approval-credentials.mjs',
   'infra/cloud/platform/render-fly-config.mjs',
   '.github/workflows/deploy-production-platform.yml',
   '.github/workflows/deploy-production-health-probe.yml',

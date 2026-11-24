@@ -27,6 +27,7 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_ENVIRONMENT_ID,
   PLATFORM_ENVIRONMENTS,
+  approvalCredentialContracts,
   assertEnvironmentManifest,
   assertEnvironmentValues,
   findForbiddenValues,
@@ -66,18 +67,44 @@ const PRODUCTION_BUDGET_DSN =
 const PRODUCTION_REDIS_URL = 'rediss://default:***@redis-production.example.test:6379';
 
 /**
+ * The operator credential array for a contract.
+ *
+ * The array is DERIVED from the manifest contract, so the fixture can
+ * never drift from the contract it is meant to satisfy: if the manifest
+ * adds an actor, this fixture carries it too and the test fails for the
+ * real reason — the contract — rather than for a missing hand-written
+ * token. The tokens are obviously fake and unique per actor.
+ *
+ * @param {object} contract  the manifest's contract for one service
+ * @returns {string} the JSON array the services parse
+ */
+function operatorArray(contract) {
+  return JSON.stringify(
+    contract.operatorActors.map((entry) => ({
+      token: ('operator-' + entry.actor + '-token-0000000000').slice(0, 32),
+      actor: entry.actor,
+      approvalTypes: [...entry.approvalTypes],
+    })),
+  );
+}
+
+/**
  * A complete production environment of obviously fake values.
  *
  * @param {object} [overrides]
  * @returns {Record<string, string>}
  */
 function productionEnv(overrides = {}) {
+  const tasksContract = approvalCredentialContracts(PRODUCTION).tasks;
+  const schedulerContract = approvalCredentialContracts(PRODUCTION).contentScheduler;
   return {
     [PRODUCTION.sourceNames.tasksDatabaseUrl]: PRODUCTION_TASKS_DSN,
     [PRODUCTION.sourceNames.budgetDatabaseUrl]: PRODUCTION_BUDGET_DSN,
     [PRODUCTION.sourceNames.redisUrl]: `content-scheduler=${PRODUCTION_REDIS_URL}`,
-    [PRODUCTION.sourceNames.tasksApprovalToken]: 'p'.repeat(32),
-    [PRODUCTION.sourceNames.schedulerApprovalToken]: 'q'.repeat(32),
+    [tasksContract.platformTokenSource]: 'p'.repeat(32),
+    [tasksContract.operatorCredentialsSource]: operatorArray(tasksContract),
+    [schedulerContract.platformTokenSource]: 'q'.repeat(32),
+    [schedulerContract.operatorCredentialsSource]: operatorArray(schedulerContract),
     ...overrides,
   };
 }
@@ -159,7 +186,7 @@ describe('platform environment manifest', () => {
         `${environment.id} needs a content-scheduler base URL`,
       );
       assert.ok(
-        environment.approvalActors.tasks,
+        environment.approvalCredentials?.tasks?.platformActor,
         `${environment.id} needs a tasks approval actor`,
       );
       for (const key of environment.requiredSourceNames) {
@@ -622,8 +649,8 @@ describe('buildPlatformSecretPayload for production', () => {
       [STAGING.sourceNames.tasksDatabaseUrl]: 'postgresql://u:***@db.example.test/neondb',
       [STAGING.sourceNames.budgetDatabaseUrl]: 'postgresql://u:***@db.example.test/neondb',
       [STAGING.sourceNames.redisUrl]: 'rediss://default:***@redis.example.test:6379',
-      [STAGING.sourceNames.tasksApprovalToken]: 'a'.repeat(32),
-      [STAGING.sourceNames.schedulerApprovalToken]: 'b'.repeat(32),
+      [approvalCredentialContracts(STAGING).tasks.platformTokenSource]: 'a'.repeat(32),
+      [approvalCredentialContracts(STAGING).contentScheduler.platformTokenSource]: 'b'.repeat(32),
     });
     const byName = Object.fromEntries(secrets.map((secret) => [secret.name, secret.value]));
     assert.equal(
@@ -655,7 +682,7 @@ describe('the provisioning CLI with an environment', () => {
 
   it('fails closed when a production source is missing, before Fly', () => {
     const env = productionEnv();
-    delete env[PRODUCTION.sourceNames.tasksApprovalToken];
+    delete env[approvalCredentialContracts(PRODUCTION).tasks.platformTokenSource];
     const { code, output, calls } = runCli(['--environment', 'production'], env);
     assert.equal(code, 1);
     assert.match(output, /PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN/);

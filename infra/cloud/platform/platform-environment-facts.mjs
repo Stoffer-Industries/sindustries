@@ -250,7 +250,15 @@ export function buildEnvironmentFacts(id = DEFAULT_ENVIRONMENT_ID) {
      * workflow file, where a second copy would drift.
      */
     healthProbeOrigin: new URL(environment.healthProbeBaseUrl).origin,
-    approvalActors: environment.approvalActors,
+    /**
+     * The approval-credential contract of this environment.
+     *
+     * The contract owns the actor set, the credential source names and
+     * the approval types per actor (task 3c004590). It is exported
+     * whole so a consumer — the deploy workflow, the verifier — projects
+     * from it instead of restating an actor list.
+     */
+    approvalCredentials: environment.approvalCredentials,
     artefacts,
   };
 }

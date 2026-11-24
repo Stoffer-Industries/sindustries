@@ -434,6 +434,57 @@ The artifact directory is a local operator artifact. It is not a tracked file an
 
 ---
 
+## 9. Production approval credential recovery
+
+The platform deploy runs on every merge to `main`, and it registers the
+production approval-credential set. Since task `3c004590` it MERGES the
+platform's own validation actor with the operator actor set instead of
+replacing the live secret, and it refuses to touch Fly at all when the
+operator credential array does not match the manifest contract.
+
+That makes one failure mode loud instead of silent: an agent write that
+starts returning `401 AUTH_REQUIRED` on production means the credential
+set on the live app is not the set the repository declares.
+
+### Diagnose
+
+1. Read the latest `production` platform workflow run. The provisioner
+   names the exact source that is missing, malformed or mismatched —
+   the deploy failed BEFORE any Fly write, so the live secrets are
+   untouched and the running services are still serving with whatever
+   was registered last.
+2. Compare the manifest's actor set against the operator array in the
+   protected GitHub Environment. **Never print the array and never print
+   a token** — compare actor names and counts only.
+3. Run the verifier through the protected workflow rather than by hand:
+
+   ```bash
+   node infra/cloud/platform/verify-platform-approval-credentials.mjs --environment production
+   ```
+
+   It presents every merged credential to its own service and requires
+   the service to report the intended actor. It reports actor names and
+   service names only.
+
+### Repair
+
+- **One actor's token is wrong or revoked:** rotate ONLY that actor's
+  entry in the Environment operator array. Do not change actor
+  membership or permissions unless the manifest changes in the same
+  reviewed delivery.
+- **The actor set itself changed:** update
+  `infra/cloud/platform/platform-environments.mjs` (`operatorActors`)
+  and the Environment operator array in the SAME reviewed change, then
+  merge. The deploy refuses to proceed while the two disagree.
+- **The array is empty or malformed:** the deploy refuses before it
+  writes. Restore the array from the tokens already distributed to the
+  callers; do not mint replacements without updating the callers, or the
+  verifier will correctly fail and the agents will hold tokens the
+  service no longer accepts.
+
+Never paste a token into a task comment, a PR, a workflow log or a chat.
+
+
 ## 8. Related documents
 
 - Tech design: `docs/specs/production-cloud-cutover-rollback-tech-design.md`
