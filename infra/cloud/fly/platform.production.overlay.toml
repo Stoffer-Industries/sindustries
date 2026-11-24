@@ -34,6 +34,7 @@ app = 'sindustries-platform-production'
   PLATFORM_ENVIRONMENT_ID = 'production'
   # tasks-api is consumed by the tasks app and mission-control.
   PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS = 'https://tasks.sindustries.co.nz,https://mission-control.sindustries.co.nz'
+  PLATFORM_TASKS_API_APPROVAL_SESSION_COOKIE_DOMAIN = '.sindustries.co.nz'
   # budget-api is consumed by mission-control (budget-mobile is a native
   # client with its own auth path and is not in the CORS scope).
   PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS = 'https://mission-control.sindustries.co.nz'

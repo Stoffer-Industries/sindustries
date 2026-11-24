@@ -73,14 +73,15 @@ const ALLOWED_OVERLAY_KEYS = new Set(['app']);
 /**
  * The `[env]` keys an overlay may set.
  *
- * These are the environment-owned values: the three CORS allow-lists and
- * the two probe cadences. Everything else in `[env]` belongs to the
+ * These are the environment-owned values: the three CORS allow-lists, the
+ * shared session-cookie domain, and the two probe cadences. Everything else in `[env]` belongs to the
  * shared topology (the router port, the status port, NODE_ENV, the
  * probe's own service name) and an overlay that could change it would
  * fork the app it is supposed to configure.
  */
 const ALLOWED_OVERLAY_ENV_KEYS = new Set([
   'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
+  'PLATFORM_TASKS_API_APPROVAL_SESSION_COOKIE_DOMAIN',
   'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
   'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
   'FLY_APP_PROBE_INTERVAL_SECONDS',
