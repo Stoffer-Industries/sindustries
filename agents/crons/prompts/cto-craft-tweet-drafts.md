@@ -7,14 +7,22 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
    `cto-craft-workflow` installed) is used:
 
    ```bash
+   set -a
+   [ -f "$HOME/.openclaw/.env" ] || { echo "missing $HOME/.openclaw/.env" >&2; exit 2; }
+   . "$HOME/.openclaw/.env"
+   set +a
    cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/cto-craft-tweet-drafts
-   CTO_CRAFT_LANGGRAPH_DATABASE_URL="<from secrets>" \
-   CONTENT_SCHEDULER_BASE_URL="<from secrets>" \
-   CONTENT_SCHEDULER_INGEST_SECRET="<from secrets>" \
+   CTO_CRAFT_LANGGRAPH_DATABASE_URL="${CTO_CRAFT_LANGGRAPH_DATABASE_URL:?missing CTO_CRAFT_LANGGRAPH_DATABASE_URL}" \
+   CONTENT_SCHEDULER_BASE_URL="${CONTENT_SCHEDULER_BASE_URL:?missing CONTENT_SCHEDULER_BASE_URL}" \
+   CONTENT_SCHEDULER_INGEST_SECRET="${CONTENT_SCHEDULER_INGEST_SECRET:?missing CONTENT_SCHEDULER_INGEST_SECRET}" \
      uv run --frozen python run.py run --json
    ```
 
-   The cron runtime provisions the three secrets above (the database URL
+   Load the live runtime environment from `~/.openclaw/.env` before the
+   command. This is important because isolated cron sessions can inherit
+   stale local-dev URLs; the env file is the source of truth for the current
+   Tasks API and Content Scheduler targets. The cron runtime must still
+   provide the three secrets above (the database URL
    for the LangGraph checkpointer, the Content Scheduler base URL, and
    the shared ingest secret). Local dev / CI may omit them for the
    `--dry-run` mode, which uses embedded fixtures and the FakeAngleModel.
