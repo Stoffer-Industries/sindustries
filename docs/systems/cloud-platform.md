@@ -367,8 +367,8 @@ names, the base URLs and the CORS allow-lists.
 | `PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL` | `STAGING_CONTENT_SCHEDULER_API_DATABASE_URL`, or derived from the tasks-api DSN | one Neon database, three schemas; schema forced to `content_scheduler` |
 | `PLATFORM_*_REDIS_URL` (6 names) | `HEALTH_PROBE_REDIS` | one live Redis instance — every live per-service Redis secret has the same Fly digest, so all six names take the same value |
 | `PLATFORM_CONTENT_SCHEDULER_API_BASE_URL` | — | public URL, registered as a plain value |
-| `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, token wrapped in the `[{token, actor, approvalTypes}]` JSON the services parse |
-| `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, same wrapping |
+| `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` **+** `TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS` | inherited name; the platform token and the operator array are MERGED into one `[{token, actor, approvalTypes}]` JSON the services parse — see [Production approval credential set](#production-approval-credential-set-task-3c004590) |
+| `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` **+** `CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS` | inherited name, same merge |
 | `PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.tasksApi`), not a GitHub environment secret |
 | `PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.budgetApi`) |
 | `PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.contentSchedulerApi`) |
@@ -821,6 +821,95 @@ The data cutover above moves the DATA. The route cutover moves the ROUTE: which 
 | Dispatch workflow | `.github/workflows/production-cloud-cutover.yml` (`workflow_dispatch` only, `production` Environment, concurrency group `production-cutover`) |
 
 ---
+
+## Production approval credential set (task `3c004590`)
+
+The platform app registers two approval-credential secrets on Fly:
+`TASKS_API_APPROVAL_SERVICE_CREDENTIALS` and
+`CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS`. Each holds a JSON
+array of `{token, actor, approvalTypes}` entries, and each entry is one
+actor the named service accepts writes as.
+
+**The provisioner MERGES that array; it never replaces it.** The
+platform deploy workflow runs on every merge to `main`, and the
+provisioner used to write a ONE-entry array holding only the platform's
+own `production-cloud-validate` actor. `flyctl secrets set` replaces the
+live secret outright, so every routine merge reset the credential set to
+a single actor and every agent write on production then failed with
+`401 AUTH_REQUIRED`. Reads kept working (they are unauthenticated by
+design), so the break was invisible until an agent tried to write.
+
+### Who owns what
+
+| Fact | Owner | Where |
+| --- | --- | --- |
+| The actor set, and each actor's allowed `approvalTypes` | the repository | `infra/cloud/platform/platform-environments.mjs`, `approvalCredentials` |
+| The token VALUES | Quinn (operator) | the protected `production` GitHub Environment |
+| The merge, the validation and the Fly write | the repository | `infra/cloud/platform/platform-provision-secrets.mjs` |
+| The runtime proof that each credential still authenticates | the repository | `infra/cloud/platform/verify-platform-approval-credentials.mjs` |
+
+There is no second actor list. `buildServiceCredentials` used to hard-code
+the single-actor shape, and `platform-environments.mjs` hard-coded the
+actors per environment; both now read the one `approvalCredentials`
+contract, so a new actor is registered by changing that contract and the
+operator array together, and nothing else.
+
+The actor sets are deliberately SERVICE-SPECIFIC. The Tasks API carries
+the nine agent and service actors that write to it; the Content Scheduler
+carries only `Ivy` and `tasks_app_browser`, the callers that actually
+write there. Registering the Tasks actor set on the Content Scheduler
+would widen production write access to callers that never write there.
+
+### The production Environment secrets
+
+| Environment secret | Carries |
+| --- | --- |
+| `PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | the `production-cloud-validate` platform token |
+| `PRODUCTION_TASKS_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS` | the COMPLETE Tasks operator array (`[{token, actor, approvalTypes}]`) |
+| `PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | the `production-cloud-validate` platform token |
+| `PRODUCTION_CONTENT_SCHEDULER_API_OPERATOR_APPROVAL_SERVICE_CREDENTIALS` | the COMPLETE Content Scheduler operator array |
+
+The operator arrays are the authoritative registration: a credential
+registered by hand in the live Fly secret is drift, and the next deploy
+replaces it. **A live credential is never registered by hand.**
+
+### Adding or removing an actor
+
+1. Change the actor set in `infra/cloud/platform/platform-environments.mjs` —
+   the service's `operatorActors` list, with each actor's exact
+   `approvalTypes`.
+2. Update the matching operator array in the protected GitHub Environment
+   in the SAME change. The array must carry precisely the declared
+   actors, with precisely the declared approval types, and one distinct
+   token per actor.
+3. Run the local suites: `node --test infra/cloud/platform/tests/` and
+   `node --test tests/cloud/tests/`.
+4. Merge. The production workflow fails BEFORE any Fly write if the
+   Environment array does not match the contract — a missing actor, an
+   unknown actor, a widened `approvalTypes`, a shared token, a
+   malformed array or an empty array all stop the deploy, and the live
+   secrets are left untouched.
+5. The post-deploy verifier then presents every merged credential to its
+   own service and requires the service to report the intended actor.
+
+Direct `flyctl secrets set` edits are unsupported: the next deploy
+replaces them.
+
+### When an agent write starts returning `401 AUTH_REQUIRED`
+
+1. Read the latest `production` platform workflow run. A red run names
+   the exact source that is missing, malformed or mismatched.
+2. Compare the manifest's `approvalCredentials` actor set against the
+   operator array in the GitHub Environment. **Never print the array or
+   a token** — compare actor names and counts only.
+3. Run the verifier through the protected workflow rather than by hand:
+   `node infra/cloud/platform/verify-platform-approval-credentials.mjs --environment production`.
+   It reports actor names and service names only, and never prints a token.
+4. If one actor's token is wrong or revoked, rotate ONLY that actor's
+   entry in the Environment array. Do not change actor membership or
+   permissions unless the manifest changes in the same reviewed delivery.
+5. Never paste a token into a task comment, a PR, a log or a chat.
+
 
 ## Credential boundary
 

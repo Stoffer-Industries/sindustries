@@ -113,12 +113,17 @@ import { redactOutput } from './redact-output.mjs';
 import {
   DEFAULT_ENVIRONMENT_ID,
   PLATFORM_ENVIRONMENTS,
+  approvalCredentialContracts,
   assertEnvironmentManifest,
   assertEnvironmentValues,
   getPlatformEnvironment,
   requiredDatabaseSourceNames,
   requiredSourceNames,
 } from './platform-environments.mjs';
+import {
+  TASKS_APPROVAL_TYPES,
+  buildMergedApprovalCredentials,
+} from './platform-approval-credentials.mjs';
 
 export const PLATFORM_APP = PLATFORM_ENVIRONMENTS.staging.platformApp;
 export const DEFAULT_ORG = 'personal';
@@ -130,8 +135,32 @@ export const DEFAULT_ORG = 'personal';
  * block. `contentSchedulerDatabaseUrl` is optional: when it is absent the
  * content-scheduler schema is derived from the tasks-api DSN (one Neon
  * database, three schemas).
+ *
+ * The approval-credential sources are NOT here: they belong to the
+ * `approvalCredentials` contract, which owns the actor set as well as
+ * the source names (task 3c004590). Two copies of an actor list are two
+ * copies that can disagree.
  */
 export const SOURCE_NAMES = { ...PLATFORM_ENVIRONMENTS.staging.sourceNames };
+
+/**
+ * The staging approval-credential source names, by service.
+ *
+ * The credential sources belong to the manifest's
+ * `approvalCredentials` contract (task 3c004590), so they are read from
+ * there rather than restated here.
+ */
+export const CREDENTIAL_SOURCE_NAMES = Object.fromEntries(
+  Object.entries(approvalCredentialContracts(PLATFORM_ENVIRONMENTS.staging)).map(
+    ([service, contract]) => [
+      service,
+      {
+        platformToken: contract.platformTokenSource,
+        operatorCredentials: contract.operatorCredentialsSource,
+      },
+    ],
+  ),
+);
 
 /**
  * The database sources that must be present and write-capable.
@@ -153,10 +182,17 @@ export const REQUIRED_DATABASE_SOURCES = requiredDatabaseSourceNames(
 export const DEFAULT_CONTENT_SCHEDULER_API_BASE_URL =
   PLATFORM_ENVIRONMENTS.staging.apiBaseUrls.contentSchedulerApi;
 
-/** The actors the staging service credentials act as. */
-export const TASKS_APPROVAL_ACTOR = PLATFORM_ENVIRONMENTS.staging.approvalActors.tasks;
+/**
+ * The actors the staging service credentials act as.
+ *
+ * The platform's own validation actor comes from the manifest's
+ * approval-credential contract, which is the single owner of the actor
+ * set (task 3c004590).
+ */
+export const TASKS_APPROVAL_ACTOR =
+  approvalCredentialContracts(PLATFORM_ENVIRONMENTS.staging).tasks.platformActor;
 export const SCHEDULER_APPROVAL_ACTOR =
-  PLATFORM_ENVIRONMENTS.staging.approvalActors.contentScheduler;
+  approvalCredentialContracts(PLATFORM_ENVIRONMENTS.staging).contentScheduler.platformActor;
 
 /**
  * The app-level secret names the consolidated platform app must carry.
@@ -346,19 +382,38 @@ export function deriveDatabaseUrl(dsn, schema) {
 }
 
 /**
- * Wrap a raw approval token in the JSON array shape the services parse:
- * `[{token, actor, approvalTypes}]`.
+ * Build a service's approval credential array.
  *
- * @param {string} token
- * @param {string} actor
- * @param {string[]} [approvalTypes]
- * @returns {string} the JSON array
+ * The array is the MERGE of the platform's own validation actor and the
+ * operator actor set the manifest declares. It used to be a one-entry
+ * array holding only the platform actor, and `flyctl secrets set`
+ * REPLACED the live secret with it — so every merge to `main` silently
+ * wiped the agent registrations and every agent write on production then
+ * failed with `401 AUTH_REQUIRED` (task 3c004590).
+ *
+ * The merge is exact: the operator array must carry precisely the
+ * declared actors, each with precisely the declared approval types. A
+ * missing actor, an unknown actor, a widened scope or a shared token
+ * throws, and the payload never reaches Fly.
+ *
+ * @param {object} options
+ * @param {object} options.contract  the manifest's contract for the service
+ * @param {string} options.platformToken  the platform actor's token
+ * @param {string} options.operatorRaw  the raw operator credential array
+ * @param {string} [options.serviceLabel]
+ * @returns {{value: string, actors: string[]}}
  */
-export function buildServiceCredentials(token, actor, approvalTypes = []) {
-  if (typeof token !== 'string' || token.trim() === '') {
-    throw new Error('empty approval token');
-  }
-  return JSON.stringify([{ token: token.trim(), actor, approvalTypes }]);
+export function buildServiceCredentials(options) {
+  const { contract, platformToken, operatorRaw } = options;
+  const serviceLabel = options.serviceLabel ?? 'service';
+  return buildMergedApprovalCredentials({
+    contract,
+    platformToken,
+    operatorRaw,
+    serviceLabel,
+    allowedApprovalTypes:
+      serviceLabel === 'tasks' ? [...TASKS_APPROVAL_TYPES] : null,
+  });
 }
 
 /**
@@ -398,8 +453,6 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
   const schemas = environment.schemas;
   const {
     contentSchedulerApiBaseUrl = environment.apiBaseUrls.contentSchedulerApi,
-    tasksApprovalActor = environment.approvalActors.tasks,
-    schedulerApprovalActor = environment.approvalActors.contentScheduler,
   } = options;
 
   const secrets = [];
@@ -410,8 +463,6 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
   const budgetDsn = env[sourceNames.budgetDatabaseUrl];
   const schedulerDsn = env[sourceNames.contentSchedulerDatabaseUrl];
   const redisRaw = env[sourceNames.redisUrl];
-  const tasksToken = env[sourceNames.tasksApprovalToken];
-  const schedulerToken = env[sourceNames.schedulerApprovalToken];
 
   // Requiredness belongs to the manifest. Enforce the list generically so
   // adding a required source cannot become documentation-only metadata.
@@ -485,19 +536,47 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
     }
   }
 
-  // --- approval credentials (inherited names, unchanged) -------------
-  if (tasksToken) {
-    secrets.push({
-      name: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
-      value: buildServiceCredentials(tasksToken, tasksApprovalActor, []),
-      source: sourceNames.tasksApprovalToken,
+  // --- approval credentials (merged, never replaced) ---------------
+  // Each service's credential array is the MERGE of the platform's own
+  // validation actor and the operator actor set the manifest declares.
+  //
+  // It used to be a ONE-entry array holding only the platform actor, and
+  // `flyctl secrets set` replaced the live secret with it. Because the
+  // platform deploy workflow runs on every merge to `main`, every routine
+  // merge silently wiped the agent registrations and every agent write
+  // on production then failed with `401 AUTH_REQUIRED` (task 3c004590).
+  //
+  // The merge is driven entirely by the manifest's contract: the
+  // provisioner holds no actor list of its own, so a new actor is
+  // registered by changing the contract and the operator array together,
+  // and nothing else. A missing, malformed, unknown or over-scoped
+  // operator array throws here, BEFORE any Fly mutation.
+  for (const [service, contract] of Object.entries(
+    approvalCredentialContracts(environment),
+  )) {
+    if (!PLATFORM_SECRET_NAMES.includes(contract.targetSecret)) {
+      throw new Error(
+        `the ${service} approval credential contract targets "${contract.targetSecret}", ` +
+          'which is not a canonical platform secret name',
+      );
+    }
+    const platformToken = env[contract.platformTokenSource];
+    const operatorRaw = env[contract.operatorCredentialsSource];
+    // A MISSING source is reported through the `missing` list (the
+    // manifest owns requiredness); a MALFORMED or mismatched one throws
+    // here. Both stop the deploy before any Fly mutation.
+    if (!platformToken) continue;
+    if (!operatorRaw && contract.operatorCredentialsRequired !== false) continue;
+    const merged = buildServiceCredentials({
+      contract,
+      platformToken,
+      operatorRaw,
+      serviceLabel: service,
     });
-  }
-  if (schedulerToken) {
     secrets.push({
-      name: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS',
-      value: buildServiceCredentials(schedulerToken, schedulerApprovalActor, ['any']),
-      source: sourceNames.schedulerApprovalToken,
+      name: contract.targetSecret,
+      value: merged.value,
+      source: `${contract.operatorCredentialsSource} + ${contract.platformTokenSource}`,
     });
   }
 
