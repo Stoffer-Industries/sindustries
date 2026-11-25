@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { tasksAppUrl } from './TasksTab.jsx';
+import { render, screen } from '@testing-library/react';
+import { TasksTab, tasksAppUrl } from './TasksTab.jsx';
 
 describe('tasksAppUrl', () => {
   it('uses the configured Tasks URL when provided', () => {
@@ -15,5 +16,15 @@ describe('tasksAppUrl', () => {
 
   it('keeps localhost as the local development default', () => {
     expect(tasksAppUrl({ PROD: false })).toBe('http://localhost:5173');
+  });
+});
+
+describe('TasksTab', () => {
+  it('uses the least-privilege iframe contract', () => {
+    render(<TasksTab />);
+    const frame = screen.getByTitle('Tasks');
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+    expect(frame).toHaveAttribute('allow', 'clipboard-write');
+    expect(frame).toHaveAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
   });
 });

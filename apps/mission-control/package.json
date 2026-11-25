@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@clerk/react": "6.17.0",
     "@sindustries/design-tokens": "file:../../packages/design-tokens",
     "@sindustries/ui": "file:../../packages/ui",
     "d3-sankey": "^0.12.3",

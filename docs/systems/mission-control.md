@@ -80,23 +80,51 @@ oriented (the W27 SPEC's flow 1 contract).
 
 ### Authentication and authorisation
 
-- Mission Control is currently deployed on the Sindustries Tailnet and runs
-  without a session check of its own.
-- The Tasks app runs the same way it does standalone — when it gains
-  authentication (a stated goal in `docs/systems/tasks.md`), the
-  iframe will share the parent's origin and therefore the parent's
-  cookies. The mitigation is a reverse proxy in production that
-  attaches an authenticated session to the iframe URL (see
-  [Production](#production) below).
+- Mission Control and the Tasks app now both sit behind Clerk sign-in
+  (task `ddd2f57d`, tech design
+  `docs/specs/mission-control-tasks-clerk-auth-tech-design.md`). The
+  Tailnet-only, no-session-check posture described above is retired: both
+  apps have live public URLs, so an unauthenticated visitor must not be
+  able to view or mutate task data.
+- **GymTrack's existing Clerk domain remains the sole primary.** Mission
+  Control and Tasks are both Clerk satellites: each uses the existing primary
+  sign-in route and satellite auto-sync. A session established on the primary
+  is recognized by Mission Control and by Tasks when it loads cross-origin
+  inside the iframe, with no second prompt inside the frame. A clean standalone
+  visit to either satellite may still round-trip through sign-in independently
+  — that is expected, not a regression.
+- Both apps reuse the **existing Sindustries Clerk identity pool** — the
+  same application GymTrack uses in production. A second user pool or a
+  GymTrack public sign-up flow is explicitly out of scope; creating an
+  identity through GymTrack never grants Tasks access.
+- Neither app exposes a public sign-up surface. Product access is a
+  server-side allowlist on the Tasks API keyed by Clerk's immutable user
+  ID; an authenticated-but-unauthorized identity sees a clear "not
+  authorized" state, never an invitation to create an account.
+- Agents remain machine identities. Their
+  `Authorization: Bearer <service credential>` contract is unchanged and
+  Clerk user tokens are never issued to them.
 - `docs/systems/tasks.md` is the source of truth for the
   Tasks app auth contract.
 
 ### Sandbox and CSP
 
-- The iframe is currently emitted without a `sandbox` attribute, a
-  `referrerpolicy`, or a CSP `frame-ancestors` directive on the Tasks
-  app side. This is acceptable for the current Tailnet-only
-  deployment. See [Revisit triggers](#revisit-triggers).
+- The iframe is now emitted with an explicit least-privilege sandbox:
+  `sandbox="allow-scripts allow-same-origin allow-forms"`, plus
+  `allow="clipboard-write"` and
+  `referrerPolicy="strict-origin-when-cross-origin"`. Top-navigation and
+  popup permissions are deliberately **not** granted: the embedded board is
+  already authenticated, and standalone sign-in is not sandboxed. If live
+  satellite evidence ever requires more, the exact blocked Clerk capability
+  has to be named before the sandbox is widened.
+- The Tasks app emits a `Content-Security-Policy: frame-ancestors` header
+  restricted to the exact approved Mission Control origins (production and
+  staging). No wildcard, no generic subdomain, no preview domain, no
+  unrelated product. The header applies to the SPA fallback responses too,
+  and does not conflict with `X-Frame-Options`.
+- The sandbox limits what the framed document can do; `frame-ancestors`
+  limits who may embed it. Both are required — neither substitutes for the
+  other. This resolves the M4 gap below.
 
 ### Unknown paths
 
@@ -125,15 +153,20 @@ staging (`https://tasks.staging.sindustries.co.nz`) and production
 (`https://tasks.sindustries.co.nz`), preventing a missing staging value from
 embedding production data or a deployed bundle from embedding localhost.
 
-### M4 — no sandbox, referrerpolicy, or CSP frame-ancestors
+### M4 — no sandbox, referrerpolicy, or CSP frame-ancestors (resolved)
 
-`apps/mission-control/src/tabs/TasksTab.jsx` emits the iframe
-without `sandbox`, `referrerpolicy`, or a CSP header story on the
-Tasks-app side. Once Tasks auth lands, the Tasks app inside Mission Control
-will share the parent origin's cookies. Even in the Tailnet case,
-`sandbox="allow-scripts allow-same-origin allow-forms"` would narrow
-the surface without breaking Tasks. Not urgent today; revisit when
-authentication lands.
+**Resolved by task `ddd2f57d` (Clerk login for Mission Control and the
+Tasks app).** `apps/mission-control/src/tabs/TasksTab.jsx` now emits the
+iframe with `sandbox="allow-scripts allow-same-origin allow-forms"`,
+`allow="clipboard-write"` and
+`referrerPolicy="strict-origin-when-cross-origin"`, and the Tasks app
+side answers with an exact-origin CSP `frame-ancestors` directive. The
+gap was opened precisely because "revisit when authentication lands" — and
+authentication landed in the same task. The residual known gap is
+M4-adjacent: gating Mission Control hides its *other* tabs from anonymous
+users, but it does not add Clerk verification to the Bookmarks or Content
+Scheduler APIs. Making every underlying service API private is additional
+cross-service scope that needs its own owner-specific design.
 
 ---
 

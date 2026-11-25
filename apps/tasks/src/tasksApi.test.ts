@@ -8,9 +8,7 @@ import {
   createTaskComment,
   createTaskApproval,
   deleteTaskApproval,
-  fetchAuthSession,
-  login,
-  logout
+  fetchAuthSession
 } from './tasksApi.ts';
 
 // Mock fetch globally
@@ -136,7 +134,7 @@ describe('tasksApi', () => {
         'http://localhost:4001/api/v1/tasks',
         expect.objectContaining({
           method: 'POST',
-          credentials: 'include',
+          headers: expect.objectContaining({ authorization: 'Bearer test-clerk-token' }),
           body: JSON.stringify({ title: 'New Task' })
         })
       );
@@ -180,24 +178,20 @@ describe('tasksApi', () => {
         'http://localhost:4001/api/v1/tasks/1',
         expect.objectContaining({
           method: 'PATCH',
-          credentials: 'include',
+          headers: expect.objectContaining({ authorization: 'Bearer test-clerk-token' }),
           body: JSON.stringify({ title: 'Updated', status: 'done', dependsOnIds: ['dep-1'] })
         })
       );
       expect(result).toEqual(task);
     });
 
-    // Regression: the Tasks API and Tasks app run on different ports, so this
-    // is a cross-origin request. Without credentials: 'include' the browser
-    // session cookie set by login() is never sent, and requireAuthenticatedUser
-    // rejects the mutation with a 401 that the UI shows as "Failed to update task".
-    it('sends the browser session cookie so mutations survive requireAuthenticatedUser', async () => {
+    it('sends the current Clerk bearer on mutations', async () => {
       mockFetch.mockResolvedValueOnce(mockResponse({ id: 1 }));
 
       await updateTask(1, { status: 'done' });
 
       const [, options] = mockFetch.mock.calls[0];
-      expect(options.credentials).toBe('include');
+      expect(options.headers.authorization).toBe('Bearer test-clerk-token');
     });
   });
 
@@ -235,47 +229,26 @@ describe('tasksApi', () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:4001/api/v1/tasks/1',
-        expect.objectContaining({ method: 'DELETE', credentials: 'include' })
+        expect.objectContaining({ method: 'DELETE', headers: expect.objectContaining({ authorization: 'Bearer test-clerk-token' }) })
       );
       expect(result).toBeNull();
     });
   });
 
-  describe('browser authentication', () => {
-    it('loads the current actor with browser credentials', async () => {
-      const actor = { username: 'tom', displayName: 'Tom' };
+  describe('Clerk authentication', () => {
+    it('loads the current actor with a fresh bearer', async () => {
+      const actor = { actor: 'Tom', displayName: 'Tom' };
       mockFetch.mockResolvedValueOnce(mockResponse(actor));
       await expect(fetchAuthSession()).resolves.toEqual(actor);
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:4001/api/v1/auth/session',
-        expect.objectContaining({ credentials: 'include' })
-      );
-    });
-
-    it('logs in with credentials without client-side token handling', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse({ username: 'tom' }));
-      await login({ username: 'tom', password: 'secret' });
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4001/api/v1/auth/session',
-        expect.objectContaining({
-          method: 'POST', credentials: 'include',
-          body: JSON.stringify({ username: 'tom', password: 'secret' })
-        })
-      );
-    });
-
-    it('logs out through the browser session endpoint, including an empty 204 response', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, status: 204, json: vi.fn() });
-      await expect(logout()).resolves.toBeNull();
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4001/api/v1/auth/session',
-        expect.objectContaining({ method: 'DELETE', credentials: 'include' })
+        expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer test-clerk-token' }) })
       );
     });
   });
 
   describe('task approvals', () => {
-    it('posts a structured type with browser session credentials and no owner', async () => {
+    it('posts a structured type with a Clerk bearer and no owner', async () => {
       const approval = { id: 'approval-1', type: 'spec', owner: 'Tom', state: 'approved' };
       mockFetch.mockResolvedValueOnce(mockResponse(approval));
 
@@ -285,7 +258,7 @@ describe('tasksApi', () => {
         'http://localhost:4001/api/v1/tasks/task-1/approvals',
         expect.objectContaining({
           method: 'POST',
-          credentials: 'include',
+          headers: expect.objectContaining({ authorization: 'Bearer test-clerk-token' }),
           body: JSON.stringify({ type: 'spec' })
         })
       );
@@ -293,14 +266,14 @@ describe('tasksApi', () => {
       expect(result).toEqual(approval);
     });
 
-    it('deletes a structured approval with browser session credentials', async () => {
+    it('deletes a structured approval with a Clerk bearer', async () => {
       mockFetch.mockResolvedValueOnce(mockResponse(null));
 
       await expect(deleteTaskApproval('task-1', 'qa')).resolves.toBeNull();
 
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:4001/api/v1/tasks/task-1/approvals/qa',
-        expect.objectContaining({ method: 'DELETE', credentials: 'include' })
+        expect.objectContaining({ method: 'DELETE', headers: expect.objectContaining({ authorization: 'Bearer test-clerk-token' }) })
       );
     });
   });
@@ -316,7 +289,7 @@ describe('tasksApi', () => {
         'http://localhost:4001/api/v1/tasks/1/comments',
         expect.objectContaining({
           method: 'POST',
-          credentials: 'include',
+          headers: expect.objectContaining({ authorization: 'Bearer test-clerk-token' }),
           body: JSON.stringify({ author: 'John', text: 'Comment' })
         })
       );

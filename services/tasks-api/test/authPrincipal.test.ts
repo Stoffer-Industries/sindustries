@@ -13,6 +13,9 @@
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { verifyTokenMock } = vi.hoisted(() => ({ verifyTokenMock: vi.fn() }));
+vi.mock('@clerk/backend', () => ({ verifyToken: verifyTokenMock }));
+
 const PROBE_TOKEN = 'principal-probe-token-long-enough';
 const PROBE_ACTOR = 'PrincipalProbeActor';
 const OTHER_TOKEN = 'other-configured-token-long-enough';
@@ -27,6 +30,10 @@ process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
   { token: PROBE_TOKEN, actor: PROBE_ACTOR, approvalTypes: [] },
   { token: OTHER_TOKEN, actor: OTHER_ACTOR, approvalTypes: ['tech_design'] }
 ]);
+process.env.CLERK_JWT_KEY = 'test-public-key';
+process.env.TASKS_API_CLERK_ISSUER = 'https://clerk.example.test';
+process.env.TASKS_API_CLERK_AUTHORIZED_PARTIES = 'https://tasks.example.test';
+process.env.TASKS_API_CLERK_AUTHORIZED_USERS = JSON.stringify([{ clerkUserId: 'user_tom', actor: 'Tom' }]);
 
 const prismaMock: any = {
   approvalSession: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
@@ -46,9 +53,7 @@ const { createApp } = await import('../src/app.ts');
 describe('GET /api/v1/auth/principal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: no browser session, so the cookie path never resolves an
-    // actor and the Bearer path is the only way in.
-    prismaMock.approvalSession.findUnique.mockResolvedValue(null);
+    verifyTokenMock.mockResolvedValue({ data: undefined, errors: [new Error('invalid')] });
   });
 
   afterAll(() => {
@@ -76,6 +81,10 @@ describe('GET /api/v1/auth/principal', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('AUTH_REQUIRED');
+    expect(verifyTokenMock).toHaveBeenCalledWith('not-a-registered-token', expect.objectContaining({
+      jwtKey: 'test-public-key',
+      authorizedParties: ['https://tasks.example.test']
+    }));
   });
 
   it('returns 401 AUTH_REQUIRED for a malformed Authorization header', async () => {
@@ -109,21 +118,58 @@ describe('GET /api/v1/auth/principal', () => {
     expect(Object.keys(res.body).sort()).toEqual(['actor', 'kind']);
   });
 
-  it('reports kind browser_session for a cookie session', async () => {
-    prismaMock.approvalSession.findUnique.mockResolvedValue({
-      actor: 'BrowserSessionActor',
-      expiresAt: new Date(Date.now() + 60_000),
-      revokedAt: null
+  it('maps a verified allowlisted Clerk subject to its Tasks actor', async () => {
+    verifyTokenMock.mockResolvedValue({
+      data: { sub: 'user_tom', iss: 'https://clerk.example.test' },
+      errors: undefined
     });
-
     const res = await request(createApp())
       .get('/api/v1/auth/principal')
-      .set('Cookie', 'tasks_api_session=browser-session-token-long-enough');
+      .set('Authorization', 'Bearer clerk-session-jwt');
 
     expect(res.status).toBe(200);
-    expect(res.body.actor).toBe('BrowserSessionActor');
-    // The `kind` discriminator comes from the middleware verbatim — it is
-    // not a hardcoded string on this route.
-    expect(res.body.kind).toBe('browser_session');
+    expect(res.body).toEqual({ actor: 'Tom', kind: 'clerk_session' });
+    expect(verifyTokenMock).toHaveBeenCalledWith('clerk-session-jwt', expect.objectContaining({
+      jwtKey: 'test-public-key',
+      authorizedParties: ['https://tasks.example.test']
+    }));
+  });
+
+  it('returns 403 for a verified Clerk subject outside the product allowlist', async () => {
+    verifyTokenMock.mockResolvedValue({
+      data: { sub: 'user_other', iss: 'https://clerk.example.test' },
+      errors: undefined
+    });
+    const res = await request(createApp())
+      .get('/api/v1/auth/principal')
+      .set('Authorization', 'Bearer clerk-session-jwt');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+  });
+});
+
+
+describe('GET /api/v1/auth/session', () => {
+  it('returns the mapped actor and approval capabilities for an authenticated browser client', async () => {
+    const res = await request(createApp())
+      .get('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${PROBE_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      data: {
+        actor: PROBE_ACTOR,
+        displayName: PROBE_ACTOR,
+        approvalTypes: []
+      }
+    });
+  });
+
+  it.each(['post', 'delete'])('leaves retired %s session lifecycle routes unmounted', async (method) => {
+    const res = await request(createApp())[method]('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${PROBE_TOKEN}`);
+
+    expect(res.status).toBe(404);
   });
 });

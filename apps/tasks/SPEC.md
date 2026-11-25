@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-11-20 (task card containment guarantee, task 7c008472)
+**Last updated:** 2026-11-25 (Clerk primary/satellite auth, task ddd2f57d)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 
@@ -15,6 +15,14 @@ A focused task management surface for Tom and the agent team. Supports capturing
 ---
 
 ## Flows
+
+### 0. Authenticate before task data loads
+1. The app boots under the existing Sindustries Clerk identity pool and mounts no board or task-fetch effects until both Clerk and the Tasks API allowlist check succeed.
+2. Signed-out standalone visitors round-trip through the existing Clerk primary sign-in URL and return to the original Tasks URL. There is no sign-up route or CTA.
+3. When embedded by Mission Control, Tasks acts as a Clerk satellite with auto-sync and recognizes the existing primary session without a second sign-in prompt.
+4. A valid Clerk identity outside the server-side product allowlist sees “Not authorized” and no task UI. Access is keyed by immutable Clerk user ID, never email.
+5. Every Tasks API browser request obtains a fresh Clerk session token and sends it as `Authorization: Bearer`; the app does not persist JWTs itself.
+6. Verification: `src/auth/AuthBoundary.test.jsx`, `src/tasksApi.test.ts`, and `src/embeddingPolicy.test.js`. The real primary/satellite and standalone redirect round trips require deployed staging because local origins cannot reproduce Clerk's configured domain handshake.
 
 ### 1. Create a task
 1. User clicks "New Task"
@@ -38,9 +46,8 @@ A focused task management surface for Tom and the agent team. Supports capturing
 6. Changes persist on save
 7. An **Approvals** sub-section renders one row per required approval type for the task's type (`spec`, `tech_design`, `qa_agent`, `accepted`):
    - An unchecked checkbox approves through structured `POST /tasks/:id/approvals` with `{ type }`; a checked checkbox revokes through `DELETE /tasks/:id/approvals/:type`.
-   - The browser includes an HttpOnly-cookie session and never supplies an approval owner; the API derives ownership from the authenticated principal.
-   - Tasks remain readable while signed out. On load the UI checks `GET /auth/session`; changing an approval while signed out opens a minimal username/password login gate backed by `POST /auth/session`. The password is held only in the form state, cleared after submission/cancel, and never stored in JavaScript storage.
-   - The current actor is shown beside Approvals and can end the session through `DELETE /auth/session`.
+   - The browser includes its Clerk bearer and never supplies an approval owner; the API derives ownership from the allowlisted authenticated principal.
+   - Tasks are not readable while signed out. The old inline username/password form and cookie logout are removed; the current Clerk-mapped actor is shown beside Approvals.
    - Each row updates optimistically and only the mutating row is disabled. A failed mutation rolls that row back and exposes an accessible row-level error; success refreshes the parent task to reconcile approvals and audit comments.
    - Archived and done tasks have immutable approval controls.
    - Checkbox checked = `approved`; unchecked = `pending` or `revoked` (state is distinguished by avatar opacity / strike-through rather than inline text).
@@ -244,7 +251,8 @@ new planes is scoped separately.
 | Description hit targets (AC row toggles, modifier-click opens the URL, plain text still edits) | `apps/tasks/src/components/MarkdownContent.test.jsx`, `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/test/e2e/description-edit-targets.spec.js` |
 | Filter by priority | `test/e2e/priority-filter.spec.js` |
 | Backlog default view — no ownership filter on load; `MY GATES` / `NEEDS MY ATTENTION` apply only when explicitly selected | `apps/tasks/src/App.test.jsx` (`default backlog view`) |
-| Approvals sub-section (session login/logout and current actor, optimistic approve/revoke, per-row pending + rollback errors, immutable states, avatars/tooltips, empty states) | `apps/tasks/src/components/ApprovalsSection.test.jsx`, `apps/tasks/src/tasksApi.test.ts`, `apps/tasks/test/e2e/approval-checkboxes.spec.js` |
+| Clerk gate, unauthorized state, bearer client, and no password UI | `apps/tasks/src/auth/AuthBoundary.test.jsx`, `apps/tasks/src/tasksApi.test.ts`, `apps/tasks/src/components/ApprovalsSection.test.jsx`; deployed-staging verification for real primary/satellite and standalone round trips |
+| Approvals sub-section (current actor, optimistic approve/revoke, per-row pending + rollback errors, immutable states, avatars/tooltips, empty states) | `apps/tasks/src/components/ApprovalsSection.test.jsx`, `apps/tasks/src/tasksApi.test.ts`, `apps/tasks/test/e2e/approval-checkboxes.spec.js` |
 
 ---
 

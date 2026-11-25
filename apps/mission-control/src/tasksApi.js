@@ -1,3 +1,5 @@
+import { getAccessToken } from './auth/token.js';
+
 // Minimal client wrapping the existing Tasks API. The Tasks API is the
 // source of truth for flow metrics — we deliberately avoid adding a new
 // analytics endpoint or database.
@@ -17,13 +19,23 @@ export function tasksApiBaseUrl() {
   );
 }
 
+export class TasksApiError extends Error {
+  constructor(message, status, code) {
+    super(message);
+    this.name = 'TasksApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function apiEnvelope(path) {
+  const token = await getAccessToken();
   const res = await fetch(`${tasksApiBaseUrl()}${path}`, {
-    headers: { 'content-type': 'application/json' }
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(body?.error?.message ?? `Tasks API ${res.status}`);
+    throw new TasksApiError(body?.error?.message ?? `Tasks API ${res.status}`, res.status, body?.error?.code);
   }
   return body;
 }
@@ -31,6 +43,10 @@ async function apiEnvelope(path) {
 async function api(path) {
   const body = await apiEnvelope(path);
   return body.data;
+}
+
+export async function fetchAuthSession() {
+  return api('/auth/session');
 }
 
 /**

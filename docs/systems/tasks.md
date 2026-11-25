@@ -952,26 +952,35 @@ When a follow-up PR is opened after the task's delivery PR and intentionally car
 
 `TaskApproval` is the only source of truth for `spec`, `tech_design`, and `qa` gates. Missing or revoked rows fail closed. Legacy `[tech-design-approved] true` and `[qa-ac-verified] true` comments remain historical data only. One narrow human-write projection is supported for feature specs: the feature-task runner reconciles the exact checked marker `- [x] **Approved by Tom**` from `brain/tasks/specs/open/*.md` into the uniquely linked task's structured `spec` row through the authenticated API. The checkbox never satisfies the gate by itself; unchecked/ambiguous/inaccessible inputs and revoked rows do not write, and the API row remains authoritative. Bookmark, `tech_design`, and `qa` semantics are unchanged.
 
-Browser approval writes require a durable login session:
+Browser approval writes require a Clerk session token (task `ddd2f57d`, tech design `docs/specs/mission-control-tasks-clerk-auth-tech-design.md`):
 
-- `POST /api/v1/auth/session` verifies a configured scrypt password hash, creates a database-backed session, and sets the opaque `tasks_api_session` cookie (`HttpOnly`, `SameSite=Lax`, `Secure` in production).
-- `GET /api/v1/auth/session` resolves the current actor.
-- `DELETE /api/v1/auth/session` revokes the session and clears the cookie.
+- `GET /api/v1/auth/session` resolves the current principal from the presented credential and returns only `{ actor, displayName, approvalTypes }` — no token or profile leakage.
+- The legacy `POST /api/v1/auth/session` (password login) and `DELETE /api/v1/auth/session` (cookie logout) paths are **retired** and answer `404`. The password-backed browser session was a second human identity system alongside the service-credential store; Clerk is now the single browser identity source of truth. The `ApprovalSession` Prisma model is left in place but inert, pending a separate cleanup task.
+- Browser requests present `Authorization: Bearer <Clerk session JWT>`. The server verifies signature, expiry, issuer and authorized party, then resolves the verified `sub` through the server-side allowlist `TASKS_API_CLERK_AUTHORIZED_USERS`. An authenticated subject that is not allowlisted is refused with `403 AUTH_FORBIDDEN`; a missing, malformed, expired, wrong-issuer or wrong-party token is refused with `401 AUTH_REQUIRED`.
+- Product access is a **server-side allowlist keyed by Clerk's immutable user ID**, never by email. Email is metadata, not an authorization key.
 
-Agent writes use `Authorization: Bearer <service-token>` with a separately scoped credential. The server derives actor and authorization; clients cannot submit `owner`. Initial policy is Tom → `spec`/`qa`, Quinn → `tech_design`. Session tokens are stored only as SHA-256 hashes and expire according to `TASKS_API_APPROVAL_SESSION_TTL_SECONDS`.
+Agent writes use `Authorization: Bearer <service-token>` with a separately scoped credential. The server derives actor and authorization; clients cannot submit `owner`. Initial policy is Tom → `spec`/`qa`, Quinn → `tech_design`. Service credentials are matched **first**, byte-for-byte unchanged from the pre-Clerk behaviour, so every existing agent/automation call keeps working without a new flag (AC6).
 
 Approval POST/DELETE and their ordinary audit comment execute in one Prisma transaction. A real transition creates exactly one comment (`Approval <type> approved|revoked by <actor>.`); identical POST and absent/already-revoked DELETE are no-ops with no duplicate history. Archived and `done` tasks are immutable.
 
-### General-mutation authentication boundary (task `0719a8e3`)
+### Authentication boundary (task `0719a8e3`, extended by task `ddd2f57d`)
 
-Every `POST` / `PATCH` / `DELETE` on the tasks-api mutation surface requires the same `tasks_api_session` cookie or `Authorization: Bearer <token>` credential that the approval routes use. The credential store is the shared `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` env var — no second identity system. The middleware in `services/tasks-api/src/middleware/requireAuth.ts` sets `req.user = { actor, kind }` on success and returns `401 AUTH_REQUIRED` on failure. GET endpoints stay open so the Tasks UI and agent task queue keep reading without friction.
+Every request on the tasks-api domain surface — **reads as well as writes** — requires a credential. As of task `ddd2f57d` the previously-open GET endpoints are gated too, because the apps now have live public URLs and an unauthenticated visitor must not be able to read or mutate task data (AC1). The pre-Clerk posture was "GET endpoints stay open so the Tasks UI and agent task queue keep reading without friction"; that is no longer acceptable on a public URL.
+
+Two credential kinds are accepted by the single authenticator in `services/tasks-api/src/middleware/authenticate.ts`:
+
+1. **Service credential** — a constant-time comparison against the shared `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` env var. Unchanged behaviour, unchanged actor, unchanged approval grants. Agents and automations keep working exactly as before (AC6).
+2. **Clerk session token** — verified as a Clerk session JWT (signature, expiry/not-before, issuer, authorized party), then the verified `sub` is resolved through the `TASKS_API_CLERK_AUTHORIZED_USERS` allowlist to an actor.
+
+The middleware sets `req.user = { actor, kind }` on success (`kind` is `service` or `clerk_session`) and returns `401 AUTH_REQUIRED` on a missing/malformed/expired/wrong-party credential or `403 AUTH_FORBIDDEN` for a valid Clerk token whose subject is not allowlisted. `/health`, `/api/v1/health` and CORS `OPTIONS` stay public. `services/tasks-api/src/middleware/requireAuth.ts` and `approvalAuth.ts` both delegate to the shared authenticator, so approval routes never verify a credential twice or drift from the domain routes.
 
 Gated surfaces (mounted ahead of every router in `app.ts`):
 
-- `POST /tasks`, `PATCH /tasks/:id`, `DELETE /tasks/:id`, `POST /tasks/:id/comments`
-- `POST /tags` (and any future `PATCH`/`DELETE` on `/tags`)
-- All write paths under `/content-scheduler/*` (items CRUD, approve/unapprove/publish/remove, reorder, the `cto-craft` trusted ingest)
-- `POST /feature-task-analytics/events`
+- every method under `/api/v1/tasks/**`
+- every method under `/api/v1/tags/**`
+- `/api/v1/task-types/**/required-approvals`
+- every method under `/api/v1/feature-task-analytics/**`
+- authenticated `GET /api/v1/auth/session`
 
 Comment author is derived from the authenticated actor (task `0719a8e3` AC2). A body-supplied `author` field on `POST /tasks/:id/comments` is rejected with `403 COMMENT_AUTHOR_FORBIDDEN` when it disagrees with the authenticated actor; matching it is accepted (and ignored otherwise). This makes impersonation impossible: even a request with `author: "Quinn"` is persisted as the authenticated actor, never the body-supplied value.
 
@@ -986,7 +995,7 @@ Per-agent service credentials — agent-owned callers use the shared Tasks API r
 | `BOOKMARK_LOBSTER_TOKEN` | `bookmark_lobster` | `agents/workflows/bookmarks/scripts/lobster_create_tasks_from_proposals.py` |
 | `FEATURE_TASK_LOBSTER_TOKEN` | `feature_task_lobster` | `agents/workflows/feature-task/src/api_client.rs` (`add_comment`), `agents/workflows/feature-task/src/analytics.rs` |
 
-When both `TASKS_API_APPROVAL_USERS` and `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` are empty the API refuses every mutation with `401 AUTH_REQUIRED`. Local dev must provision at least one user or service credential — see `services/tasks-api/test/mutationAuthIntegration.test.ts` for the contract. Quinn provisions the relevant per-agent tokens in `~/.openclaw/.env` and the agent env files; each agent only learns its own token.
+When both `TASKS_API_CLERK_AUTHORIZED_USERS` and `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` are empty the API refuses every domain request with `401 AUTH_REQUIRED`. Local dev must provision at least one Clerk allowlist row or service credential — see `services/tasks-api/test/mutationAuthIntegration.test.ts` for the contract. Quinn provisions the relevant per-agent tokens in `~/.openclaw/.env` and the agent env files; each agent only learns its own token.
 
 ---
 
