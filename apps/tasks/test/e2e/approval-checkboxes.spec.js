@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+// The Clerk boundary retired the password-backed session, so this spec no
+// longer drives a sign-in form. The harness establishes the session up front:
+// the app is mounted with the test-only session seam (see
+// apps/tasks/src/auth/e2eSession.js) and the API session is stubbed as an
+// already-signed-in actor, which is what the approval controls now require.
 test('approval checkboxes approve, revoke, reconcile, and roll back failures', async ({ page }) => {
   const task = {
     id: 'approval-task', title: 'Approval target', description: '', status: 'ready',
@@ -7,7 +12,6 @@ test('approval checkboxes approve, revoke, reconcile, and roll back failures', a
     blocked: false, tags: [], taskType: 'feature', approvals: [], comments: []
   };
   let failNextApproval = false;
-  let signedIn = false;
 
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request();
@@ -15,20 +19,15 @@ test('approval checkboxes approve, revoke, reconcile, and roll back failures', a
     const method = request.method();
 
     if (method === 'GET' && /\/auth\/session$/.test(url.pathname)) {
-      await route.fulfill(signedIn
-        ? { json: { data: { actor: 'Tom', approvalTypes: ['spec', 'qa'] } } }
-        : { status: 401, json: { error: { message: 'Unauthenticated' } } });
-      return;
-    }
-    if (method === 'POST' && /\/auth\/session$/.test(url.pathname)) {
-      expect(request.postDataJSON()).toEqual({ username: 'tom', password: 'test-password' });
-      signedIn = true;
-      await route.fulfill({ json: { data: { actor: 'Tom', approvalTypes: ['spec', 'qa'] } } });
-      return;
-    }
-    if (method === 'DELETE' && /\/auth\/session$/.test(url.pathname)) {
-      signedIn = false;
-      await route.fulfill({ json: { data: null } });
+      await route.fulfill({
+        json: {
+          data: {
+            actor: 'Tom',
+            displayName: 'Tom',
+            approvalTypes: ['spec', 'tech_design', 'qa_agent', 'accepted']
+          }
+        }
+      });
       return;
     }
     if (method === 'GET' && /\/task-types\/feature\/required-approvals$/.test(url.pathname)) {
@@ -74,16 +73,13 @@ test('approval checkboxes approve, revoke, reconcile, and roll back failures', a
 
   await expect(checkbox).not.toBeChecked();
   await expect(checkbox).toBeEnabled();
-  // Initial click while unauthenticated — opens the login modal and rolls back
-  // the optimistic check. Use .click() instead of .check() because the rollback
-  // intentionally leaves the box unchecked between the click and the re-attempt
-  // triggered by the login flow; the strict .check() helper would time out
+  await expect(page.getByText('Signed in as Tom')).toBeVisible();
+
+  // The session already exists, so the first click approves straight away.
+  // Use .click() instead of .check() because the optimistic state is rolled
+  // back by a rejected request, and the strict .check() helper would time out
   // waiting for the box to settle as checked during that interim state.
   await checkbox.click();
-  await page.getByLabel('Username').fill('tom');
-  await page.getByLabel('Password').fill('test-password');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByText('Signed in as Tom')).toBeVisible();
   await expect(checkbox).toBeChecked();
   await expect(page.getByText('Approval spec approved by Tom.')).toBeVisible();
 
@@ -97,7 +93,4 @@ test('approval checkboxes approve, revoke, reconcile, and roll back failures', a
   await checkbox.click();
   await expect(page.getByRole('alert')).toContainText('Approval denied');
   await expect(checkbox).not.toBeChecked();
-
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page.getByText('Sign in to change approvals')).toBeVisible();
 });
