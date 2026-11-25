@@ -27,7 +27,7 @@
 // deploys the SHARED Fly config instead of the rendered one deploys the
 // STAGING app name and the STAGING CORS origins to production, and the
 // deploy succeeds. A workflow that forgets a source name registers
-// fifteen app-level secrets with one source missing and the supervisor
+// nineteen app-level values with one source missing and the supervisor
 // refuses to start. A source name carrying a staging marker registers a
 // staging database on a production app.
 //
