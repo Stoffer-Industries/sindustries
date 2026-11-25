@@ -1,0 +1,40 @@
+-- Fix gymtrack_oauth_clients read policy for Clerk Third-Party Auth
+--
+-- Every user-owned GymTrack table was repointed to auth.jwt()->>'sub' by
+-- 20260924000000_clerk_rls_third_party_auth_assert.sql. public.gymtrack_oauth_clients
+-- has no user_id (it is a public client catalogue, not user-owned data), so it was
+-- correctly left out of that migration's scope -- but its original read policy was
+-- never revisited:
+--
+--   create policy gymtrack_oauth_clients_authenticated_read on public.gymtrack_oauth_clients
+--     for select using (auth.role() = 'authenticated');
+--
+-- auth.role() resolves from a `role` claim on the request JWT. Native Supabase Auth
+-- JWTs always carry `role: "authenticated"`; a Clerk-issued session JWT verified via
+-- Supabase Third-Party Auth only carries that claim if it was explicitly added as a
+-- custom claim in Clerk's session token configuration (a Clerk-dashboard-only setting,
+-- outside this repo). That configuration step was never verified against a real
+-- production token -- the Slice B assertion migration's own self-test synthesizes the
+-- `role` claim with set_config() rather than proving a live Clerk token carries it.
+--
+-- Effect in production (2026-11-25): every OAuth consent screen -- for every
+-- dynamically-registered MCP client (Claude, OpenClaw, etc.) -- failed closed with a
+-- generic "Unknown OAuth client." error, because the SELECT silently returned zero rows
+-- under RLS rather than erroring, and the frontend (AgentConsentPage.jsx) cannot
+-- distinguish "no such client" from "RLS filtered the row".
+--
+-- Fix: stop depending on the Clerk-only custom claim. Any verified third-party JWT
+-- proves the caller authenticated through Supabase's Third-Party Auth integration --
+-- that is sufficient for this table, since it has no row-level ownership to check.
+-- This matches Supabase's documented guidance for Third-Party Auth: use
+-- `(select auth.jwt()) is not null` to test "is authenticated" rather than relying on
+-- a role claim that only native Supabase Auth guarantees.
+--
+-- Applied directly to production via the Supabase Management API on 2026-11-25
+-- (verified: SELECT against this table with a simulated Clerk JWT carrying only `sub`,
+-- no `role`, now succeeds). This migration lands the same change in the repo so
+-- `supabase db push` on the next deploy is a no-op against production and every other
+-- environment picks up the fix.
+
+alter policy gymtrack_oauth_clients_authenticated_read on public.gymtrack_oauth_clients
+  using ((select auth.jwt()) is not null);
