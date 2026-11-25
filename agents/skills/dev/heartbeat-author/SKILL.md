@@ -17,7 +17,9 @@ description: "Create, restructure, or review repository-owned HEARTBEAT.md files
 - **Stop after the useful work for this pass.** Once the unit has taken its one bounded action, or recorded a newly evidenced blocker, stop that unit. Do not start a second item merely because time remains. The scheduler may proceed to the next independent unit only if the turn budget permits and the unit has not reached a pass-level stop condition.
 - **Bound the pass.** A heartbeat should have a fixed per-pass turn/time budget, a maximum number of units to act, and a defined stop response on budget exhaustion. Prefer one concrete action per unit; do not allow an unbounded loop over tasks, PRs, incidents, or files.
 - **Promote growth instead of extending indefinitely.** When a unit becomes large, slow, stateful, or independently schedulable, spin it out into a special cron first. When two or more crons need ordering, shared state, retries, or handoffs, define a workflow that owns that orchestration. Do not solve scheduler pressure by adding more prose to HEARTBEAT.md.
+- **Prefer existing skills before writing inline procedure.** Before adding execution detail to a heartbeat, search the repository's skills and use the most specific applicable skill. If one exists, the heartbeat names the trigger and points to it; it does not duplicate or reinvent the procedure. Create or update a skill when the primitive is reusable, stable, or shared by more than one unit/agent.
 - **Cross-cutting duplication is a defect.** Shared retro-note, failure-notification, environment-loading, or output rules belong in a referenced skill or canonical shared section. Do not copy them into every unit unless the unit-specific difference is explicit.
+- **Cron prompts inherit the cron-author contract.** Any unit promoted to a cron must use the cron-author skill and end with the exact notify-soft-fails block from that skill. The heartbeat must not absorb, rewrite, or omit that block; it only defines the unit's trigger, handoff, and visibility contract.
 - **Preserve behavior during restructuring.** Move content to the correct boundary; do not silently remove operational guidance. If a rule cannot be assigned to a unit or scheduler policy, stop and report the ambiguity instead of guessing.
 - **Use evidence for promotion decisions.** Recommend a cron/workflow based on observed duration, cadence collisions, repeated trigger patterns, repeated output/state coupling, or a concrete task/PR correction—not merely line count.
 
@@ -28,15 +30,16 @@ description: "Create, restructure, or review repository-owned HEARTBEAT.md files
 3. **Draw the boundaries before editing.** Classify every paragraph as scheduler policy, unit policy, execution reference, shared policy, or unexplained/ambiguous. A paragraph that serves two units must be split or moved to shared scheduler policy; do not leave it intermingled.
 4. **Apply the unit contract.** Rewrite each unit using the OUTPUT FORMAT below. Keep the unit self-contained and use pointers rather than duplicating execution details. A unit may have subsections, but its output contract and stop condition must remain visible at the unit's top level.
 5. **Define the scheduler envelope.** Add one clearly named scheduler section containing only cross-cutting rules: discovery-before-silence, ordering, turn/time budget, maximum actions, concurrency, final aggregation, and what happens when the budget is exhausted. The scheduler must not decide a unit's domain-specific output.
-6. **Decide whether to promote work.** For each unit, choose one outcome:
+6. **Resolve reusable procedure references.** Search the installed/repository skill catalog before drafting execution prose. Select the most specific existing skill, verify its instructions, and make the unit point to it. Only add inline detail for heartbeat-specific trigger/stop/handoff policy or when no applicable skill exists.
+7. **Decide whether to promote work.** For each unit, choose one outcome:
    - **Keep in heartbeat:** small, bounded, every-pass discovery or routing; no independent long-running workflow.
    - **Spin out to a special cron:** a distinct cadence/trigger, isolated model or tools, long-running work, optional maintenance, or a unit whose runtime regularly consumes the heartbeat budget. Replace the old body with a pointer to the cron prompt and retain only the heartbeat handoff/visibility rule.
    - **Create or extend a workflow:** two or more crons/units require serialization, dependency ordering, shared state transitions, retries, approval gates, or a durable handoff. The workflow owns sequencing; heartbeat only discovers whether it needs to start or report it.
    - **Extract a reusable skill:** the same execution primitive is useful to multiple agents or has a stable input/output contract.
-7. **Define stop conditions explicitly.** For each unit specify when it stops after one action, one item, a bounded batch, a blocker, an external failure, or budget exhaustion. At scheduler level specify the order in which remaining units are skipped or continued. Never imply “continue until done” without a hard bound.
-8. **Check output isolation.** Read the final document as if extracting each unit into a fresh cron session. Verify that each unit's output can be understood without neighboring prose and that a unit cannot accidentally emit another unit's marker, notification, or task comment.
-9. **Validate preservation and structure.** Diff against the original; confirm all old operational facts are either preserved, moved to the correct file, or replaced by an explicit pointer. Check that the file has one title, consistent section headings, named scheduler policy, named units, and no orphaned paragraphs. Run repository-specific validation and focused tests named by touched resources.
-10. **Report the promotion map.** Return a compact table of unit → keep/cron/workflow/skill, with evidence, stop condition, output surface, and any unresolved ambiguity. Do not claim the heartbeat is finished until every unit has a disposition.
+8. **Define stop conditions explicitly.** For each unit specify when it stops after one action, one item, a bounded batch, a blocker, an external failure, or budget exhaustion. At scheduler level specify the order in which remaining units are skipped or continued. Never imply “continue until done” without a hard bound.
+9. **Check output isolation.** Read the final document as if extracting each unit into a fresh cron session. Verify that each unit's output can be understood without neighboring prose and that a unit cannot accidentally emit another unit's marker, notification, or task comment.
+10. **Validate preservation and structure.** Diff against the original; confirm all old operational facts are either preserved, moved to the correct file, or replaced by an explicit pointer. Check that the file has one title, consistent section headings, named scheduler policy, named units, and no orphaned paragraphs. Run repository-specific validation and focused tests named by touched resources.
+11. **Report the promotion map.** Return a compact table of unit → keep/cron/workflow/skill, with evidence, stop condition, output surface, and any unresolved ambiguity. Do not claim the heartbeat is finished until every unit has a disposition.
 
 ## OUTPUT FORMAT
 
@@ -90,6 +93,15 @@ skill, or ordered workflow.
 Point to the canonical notify-soft-fail or incident-routing skill. Keep only
 heartbeat-specific routing/stop behavior here.
 
+If a unit is promoted to a cron, its cron prompt must end with this exact
+cron-author block (not a paraphrase):
+
+~~~markdown
+# notify-soft-fails
+Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md and follow it.
+If the output of this cron has soft failures or unacceptable errors, escalate that to Lox's main session.
+~~~
+
 ## Retro notes scan
 
 A bounded pointer to the retro-notes skill; do not duplicate its procedure.
@@ -119,12 +131,13 @@ Read these in order before authoring or reviewing a heartbeat:
 
 1. The target agent's HEARTBEAT.md, WORKFLOW.md, SOUL.md, and DoD.md where present.
 2. agents/definitions/README.md for the canonical HEARTBEAT vs WORKFLOW split and source-of-truth rules.
-3. The agent's linked skills, cron prompts, and workflow/lobster definitions.
-4. agents/skills/dev/skill-author/SKILL.md for the repository's 5+1 skill blueprint and evidence-preservation conventions.
-5. agents/skills/ops/cron-author/SKILL.md for cron prompt ownership and the notify-soft-fails requirement.
-6. agents/skills/ops/notify-soft-fail/SKILL.md for external-failure routing.
-7. docs/systems/agent-incidents.md when the heartbeat reads or writes incident state.
-8. Recent task/PR/review evidence establishing duration, collisions, regressions, or repeated corrections.
+3. The installed/repository skill catalog: search for an applicable skill before writing inline execution procedure.
+4. The agent's linked skills, cron prompts, and workflow/lobster definitions.
+5. agents/skills/dev/skill-author/SKILL.md for the repository's 5+1 skill blueprint and evidence-preservation conventions.
+6. agents/skills/ops/cron-author/SKILL.md for cron prompt ownership and the notify-soft-fails requirement.
+7. agents/skills/ops/notify-soft-fail/SKILL.md for external-failure routing.
+8. docs/systems/agent-incidents.md when the heartbeat reads or writes incident state.
+9. Recent task/PR/review evidence establishing duration, collisions, regressions, or repeated corrections.
 
 ## ONBOARDING
 
