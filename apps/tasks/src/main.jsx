@@ -6,6 +6,7 @@ import '@sindustries/ui/react/styles.css';
 import './index.css';
 import { App } from './App.jsx';
 import { AuthBoundary } from './auth/AuthBoundary.jsx';
+import { e2eSession, installE2eSession } from './auth/e2eSession.js';
 import { clerkConfig } from './auth/clerkConfig.js';
 import { getStoredTheme, getStoredPulseTheme, setStoredPulseTheme, setStoredTheme } from './utils/storage.js';
 
@@ -42,14 +43,21 @@ if (typeof window !== 'undefined') {
   });
 }
 
-const authConfig = clerkConfig();
+// The test-only e2e session bypasses Clerk entirely (see
+// auth/e2eSession.js): the Playwright harness stubs every API response, so
+// there is no Clerk session to establish and no publishable key to configure.
+const e2e = e2eSession();
+if (e2e) installE2eSession(e2e);
+
+const board = (
+  <AuthBoundary>
+    <App />
+  </AuthBoundary>
+);
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <ClerkProvider {...authConfig}>
-      <AuthBoundary>
-        <App />
-      </AuthBoundary>
-    </ClerkProvider>
+    {e2e ? board : <ClerkProvider {...clerkConfig()}>{board}</ClerkProvider>}
   </React.StrictMode>
 );
 

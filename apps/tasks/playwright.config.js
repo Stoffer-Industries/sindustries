@@ -9,7 +9,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      'VITE_TASKS_API_BASE_URL=http://127.0.0.1:4000/api/v1 npm run dev -- --host 127.0.0.1 --port 4173',
+      'VITE_TASKS_E2E_AUTH_TOKEN=e2e-harness-session-token VITE_TASKS_API_BASE_URL=http://127.0.0.1:4000/api/v1 npm run dev -- --host 127.0.0.1 --port 4173',
     port: 4173,
     reuseExistingServer: true,
     cwd: '.'
