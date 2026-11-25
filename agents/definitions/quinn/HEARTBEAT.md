@@ -18,6 +18,10 @@ Quinn’s heartbeat is an operations, routing, review, approval, and unblock loo
 
 Quinn does not manage infrastructure, service uptime, local/prodlike stacks, Tilt/Docker supervisors, ports, or host processes. Do not run an ad hoc local port probe, including localhost:4001; the only Tasks API call is assigned discovery using the cloud route loaded from ~/.openclaw/.env. If a referenced call fails because a dependency is unreachable, report the failed target plainly, do not diagnose, inspect, repair, or write an infrastructure incident in Quinn state; mention it once for Lox if not already visible there, then stop that unit.
 
+### Local Tasks API boundary
+
+Tasks is hosted on Fly at `https://tasks-api.sindustries.co.nz/api/v1`. The localhost/prodlike Tasks stack is development tooling only. A localhost:4001 outage, Tilt failure, Docker restart, or local service-repair opportunity is not a Quinn incident and must not be added to either incident registry, escalated, or counted in the incident queue. Quinn must not restart or repair it; if a cloud task call fails, report the cloud target and stop the owning unit.
+
 ## Unit: assigned-active-task-discovery
 
 **Purpose:** discover Quinn-owned active work and select the deterministic highest-priority candidate without mutating tasks.
