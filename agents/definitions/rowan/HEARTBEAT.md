@@ -1,163 +1,89 @@
 # HEARTBEAT.md — Rowan
 
-**Scope of this file:** *when* I check for work and *what triggers action* each pass. For *how* I execute — task-state rules, tech-design gate, PR standards, escalation triggers — see `WORKFLOW.md`. This file is the polling cadence; WORKFLOW is the execution playbook.
+**Scope of this file:** polling cadence, discovery order, per-pass triggers,
+priority, and stop conditions. Execution details live in `WORKFLOW.md` and the
+referenced skills.
 
-Each heartbeat pass does two things in order: handle all PR work (review assigned PRs and address feedback on my own), then pick code-garden work.
+## Scheduler policy
 
-Before Step 1, run the shared read-only work queue once:
-`set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a; TASKS_API_BASE_URL="${TASKS_API_BASE_URL:?load TASKS_API_BASE_URL from ~/.openclaw/.env}" python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Rowan --json`
+- **Fresh-pass contract:** Load the current agent definition and run the shared task queue before deciding that the pass is empty. Read it with `tasks-api/scripts/agent_task_queue.py --assignee Rowan --json`; never infer emptiness from a raw query or the GitHub login `rowanstoffer`.
+- **Order:** Queue discovery → PR candidate → task candidate → code gardening → retro scan. PR and task work use the queue's one deterministic `topCandidate`; code gardening is considered only after task work has been evaluated.
+- **Budget:** Target ≤20 minutes and always finish within the 30-minute cadence; hard ceiling `timeoutSeconds: 1500`.
+- **Action cap:** At most one queue candidate and at most one code-garden PR per pass. Do not start a second item because time remains.
+- **Concurrency:** Serialize units because they share queue, branch/PR dedupe, and Rowan task attention state. Retro runs only after useful work.
+- **Exhaustion:** On budget exhaustion, stop immediately. Record staged gardening work, branch, or prepared change in Rowan memory so the next pass can resume; remaining units emit bounded `SKIPPED_BUDGET` records rather than claiming a clean pass.
+- **Final output:** Aggregate unit results as separately labelled records. Emit `NO_REPLY` only when every required discovery unit ran or recorded its safe skip condition and every unit is silent by its own contract.
 
-The queue combines task and PR work and returns one deterministic `topCandidate`. Action that candidate in this pass through the matching workflow or `pr-process` skill with Rowan's own identity. The queue never reviews, comments, changes task state, or merges automatically.
+## Unit: queue-discovery
 
-**Always use this script — never a raw `curl .../tasks?assignee=...` call.** The tasks-api `assignee` field is the human display name `Rowan`, not the GitHub login `rowanstoffer`; a raw query with the wrong casing silently returns `[]` and has repeatedly masked the entire 4-doing workload, leading to false "nothing assigned" conclusions that skipped straight past Step 3 into `NO_REPLY`. If a raw sanity-check query is ever needed, use `assignee=Rowan` and treat `assignee=rowanstoffer` returning `[]` as expected, not as evidence of an empty queue.
+**Purpose:** Build the authoritative, deterministic work view for this pass.
 
----
+**Trigger:** Every heartbeat pass, before any action or silence decision.
 
-## Step 1 — PR work
+**Inputs and state:** Read the Tasks API queue script and environment from `$HOME/.openclaw/.env`; read current open Sindustries PR metadata. The queue owns classification and `topCandidate`; this unit may not change task state, review PRs, comment, or merge.
 
-Read and follow the pr-process skill for both reviewer and assignee duties:
-`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
+**Action boundary:** Run the queue script once and retain its tasks, PR candidates, classifications, and `topCandidate`. Follow the tasks-api skill; do not substitute raw curl/query.
 
-When `topCandidate.kind` is `reviewRequest`, `authoredPrFeedback`, `authoredPrConflict`, or `mergeCandidate`, process that one candidate through the matching reviewer or assignee path. An `authoredPrConflict` follows the rebase procedure in `WORKFLOW.md`; it is actionable even when CI is green. Rowan merges only his own eligible PR after Quinn's blocking approval and green CI; Tom remains visibility-only unless explicitly required.
+**Output contract:** Silent on a valid queue. Return labelled `QUEUE_BLOCKED` to Lox's main session through canonical soft-failure policy on API/auth/empty-output/traceback failure. Never emit `NO_REPLY` from this unit.
 
-If no open PRs or no unresolved comments: skip the assignee part.
+**Stop condition:** One successful queue read, one newly evidenced blocker, or scheduler budget. Do not retry indefinitely.
 
-**Pre-publish check for any PR I open (added 2026-09-02 after a 12h stall on four PRs that lacked reviewer requests):**
+**Growth trigger:** Promote to a dedicated cron if queue latency/retries regularly consume heartbeat budget, or a workflow if queue state needs durable retries/handoffs with another scheduler.
 
-After `gh pr create`, before considering the PR "open", run **two separate calls** — assignees and reviewer requests are different endpoints with different paths:
+## Unit: pr-candidate
 
-```bash
-# assignees: PRs ARE issues, so the /issues/ path is correct here
-gh api -X POST 'repos/Stoffer-Industries/sindustries/issues/<N>/assignees' -f 'assignees[]=rowanstoffer'
-# reviewer requests: the canonical endpoint is /pulls/, NOT /issues/
-gh api -X POST 'repos/Stoffer-Industries/sindustries/pulls/<N>/requested_reviewers' \
-  -f 'reviewers[]=quinnstoffer' -f 'reviewers[]=Stoff81'
-```
+**Purpose:** Progress exactly one assigned or authored PR candidate.
 
-**Do not bundle these into one snippet or swap the prefixes.** `POST /issues/<N>/requested_reviewers` returns `404 Not Found` — that path does not exist on GitHub's REST API — while `/issues/<N>/assignees` works and `/pulls/<N>/requested_reviewers` works. This 404 has now fired on three PRs (#603, #672, #867) purely because of a wrong prefix in the instruction, costing a retry each time and, on #867, hiding the fact that reviewers had not been requested until a follow-up read-back caught it.
+**Trigger:** `topCandidate.kind` is `reviewRequest`, `authoredPrFeedback`, `authoredPrConflict`, or `mergeCandidate`.
 
-Verify both landed before moving on:
+**Inputs and state:** Read the queue candidate, live PR reviews/checks/branch, and Rowan's `WORKFLOW.md`; write only PR branch, PR metadata, and required task/PR evidence permitted there. Reviewer requests and assignees are separate GitHub endpoints and must be verified after PR creation.
 
-```bash
-gh pr view <N> --json assignees,reviewRequests
-```
+**Action boundary:** Follow `pr-process/SKILL.md` for the matching path. For conflicts use `WORKFLOW.md`; Rowan may merge only his own eligible PR after Quinn's blocking approval and green CI. Use the task/PR dedupe guard before implementation and before creating a PR; never create a duplicate.
 
-Both arrays must be non-empty (`reviewRequests` under `gh pr view` is the correct field name — `requestedReviewers` is not a valid `gh pr view` field and errors out). If `assignees` is empty, Quinn never gets notified and `mergeCandidates` never populates, regardless of task-comment authorization. This applies to **draft** PRs too — Quinn's first-look feedback on a draft is the whole point of opening it before the next slice ships.
+**Output contract:** Silent when safely skipped because no unresolved work remains. Otherwise emit one labelled `PR_PROGRESS`, `PR_BLOCKED`, or `PR_RACE` naming PR and evidence. External failures follow shared soft-failure policy; this unit does not claim task completion.
 
-A `404` on the reviewer-request call is a URL-pattern error, **not** a token-scope error: verify with `gh api -i /user | grep -i x-oauth-scopes` before concluding anything about the credential.
+**Stop condition:** One candidate's bounded review, feedback fix, conflict handoff, or eligible merge; stop at first blocker, race, or budget limit.
 
----
+**Growth trigger:** Spin independently scheduled or long-running review into a cron; create a workflow only when PR work needs ordered retries/handoffs across crons.
 
-## Step 2 — Task work (feature + code)
+## Unit: task-candidate
 
-When `topCandidate.kind` is `task`, use that task as the active work item. The `tasks` list retains all assigned active tasks for blocker/context checks.
+**Purpose:** Materially progress one actionable Rowan task while preserving Lobster capacity and attention ownership.
 
-The classifier distinguishes explicit and dependency blocks from actionable work. Capacity and state admission remain entirely owned by Lobster. A missing implementation delivery (`[implementer-prs]`) is `ACTIONABLE`, never a request or wait for Quinn.
+**Trigger:** `topCandidate.kind` is `task`, or a task has an actionable implementation state requiring Rowan's workflow.
 
-For each returned task, follow `WORKFLOW.md` for the execution steps in that state. If the queue contains any `ACTIONABLE` task, the pass must materially progress one before finishing: create/update a branch, commit, PR, validation result, required task comment, or a newly evidenced concrete blocker. A pass with actionable work and no such progress is a failed heartbeat and must follow **Escalate on Failure** below.
+**Inputs and state:** Read queue candidate and assigned active tasks, `WORKFLOW.md`, open Sindustries PRs/branches, latest `[lobster-state]`, approvals, gate, `assignee`, and `attentionOwners`. Write only through Tasks API/approved task comments and Rowan's implementation branch/PR.
 
-**Task/PR dedupe guard — required before implementation and again immediately before `gh pr create`:**
+**Action boundary:** Follow `WORKFLOW.md`. If an assigned `open` task lacks `[tech-design]` or `[tech-design-not-required]`, post the design first and wait for Quinn approval. Otherwise make one concrete delivery step: branch, commit, PR, validation, required comment, or newly evidenced blocker. Before changing `attentionOwners`, read latest Lobster state; unresolved `failureFingerprint` on a `doing` task remains a delivery blocker, not a reason to add Tom or Quinn. Before finishing, read back assignee, attention owners, approvals, and gate; keep Rowan assigned while advancing a completed handoff.
 
-1. Derive the task's 8-character ID and inspect **all** open Sindustries PRs, not only the current branch. Match the task ID against `headRefName`, PR body, and commit messages; also inspect remote `task-<short-id>-*` branches.
-2. If an open PR or implementation branch already exists for the task, stop creating a new branch/PR. Reuse and continue the existing work. A design-only canonical branch is the implementation branch to extend, not a reason to create an agent-suffixed branch.
-3. Do not conclude "no PR exists" from an exact-head lookup alone. Another heartbeat may have used a suffixed branch name.
-4. After opening a PR, read back all open PRs for the task. If more than one exists, make no further workflow/routing writes; report the race and consolidate to one PR before continuing.
+**Output contract:** Emit one labelled `TASK_PROGRESS` for material progress or `TASK_BLOCKED` for a concrete blocker. A pass with actionable work and no progress is failure and uses shared soft-failure policy; never silently report success.
 
-This guard prevents overlapping heartbeat runs from independently implementing the same task, as happened with task `479d76f8` (PRs #811 and #812).
+**Stop condition:** One tech-design post, one bounded implementation/evidence step, or first blocker/race/budget limit. Do not implement multiple tasks.
 
-Before finishing a task pass, read back the task's `assignee`, `attentionOwners`,
-approvals, and current gate. If Rowan is still `attentionOwners[0]` only because
-delivery evidence was requested, and the merged PR/evidence handoff is now
-complete, self-resolve or advance Rowan's top attention slot with a reason-bearing
-write. Keep Rowan as `assignee`; do not clear the delivery assignment. If QA is
-already approved, the next expected actor is the acceptance gate, not Rowan.
+**Growth trigger:** Extract a reusable stable primitive into a skill; spin long-running/retryable work into a cron; use a workflow when task crons require ordered transitions/retries/handoffs.
 
-Before changing `attentionOwners`, also read the latest `[lobster-state]`.
-When the task is still `doing` and its latest Lobster state has a non-empty
-`failureFingerprint`, that fingerprint is an unresolved delivery/evidence
-blocker until a newer successful Lobster state clears it. Do not add Tom for
-acceptance or Quinn as a dormant verification slot in that state; keep the
-stack empty unless there is a genuine current position-0 runtime blocker, and
-work the delivery evidence as Rowan. The Tasks API rejects the invalid
-`doing`-task stack as a final safety net.
+## Unit: code-garden
 
-**Heartbeat cadence rule — the only per-pass opinion layered on top of `WORKFLOW.md`:**
+**Purpose:** Make one bounded maintenance improvement only when assigned work does not require Rowan's action.
 
-If any assigned implementation task is in `open` and lacks a posted `[tech-design]` comment or `[tech-design-not-required]` waiver, prioritise writing and posting that tech design before continuing implementation on any `doing`/`acceptance` task. After posting `[tech-design]`, return to the active implementation work — do not start implementing the `open` task until Quinn approves the design.
+**Trigger:** No PR candidate, no `open` task waiting for tech design, no `doing`/`acceptance` task can materially progress, and any needed nudge is sent. Dependency-blocked or waiting-external alone is not a skip reason.
 
----
+**Inputs and state:** Read queue classifications, open code-garden PRs, `code-garden` skill, retro handoff, and Rowan memory. Write at most one maintenance branch/PR and current-pass memory for resumable work.
 
-## Step 3 — Code gardening
+**Action boundary:** Follow `code-garden/SKILL.md`; check open code-garden PR first. Prefer cheap retro handoff over whole-tree sweep. Stage and carry a candidate when budget expires.
 
-Read and follow:
-`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/code-garden/SKILL.md`
+**Output contract:** Silent when an existing garden PR or valid scheduler skip applies. Otherwise emit one labelled `GARDEN_PROGRESS` or `GARDEN_BLOCKED` with candidate/PR and evidence. This unit owns no task or PR-candidate output.
 
-**Limit:** Open at most 1 code-garden PR at a time. Check for open PRs first — if one exists, skip this step.
+**Stop condition:** One finding/PR, one newly evidenced blocker, or 20 minutes elapsed; never begin another finding after the threshold.
 
-**Skip code gardening entirely** if any assigned implementation task in `open` is waiting for its tech design, or any `doing`/`acceptance` task can be materially progressed this pass (implementation, review feedback, merge/post-merge work, required comments/specs, or validation). Code garden is only on the table when all active implementation tasks are waiting on someone else's action and any needed nudge has already been sent.
+**Growth trigger:** Promote to a cron when independently cadenced, long-running, or repeatedly budget-consuming; create a workflow only if gardening needs ordered retries/handoffs.
 
-**Only those three bullets are valid reasons to skip code garden.** `DEPENDENCY_BLOCKED` and `WAITING_EXTERNAL` classifications from the queue are explicitly NOT skip reasons on their own — they mean Step 2 has nothing to progress, which is exactly the signal to move to Step 3. Do not invent additional judgment calls this file doesn't list (e.g. "don't compete for review attention," "hold until the dependency chain clears," "avoid opening a PR while other tasks are mid-flight") as reasons to skip. If the three bullets don't apply, open code gardening — that is the required action, not a fallback to consider.
+## Shared failure policy
 
-## Turn budget — this heartbeat shares the cron lane with the other agents' heartbeats
-
-Added 2026-11-23 after the 7-day lift analysis below. This agent's own heartbeat is
-the largest single correlate of the other agents' `heartbeat skipped: cron-in-progress`
-events, so a turn that outlasts its cadence does not only cost this agent its own
-pass — it starves the other agents' heartbeats, including one of the `qa_agent`
-approvers on an open task.
-
-Measured 2026-11-23 over 7 days (2026-11-16 15:30 → 2026-11-23 14:48) across 172 skip
-ticks, from cron run history with skip events excluded from the occupancy windows (a
-skip is not a running job):
-
-| job | share of wall time running | P(running at a skip tick) | lift vs baseline |
-| --- | --- | --- | --- |
-| `heartbeat-rowan` | 30.1% | 59.9% | 1.95x |
-| Task Lobsters | 16.3% | 19.2% | 1.16x |
-| `heartbeat-quinn` | 10.6% | 7.6% | 0.74x |
-| `heartbeat-lox` | 2.7% | 0.0% | 0.00x |
-
-103 of the 172 skip ticks (60%) had this heartbeat in flight, and every other job sat
-at or below its own baseline. Per `heartbeat-global-cron-busy-skip`, mere overlap is
-evidence, not proof — the skip storm is also long-standing and fleet-wide (50 of Lox's
-skips on 2026-11-17 → 2026-11-21 had no rowan run in flight at all), so its origin is
-scheduler-level lane tracking rather than this job. This job is the largest aggravator
-of a condition that predates it.
-
-**Rules.**
-
-1. **A heartbeat turn finishes inside its cadence.** The hard ceiling is
-   `timeoutSeconds: 1500` — past that, `cron: job execution timed out` throws the
-   turn's completed work away (`heartbeat-deadline-and-provider-rate-limit`). Target
-   ≤ 20 minutes of wall time; the cadence is 30m.
-2. **Prefer the cheap discovery paths.** The retro-notes hand-off line from the
-   previous pass names the next instance of a swept class and costs one read; a
-   whole-tree grep sweep costs many tool calls and is the single biggest time sink in
-   Step 3.
-3. **Do not start a new code-garden finding once the pass is past 20 minutes.** This
-   is a budget, not a fourth skip reason: code garden is still the required action
-   under Step 3, and the work carries to the next pass.
-4. **Stage and carry, do not abandon.** If the sweep cannot be finished inside the
-   budget, record the candidate finding, the branch and the prepared change in this
-   pass's memory file and open the PR at the next pass. The task/PR dedupe guard
-   already resumes a branch that exists without a PR — a staged sweep is a resumable
-   sweep.
-
----
-
----
-
-## Escalate on Failure
-
-If any step fails due to an external dependency or operational issue (GitHub auth/scope error, Tasks API error, service unavailable, command traceback, unexpected empty output, or a brittle diagnostic command failure):
-
-1. Do NOT silently fall back, spam Tom with raw command failure output, or treat the failure as ordinary heartbeat progress
-2. Note which step failed and what the error was
-3. Read and follow `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md` — escalate to Lox's main session
-4. Continue only if the remaining heartbeat steps are safe and independent; otherwise stop after the Lox escalation
-
----
+For GitHub auth/scope errors, Tasks API errors, service unavailability, tracebacks, unexpected empty output, or brittle diagnostic failures, stop the affected unit, preserve completed work, and follow `agents/skills/ops/notify-soft-fail/SKILL.md` to escalate to Lox's main session. Do not fall back silently, spam Tom with raw errors, or let one unit claim another's success. Incident authority remains with existing incident-routing conventions; this heartbeat does not invent authority.
 
 ## Retro notes scan
 
-After completing all heartbeat sections, if recent build/infra/CI/PR work surfaced a recurring pattern (same friction or working practice appearing for the second or later time), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug, and the highest-impact one becomes an auto-created feature task for Tom's approval. Use stable kebab-case `pattern-slug`s so observations group cleanly across the week.
+After units complete, use `retro-notes` skill for a bounded scan of recent build/infra/CI/PR work. If a recurring pattern appears for the second or later time, append one row to today's `brain/ops/retro-notes/YYYY-MM-DD.md`; do not duplicate a weekly `pattern-slug`. Silent when no new pattern exists; emit `RETRO_RECORDED` only when writing a row.
+
+If this scan repeatedly exceeds budget or needs independent cadence, promote it to a cron; if multiple retro jobs need ordering or shared deduplication state, create a workflow.
