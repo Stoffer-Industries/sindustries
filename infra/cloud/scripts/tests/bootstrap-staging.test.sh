@@ -121,7 +121,7 @@ AUTO_POST_WORKER_DATABASE_URL=postgres://stub:***@localhost:5432/stub
 HEALTH_PROBE_REDIS=redis://stub.example.upstash.io:6379
 TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-tasks-token
 CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-scheduler-token
-TASKS_API_CLERK_SECRET_KEY=sk_test_stubtasksapiclrkey
+TASKS_API_CLERK_SECRET_KEY=stub-clerk-secret-key
 TASKS_API_CLERK_ISSUER=https://clerk.example.com
 TASKS_API_CLERK_AUTHORIZED_USERS=user_2stub,user_3stub
 ENV
@@ -149,7 +149,7 @@ AUTO_POST_WORKER_DATABASE_URL=postgres://stub:***@localhost:5432/stub
 HEALTH_PROBE_REDIS=redis://stub.example.upstash.io:6379
 TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-tasks-token
 CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-scheduler-token
-TASKS_API_CLERK_SECRET_KEY=sk_test_stubtasksapiclrkey
+TASKS_API_CLERK_SECRET_KEY=stub-clerk-secret-key
 TASKS_API_CLERK_ISSUER=https://clerk.example.com
 TASKS_API_CLERK_AUTHORIZED_USERS=user_2stub,user_3stub
 ENV
