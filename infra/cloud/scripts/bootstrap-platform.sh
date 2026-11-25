@@ -137,6 +137,7 @@ RETIRED_SERVICES=(tasks-api budget-api content-scheduler-api auto-post-worker)
 LOCAL_SOURCE_MAP=(
   "TASKS_API_DATABASE_URL:tasksDatabaseUrl"
   "BUDGET_API_DATABASE_URL:budgetDatabaseUrl"
+  "BUDGET_API_CLERK_SECRET_KEY:clerkSecretKey"
   "AUTO_POST_WORKER_DATABASE_URL:contentSchedulerDatabaseUrl"
   "CONTENT_SCHEDULER_API_DATABASE_URL:contentSchedulerDatabaseUrl"
   "HEALTH_PROBE_REDIS:redisUrl"

@@ -85,6 +85,7 @@ function fullParentEnv() {
     // App-level secrets.
     PLATFORM_TASKS_API_DATABASE_URL: 'postgres://host/db?schema=tasks_api',
     PLATFORM_BUDGET_API_DATABASE_URL: 'postgres://host/db?schema=budget_api',
+    PLATFORM_BUDGET_API_CLERK_SECRET_KEY: 'stub-budget-api-clerk-secret-value',
     PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL: 'postgres://host/db?schema=content_scheduler',
     PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS: 'https://tasks.staging.sindustries.co.nz',
     PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS: 'https://mission-control.staging.sindustries.co.nz',

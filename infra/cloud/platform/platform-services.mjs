@@ -164,6 +164,10 @@ export const CHILDREN = [
     requiredSources: [
       'PLATFORM_BUDGET_API_DATABASE_URL',
       'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
+      // Without this, CLERK_SECRET_KEY is silently absent and requireSession
+      // disables the Clerk path: every authenticated request 401s instead of
+      // failing provisioning (PR #1117 review, finding 2).
+      'PLATFORM_BUDGET_API_CLERK_SECRET_KEY',
     ],
   },
   {

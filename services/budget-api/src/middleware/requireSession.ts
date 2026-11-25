@@ -25,18 +25,23 @@ async function resolveClerkSession(token: string): Promise<SessionContext | null
   const claims = await verifyToken(token, { secretKey: clerkSecretKey });
   if (!claims.sub) return null;
 
-  const clerkUser = await clerkClient.users.getUser(claims.sub);
-  const email = clerkUser.primaryEmailAddress?.emailAddress ?? clerkUser.emailAddresses[0]?.emailAddress;
-  if (!email) return null;
-
+  // A subject already linked to a budget user is sufficient; do not make a
+  // Clerk API request on every authenticated API call.
   let user = await prisma.user.findUnique({ where: { clerkUserId: claims.sub } });
-  if (!user) {
-    user = await prisma.user.findUnique({ where: { email } });
-    if (user) {
-      user = await prisma.user.update({ where: { id: user.id }, data: { clerkUserId: claims.sub, email } });
-    } else {
-      user = await prisma.user.create({ data: { clerkUserId: claims.sub, email } });
-    }
+  if (user) return { id: 'clerk:' + claims.sub, userId: user.id, expiresAt: null };
+
+  const clerkUser = await clerkClient.users.getUser(claims.sub);
+  const primaryEmailAddress = clerkUser.primaryEmailAddress;
+  if (!primaryEmailAddress || primaryEmailAddress.verification?.status !== 'verified') {
+    return null;
+  }
+  const email = primaryEmailAddress.emailAddress;
+
+  user = await prisma.user.findUnique({ where: { email } });
+  if (user) {
+    user = await prisma.user.update({ where: { id: user.id }, data: { clerkUserId: claims.sub, email } });
+  } else {
+    user = await prisma.user.create({ data: { clerkUserId: claims.sub, email } });
   }
 
   return { id: 'clerk:' + claims.sub, userId: user.id, expiresAt: null };
@@ -63,7 +68,8 @@ export const requireSession = asyncHandler(
       if (!clerkSession) return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
       req.session = clerkSession;
       return next();
-    } catch {
+    } catch (error) {
+      console.error('Clerk session resolution failed', error);
       return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
     }
   }
