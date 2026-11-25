@@ -1,9 +1,9 @@
 ---
-status: approved
+status: shipped
 task_id: ddd2f57d-0e22-499f-a785-190f81c10683
 product_spec: brain/tasks/specs/in-progress/mission-control-tasks-clerk-auth-2026-11-24.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: 1122
+shipped_date: 2026-11-25
 ---
 
 # Clerk login for Mission Control and the Tasks app — Tech Design
