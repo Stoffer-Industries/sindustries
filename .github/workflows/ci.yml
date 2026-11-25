@@ -1877,6 +1877,37 @@ jobs:
     uses: ./.github/workflows/deploy-staging-platform.yml
     secrets: inherit
 
+  # Task 3c004590 - the production platform deploy path.
+  #
+  # deploy-production-platform.yml is workflow_call only, so until this
+  # caller existed the production platform was NEVER deployed by a merge:
+  # GitHub reported zero runs for that workflow. The provisioner now
+  # MERGES the platform validation actor with the operator credential
+  # array (PR #1118) instead of replacing the live set - but a merge
+  # behavior nobody can reach is not a merge behavior, and the merged
+  # credential set is only ever deployed if something calls the workflow.
+  #
+  # The gates are the ones the staging caller uses, plus the staging
+  # deploy it follows: production is deployed after staging succeeds,
+  # never from a pull request, and never before the merge gate is
+  # green. Inside the reusable workflow the deploy itself stays behind
+  # PRODUCTION_PLATFORM_DEPLOY_ENABLED and
+  # PRODUCTION_PLATFORM_PROVISION_ENABLED, and the provisioner fails
+  # closed before any 'flyctl secrets set' when the operator credential
+  # arrays are absent from the production Environment.
+  deploy-platform-production:
+    name: platform production
+    needs: [changes, merge-gate, deploy-platform-staging]
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.merge-gate.result == 'success' &&
+      needs.deploy-platform-staging.result == 'success' &&
+      needs.changes.outputs.platform == 'true'
+    uses: ./.github/workflows/deploy-production-platform.yml
+    secrets: inherit
+
   deploy-gymtrack-production:
     name: gymtrack production
     needs: [changes, merge-gate]

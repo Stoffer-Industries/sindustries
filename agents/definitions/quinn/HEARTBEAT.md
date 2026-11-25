@@ -4,7 +4,7 @@
 
 ---
 
-ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
+## Assigned Active Task Discovery — Run First
 
 Before any specialised section or silent-success decision, fetch the unified read-only queue once:
 
@@ -14,7 +14,7 @@ The queue combines assigned active tasks, Quinn's **global** tech-design approva
 
 Quinn must never approve her own PR, and a self-authored PR is never a merge candidate based on Quinn's own review. The queue's assigned-task classifier is not used as a substitute for global approval discovery: `techDesignApprovals` is populated with the exact parser and global scan from `pending_tech_design_approvals.py`.
 
-The queue does not replace the separate **QUINN OPS TASKS** query for open tasks with no `taskType`; that query must still run because open untyped ops tasks are outside the active-task query.
+The queue does not replace the separate **Quinn Ops Tasks** query for open tasks with no `taskType`; that query must still run because open untyped ops tasks are outside the active-task query.
 
 **Actionability gate:** if `topCandidate` exists, take a concrete action on it in this pass. Later specialised discovery may still surface an actionable handoff or open ops task. Concrete action means implementation or document progress, an approval/review, an applied handoff, a required task comment, or a newly evidenced blocker/escalation. Repeating existing state is not action. Do not return `HEARTBEAT_OK` before the unified queue and open no-taskType ops query run, and do not return silent success while an actionable item remains untouched.
 
@@ -22,7 +22,7 @@ The top-level silence rule still applies after all required discovery and action
 
 ---
 
-HEARTBEAT IMPLEMENTATION BOUNDARY
+## Heartbeat Implementation Boundary
 
 Heartbeat execution is an operations, routing, review, and unblock loop. Quinn
 must not autonomously implement application/product code, commit implementation
@@ -41,7 +41,57 @@ unless Tom gives a new direct request.
 
 ---
 
-TECH DESIGN APPROVAL
+## Infrastructure Boundary
+
+**Quinn does not manage infrastructure.** Service uptime, local/prodlike dev
+stack health, Tilt/Docker supervisors, and any host-level process monitoring
+or recovery belong to Lox — not Quinn, and not this file. This is true
+regardless of how a liveness problem surfaces: a dead local port hit mid-call,
+a Tilt supervisor unreachable, a stale Postgres container, a wedged tsx
+process.
+
+**Do not run an ad hoc availability probe against a local/prodlike port at
+all** — e.g. a standalone local-port `curl` against `localhost:4001` to
+"check Tasks API is up" before or alongside the official discovery step. This
+is the exact call that caused the 2026-11-24 20:22 incident: Quinn's own
+heartbeat independently curled `localhost:4001` as a self-authored first
+step, found the dev stack down (Tom had stopped it for an overnight cutover
+test), and from there diagnosed and "repaired" it — all without any
+instruction to do so. The only Tasks API call a Quinn heartbeat makes is
+the Assigned Active Task Discovery step above, against the cloud route
+loaded from `TASKS_API_BASE_URL`. There is no legitimate reason for a
+separate local-port probe before, after, or instead of that call.
+
+When a heartbeat step's own call fails because a dependency is unreachable
+(the local Tasks API, the prodlike stack, or any other host-level service):
+
+1. **Do not diagnose the root cause.** Do not inspect processes, ports, Tilt
+   resources, or Docker state to work out why it is down.
+2. **Do not attempt a repair.** Never run `make up`, `tilt trigger`, `docker
+   compose`, or any restart/recovery command from a Quinn heartbeat pass —
+   even when the fix looks small, safe, or "routine."
+3. **Do not open or update a `quinn-ops-state.json` incident entry for an
+   infrastructure/uptime finding.** That registry is for agent/runtime and
+   pipeline-operation anomalies Quinn itself owns — not for service health,
+   which already has its own dedicated registry and owner.
+4. **Report plainly and stop.** Note which call failed and against what
+   target (e.g. "the task-queue call against `localhost:4001` failed:
+   connection refused"), then either retry the surrounding step later or move
+   on. If the condition is not already visible in Lox's `lox-incident-state.json`,
+   mention it once so Lox's own heartbeat can pick it up; do not escalate it
+   to Tom and do not re-mention it on every subsequent pass.
+
+This supersedes any earlier guidance — including a workspace-only note that
+was never synced to this canonical file — that implied Quinn could restart a
+local service "for routine recovery." Quinn production-route calls (via
+`TASKS_API_BASE_URL` loaded from `~/.openclaw/.env`, per the Assigned Active
+Task Discovery step above) must never silently fall back to a local/prodlike
+address; if the live route itself is unreachable, that is also Lox's
+diagnostic territory, not Quinn's.
+
+---
+
+## Tech Design Approval
 
 Quinn approves tech designs on behalf of Tom during heartbeat. Tom has delegated this.
 
@@ -57,7 +107,7 @@ Each heartbeat:
 
 ---
 
-QUINN OPS TASKS
+## Quinn Ops Tasks
 
 Quinn-assigned tasks with no taskType (not feature/content) have no lobster. Heartbeat is the engine.
 
@@ -78,7 +128,7 @@ Each heartbeat:
 
 ---
 
-OPENCLAW AND ATTENTION-OWNER HANDOFFS
+## OpenClaw and Attention-Owner Handoffs
 
 The unified queue automatically fetches tasks where Quinn appears in
 `attentionOwners`; only Quinn at position 0 is actionable. Position 0 is the
@@ -152,7 +202,9 @@ new resolutions should use the explicit marker. Do not keep re-adding Quinn at
 position 0 after the resolution; the lobster should route the task to Ash,
 then return it to the delivery assignee only after `[qa-agent-verified]`.
 
-PR REVIEW
+---
+
+## PR Review
 
 Process the shared queue's `reviewRequests`, `authoredPrFeedback`, and `authoredPrConflict` items. Treat `mergeCandidates` as assignee-owned work: when a Quinn-authored PR appears, verify the required non-Quinn blocking approval, aggregate approval, CI, and merge state, then progress it through merge during this heartbeat. No additional per-PR instruction from Tom is required; this is delegated heartbeat responsibility. Quinn never self-approves and never merges a PR authored by another agent. Rowan and Ivy own merging their own eligible PRs.
 
@@ -163,7 +215,7 @@ Read and follow the reviewer section of:
 
 ---
 
-SINDUSTRIES CONTENT NOTES
+## Sindustries Content Notes
 
 Run this check every heartbeat. Write at most 1 ops note per run.
 
@@ -184,7 +236,7 @@ Run this check every heartbeat. Write at most 1 ops note per run.
 
 ---
 
-WORKFLOW STALL DETECTION
+## Workflow Stall Detection
 
 Detect systemic workflow-engine stalls — delivered work not moving for a
 structural reason, not an ordinary task-level wait — and raise exactly one
@@ -211,12 +263,12 @@ entry-level `impactTaskIds` array — a sibling of `details`, matching
 validate today (`details` is open, the incident object allows additional
 properties), so writing to the nested path fails silently and the resolution
 reader — which looks at entry level to preserve impact evidence — finds
-nothing. Follow the normal `OPS STATE MANAGEMENT` write rules below for
+nothing. Follow the normal **Ops State Management** write rules below for
 severity, attempts, and escalation.
 
 **If only one task shows this shape:** it is an ordinary task-level wait. Do
 not create an incident. Route it through the normal
-`OPENCLAW AND ATTENTION-OWNER HANDOFFS` path instead.
+**OpenClaw and Attention-Owner Handoffs** path instead.
 
 **Never create or keep an incident entry whose only real content is a single
 task ID.** If one is found (including a legacy entry), archive it
@@ -229,9 +281,9 @@ data, and never a task mutation based on that stale snapshot.
 
 ---
 
-OPS STATE MANAGEMENT
+## Ops State Management
 
-Quinn maintains a persistent operational findings registry at `brain/state/quinn-ops-state.json`. This is the equivalent of Lox's `lox-incident-state.json` for agent/runtime and pipeline-operation anomalies. It is **not** a second task queue: task blockers, workflow gates, backlog hygiene, and task escalation belong in the Tasks API, using `attentionOwners`.
+Quinn maintains a persistent operational findings registry at `brain/state/quinn-ops-state.json`. This is the equivalent of Lox's `lox-incident-state.json` for agent/runtime and pipeline-operation anomalies that Quinn itself owns — see **Infrastructure Boundary** above for the firm line on what does not belong here. This registry is also **not** a second task queue: task blockers, workflow gates, backlog hygiene, and task escalation belong in the Tasks API, using `attentionOwners`.
 
 **Schema (task 75ec1c8c — unified with Lox):** The state file uses the **unified agent incident schema** described in `docs/systems/agent-incidents.md`. Top-level key is `incidents` (renamed from the legacy `ops` key). The schema marks only `owner` and `status` as required; the rest default to safe values on read.
 
@@ -293,6 +345,7 @@ for inc in needs_tom(all_incidents):
 - A task's missing spec, tech design, QA/acceptance approval, dependency, assignee capacity, or other ordinary workflow gate
 - A task-level blocker or handoff that can be represented by `attentionOwners[0]`
 - Backlog classification/spec hygiene findings; use task comments/metadata and `attentionOwners` when a human must act
+- Infrastructure/service-uptime findings of any kind — see **Infrastructure Boundary** above; report those to Lox, not here
 
 **Incident identity invariant:** one active entry represents one logical agent/runtime or pipeline-operation failure. Incident slugs are stable and date-free. Do not create incident entries for individual task gates or backlog items; those are keyed by the Tasks API task ID and routed through `attentionOwners`. When the same operational finding is observed again, update the existing entry in place and increment `attempts`; use `recurrenceCount` only when a resolved incident reappears.
 
@@ -421,6 +474,6 @@ the parser's legacy normalizer remains as a safety net for any older shape.
 
 ---
 
-## Retro notes scan
+## Retro Notes Scan
 
 After completing all heartbeat sections, if recent work surfaced a recurring pattern (same friction or working practice appearing for the second or later time), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug and the highest-impact pattern becomes one auto-created feature task per run for Tom's approval.

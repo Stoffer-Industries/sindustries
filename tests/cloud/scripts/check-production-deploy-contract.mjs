@@ -58,6 +58,11 @@ const PROBE_OVERLAY_PATH =
 const PROBE_SHARED_PATH = 'infra/cloud/observability/health-probe/fly.toml';
 const PLATFORM_WORKFLOW_PATH = '.github/workflows/deploy-production-platform.yml';
 const PROBE_WORKFLOW_PATH = '.github/workflows/deploy-production-health-probe.yml';
+// The CI workflow that CALLS the production deploy. The production
+// deploy workflow is workflow_call only: nothing runs it unless a
+// caller exists, so the caller is part of the production deploy
+// contract, not a CI detail.
+const CI_WORKFLOW_PATH = '.github/workflows/ci.yml';
 
 const API_SURFACE_IDS = ['tasks-api', 'budget-api', 'content-scheduler-api'];
 const HEALTH_PATH = '/health';
@@ -917,6 +922,114 @@ function checkApprovalCredentialContract(manifest, steps) {
   }
 }
 
+/**
+ * The jobs of a workflow file, read line-wise.
+ *
+ * The checker is pure Node with no deps, so the YAML is read the way
+ * the rest of this file reads it: a job starts at a two-space
+ * indented key and runs until the next one.
+ *
+ * @param {string} text
+ * @returns {{name: string, text: string}[]}
+ */
+function readJobs(text) {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  const jobs = [];
+  let current = null;
+  for (const line of lines.slice(start < 0 ? 0 : start + 1)) {
+    const header = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
+    if (header) {
+      current = { name: header[1], text: '' };
+      jobs.push(current);
+      continue;
+    }
+    if (current) current.text += line + '\n';
+  }
+  return jobs;
+}
+
+/**
+ * The production platform deploy must be REACHABLE from a merge to main.
+ *
+ * deploy-production-platform.yml is workflow_call only. Until task
+ * 3c004590 added a caller to ci.yml the workflow had ZERO runs: the
+ * provisioner never ran, so the merged approval-credential set was
+ * never deployed and the live credential set could only ever have
+ * been changed by hand.
+ *
+ * A caller that disappears is not a quiet regression. The production
+ * platform silently stops being deployed and the symptom - agent
+ * writes failing on production - arrives later and looks unrelated to
+ * the change that removed it. So the caller's existence, and the
+ * gates that keep a production deploy off a pull request, are checked
+ * here.
+ */
+function checkProductionPlatformCaller() {
+  const text = readText(CI_WORKFLOW_PATH);
+  if (text === null) return;
+
+  const callers = readJobs(text).filter((job) =>
+    job.text.includes('uses: ./.github/workflows/deploy-production-platform.yml'),
+  );
+
+  if (callers.length === 0) {
+    fail(
+      CI_WORKFLOW_PATH +
+        ': has no job calling deploy-production-platform.yml, so the production platform ' +
+        'deploy never runs and the merged approval-credential set is never deployed',
+    );
+    return;
+  }
+  if (callers.length > 1) {
+    fail(
+      CI_WORKFLOW_PATH +
+        ': ' +
+        callers.length +
+        ' jobs call deploy-production-platform.yml (' +
+        callers.map((job) => job.name).join(', ') +
+        '); exactly one caller is expected',
+    );
+  }
+
+  const caller = callers[0];
+  if (!/github\.event_name == 'push'/.test(caller.text)) {
+    fail(
+      CI_WORKFLOW_PATH +
+        ': the ' +
+        caller.name +
+        ' job that calls deploy-production-platform.yml does not require a push event, ' +
+        'so a pull request could deploy production',
+    );
+  }
+  if (!/github\.ref == 'refs\/heads\/main'/.test(caller.text)) {
+    fail(
+      CI_WORKFLOW_PATH +
+        ': the ' +
+        caller.name +
+        ' job that calls deploy-production-platform.yml is not restricted to ' +
+        'refs/heads/main',
+    );
+  }
+  if (!/needs\.merge-gate\.result == 'success'/.test(caller.text)) {
+    fail(
+      CI_WORKFLOW_PATH +
+        ': the ' +
+        caller.name +
+        ' job that calls deploy-production-platform.yml does not wait for a green ' +
+        'merge gate',
+    );
+  }
+  if (!/secrets: inherit/.test(caller.text)) {
+    fail(
+      CI_WORKFLOW_PATH +
+        ': the ' +
+        caller.name +
+        ' job that calls deploy-production-platform.yml does not inherit secrets',
+    );
+  }
+}
+
 function checkProbeWorkflow(manifest, matrix) {
   if (!manifest || !matrix) return;
   const text = readText(PROBE_WORKFLOW_PATH);
@@ -967,6 +1080,7 @@ async function main() {
   await checkRenderedTopology(manifest);
   checkPlatformWorkflow(manifest, matrix);
   checkProbeWorkflow(manifest, matrix);
+  checkProductionPlatformCaller();
 
   if (errors.length > 0) {
     stderr.write('production deploy contract check failed:\n');
