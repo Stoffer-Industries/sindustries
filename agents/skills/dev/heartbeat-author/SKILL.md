@@ -45,7 +45,7 @@ description: "Create, restructure, or review repository-owned HEARTBEAT.md files
 
 Use this shape for every repository-owned HEARTBEAT.md. The exact unit names vary by agent, but the boundaries do not.
 
-~~~markdown
+~~~~markdown
 # HEARTBEAT.md — <Agent>
 
 **Scope of this file:** polling cadence, discovery order, per-pass triggers,
@@ -105,7 +105,7 @@ If the output of this cron has soft failures or unacceptable errors, escalate th
 ## Retro notes scan
 
 A bounded pointer to the retro-notes skill; do not duplicate its procedure.
-~~~
+~~~~
 
 ### Unit output contract rules
 
