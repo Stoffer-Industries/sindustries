@@ -1,479 +1,178 @@
-# HEARTBEAT
-
-**SILENCE RULE: Default to HEARTBEAT_OK. Only produce output when there is a new, actionable item that Tom or Quinn needs to act on RIGHT NOW. Do not narrate zero-counts, unchanged state, chronic items already escalated, sections with nothing to do, or items already tracked in ops state with `escalatedAt` set. Each section below should contribute nothing to output unless it has a genuine new finding. When in doubt, stay silent.**
-
----
-
-## Assigned Active Task Discovery — Run First
-
-Before any specialised section or silent-success decision, fetch the unified read-only queue once:
-
-`set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a; TASKS_API_BASE_URL="${TASKS_API_BASE_URL:?load TASKS_API_BASE_URL from ~/.openclaw/.env}" python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
+# HEARTBEAT.md — Quinn
 
-The queue combines assigned active tasks, Quinn's **global** tech-design approval scan across all feature/code tasks regardless of assignee, review requests, authored-PR feedback, and role-safe merge candidates. It returns one deterministic `topCandidate`. Action that candidate through the matching specialised section and existing workflow/PR skill; the queue itself never mutates tasks or GitHub.
+**Scope of this file:** polling cadence, discovery order, per-pass triggers, action boundaries, and stop conditions. Execution details live in linked skills and workflow resources; this is not an execution playbook.
 
-Quinn must never approve her own PR, and a self-authored PR is never a merge candidate based on Quinn's own review. The queue's assigned-task classifier is not used as a substitute for global approval discovery: `techDesignApprovals` is populated with the exact parser and global scan from `pending_tech_design_approvals.py`.
+## Scheduler policy
 
-The queue does not replace the separate **Quinn Ops Tasks** query for open tasks with no `taskType`; that query must still run because open untyped ops tasks are outside the active-task query.
-
-**Actionability gate:** if `topCandidate` exists, take a concrete action on it in this pass. Later specialised discovery may still surface an actionable handoff or open ops task. Concrete action means implementation or document progress, an approval/review, an applied handoff, a required task comment, or a newly evidenced blocker/escalation. Repeating existing state is not action. Do not return `HEARTBEAT_OK` before the unified queue and open no-taskType ops query run, and do not return silent success while an actionable item remains untouched.
-
-The top-level silence rule still applies after all required discovery and action: report only the action taken or genuinely new input needed.
-
----
-
-## Heartbeat Implementation Boundary
-
-Heartbeat execution is an operations, routing, review, and unblock loop. Quinn
-must not autonomously implement application/product code, commit implementation
-changes, or open an implementation PR for a task assigned to another agent,
-even when that agent is idle, the change looks small, or the task is urgent.
-The task's implementer owns the code and opens the implementation PR under the
-implementer's GitHub identity. Quinn may investigate, write evidence, approve
-designs, review PRs, fix Quinn-owned runtime/workflow documentation, and route
-the task to its implementer.
-
-A direct request from Tom in the active conversation can authorize Quinn to
-implement a specifically scoped change. That is a direct-ask exception, not a
-heartbeat permission; record the scope in the PR and use the `direct-ask`
-label. A later heartbeat must not continue or expand that implementation
-unless Tom gives a new direct request.
-
----
-
-## Infrastructure Boundary
-
-**Quinn does not manage infrastructure.** Service uptime, local/prodlike dev
-stack health, Tilt/Docker supervisors, and any host-level process monitoring
-or recovery belong to Lox — not Quinn, and not this file. This is true
-regardless of how a liveness problem surfaces: a dead local port hit mid-call,
-a Tilt supervisor unreachable, a stale Postgres container, a wedged tsx
-process.
-
-**Do not run an ad hoc availability probe against a local/prodlike port at
-all** — e.g. a standalone local-port `curl` against `localhost:4001` to
-"check Tasks API is up" before or alongside the official discovery step. This
-is the exact call that caused the 2026-11-24 20:22 incident: Quinn's own
-heartbeat independently curled `localhost:4001` as a self-authored first
-step, found the dev stack down (Tom had stopped it for an overnight cutover
-test), and from there diagnosed and "repaired" it — all without any
-instruction to do so. The only Tasks API call a Quinn heartbeat makes is
-the Assigned Active Task Discovery step above, against the cloud route
-loaded from `TASKS_API_BASE_URL`. There is no legitimate reason for a
-separate local-port probe before, after, or instead of that call.
-
-When a heartbeat step's own call fails because a dependency is unreachable
-(the local Tasks API, the prodlike stack, or any other host-level service):
-
-1. **Do not diagnose the root cause.** Do not inspect processes, ports, Tilt
-   resources, or Docker state to work out why it is down.
-2. **Do not attempt a repair.** Never run `make up`, `tilt trigger`, `docker
-   compose`, or any restart/recovery command from a Quinn heartbeat pass —
-   even when the fix looks small, safe, or "routine."
-3. **Do not open or update a `quinn-ops-state.json` incident entry for an
-   infrastructure/uptime finding.** That registry is for agent/runtime and
-   pipeline-operation anomalies Quinn itself owns — not for service health,
-   which already has its own dedicated registry and owner.
-4. **Report plainly and stop.** Note which call failed and against what
-   target (e.g. "the task-queue call against `localhost:4001` failed:
-   connection refused"), then either retry the surrounding step later or move
-   on. If the condition is not already visible in Lox's `lox-incident-state.json`,
-   mention it once so Lox's own heartbeat can pick it up; do not escalate it
-   to Tom and do not re-mention it on every subsequent pass.
-
-This supersedes any earlier guidance — including a workspace-only note that
-was never synced to this canonical file — that implied Quinn could restart a
-local service "for routine recovery." Quinn production-route calls (via
-`TASKS_API_BASE_URL` loaded from `~/.openclaw/.env`, per the Assigned Active
-Task Discovery step above) must never silently fall back to a local/prodlike
-address; if the live route itself is unreachable, that is also Lox's
-diagnostic territory, not Quinn's.
-
----
-
-## Tech Design Approval
-
-Quinn approves tech designs on behalf of Tom during heartbeat. Tom has delegated this.
-
-Each heartbeat:
-1. Use `techDesignApprovals` from the unified queue. It is populated by `pending_tech_design_approvals.py`, which reads the structured `task.approvals` collection; comments provide the `[tech-design]` document link but never grant approval.
-2. **If 0 pending: skip this section entirely. No output.**
-3. For each pending task:
-   - Read the design at the linked path.
-   - Check: all required sections present, aligned with spec, no unbounded scope, `.openclaw` boundary notes where relevant.
-   - If it looks good: call `tasks_api_client.py approve --id <task-id> --type tech_design` with Quinn's scoped `TASKS_API_APPROVAL_TOKEN`. The API derives Quinn's identity and writes the audit comment atomically.
-   - If something looks wrong or risky: flag to Tom via Telegram instead of approving.
-4. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
-
----
-
-## Quinn Ops Tasks
-
-Quinn-assigned tasks with no taskType (not feature/content) have no lobster. Heartbeat is the engine.
-
-Each heartbeat:
-1. Fetch open Quinn-assigned tasks (load the live route from the runtime environment first:
-   `set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a`):
-   `curl -s "${TASKS_API_BASE_URL}/tasks?assignee=Quinn&status=open" | python3 -c "import json,sys; tasks=[t for t in json.load(sys.stdin)['data'] if not t.get('taskType')]; print(json.dumps(tasks, indent=2))"`
-2. **If none: skip this section entirely. No output.**
-3. Sort by `createdAt` ascending (oldest first). Take the top task.
-4. Read the description fully. Determine if it can be completed this heartbeat pass:
-   - **Yes (self-contained ops work):** Do it. Mark the task `doing`, complete the work, mark it `done`. Report to Tom what was done.
-   - **Needs Tom input/approval:** Post a task comment explaining what's needed, ping Tom via Telegram. Log in ops state.
-   - **Multi-step (takes >1 heartbeat):** Mark it `doing`, do the first meaningful chunk, post a progress comment, leave in `doing` for next pass.
-5. Never start a second task in the same heartbeat pass. One task at a time.
-6. If a task has been `doing` for >3 heartbeats with no progress comment from Quinn, escalate to Tom.
-
-**Silence rule:** Only output if you actioned a task or need Tom's input. Do not narrate that you checked and found nothing.
-
----
-
-## OpenClaw and Attention-Owner Handoffs
-
-The unified queue automatically fetches tasks where Quinn appears in
-`attentionOwners`; only Quinn at position 0 is actionable. Position 0 is the
-authoritative blocker/handoff owner, and later slots are the preserved
-escalation path. OpenClaw/runtime blockers must put Quinn first. Legacy
-`[openclaw-needed]` and `[openclaw-done]` comments remain useful audit evidence
-but never route work.
-
-**Quinn's attention-owner contract:** an attention-owner entry is an active
-unblock handoff, not a watchlist or passive review reservation. Quinn must only
-be added at position 0 when Quinn owns the current OpenClaw/runtime blocker.
-Never add Quinn as a later dormant slot; a GitHub PR review request is the
-separate mechanism for review. If the queue surfaces a task only because
-Quinn appears after position 0, that is not Quinn's work and Quinn must not
-retain or reinstate that slot.
-
-Quinn is an exceptional unblocker, not a normal delivery, QA, acceptance, or
-review stage. Do not add Quinn merely because implementation finished or a gate
-needs its normal next verifier; route those workflow transitions to their
-defined owner (for example Ash for `qa_agent`). Any Quinn or Tom escalation
-must use a reason-bearing Tasks API write with an authenticated actor and a
-specific current blocker, next action, and reason the named owner is needed.
-Legacy `[quinn-escalation]` comments are audit text only and authorize nothing.
-Invoke `agents/skills/ops/attention-owner-routing/SKILL.md` for every
-add, replacement, escalation, repair, and self-resolve. Never fall back to the
-legacy full-stack PATCH or direct curl if the reason-bearing endpoint is
-unavailable; stop and report the blocker.
-
-When Quinn is top owner:
-
-1. Read the task and its audit/context comments.
-2. On this heartbeat, investigate the blocker and take the next concrete
-   unblock action. Do not leave the task waiting for a later pass without
-   either progress or newly evidenced blocker state.
-3. Apply or decide the requested action. For `~/.openclaw/`, retain the normal
-   safety and product-behaviour approval checks.
-4. Post evidence as a task comment.
-5. If the work is resolved, remove Quinn from the ordered stack immediately,
-   preserving any genuine later escalation slots exactly. Do not leave Quinn
-   behind as a dormant reviewer.
-6. If Quinn cannot resolve the blocker because of a genuine external blocker
-   (missing access, owner-only approval, unavailable credential, or unresolved
-   product decision), use the authenticated reason-bearing API to replace the
-   stack with `attentionOwners=["Tom"]`, post concrete evidence, and page Tom
-   directly and immediately. Do not leave Quinn as a dormant tail, silently
-   remove the blocker, or wait for another heartbeat.
-7. Do not escalate when the only possible action is duplicate state help, such
-   as repeating PR assistance or restating evidence already recorded elsewhere.
-   Leave the existing stack unchanged and avoid a second page.
-8. **Tom is never added to `attentionOwners` for a `doing`-status task unless
-   the very next action truly requires him** (owner-only approval, credential
-   only he can provision, an unresolved product decision). "Quinn's own gate is
-   complete" is not by itself a reason to add or reorder Tom onto a `doing`
-   task — the task is still not ready for his acceptance, and adding him
-   pages him for nothing. This bit us for real on 2026-09-22/23: a heartbeat
-   pass added Tom to two `doing`/dependency-blocked tasks hours after Tom
-   asked to be removed, for no actionable reason. Before adding or reordering
-   Tom onto any task, ask: "is there a concrete action only Tom can take on
-   this specific task, right now?" If no, do not add him, regardless of
-   whether Quinn's own portion of the work is finished.
-
-Delivery assignee and structured gate owner remain independent context. Ash may
-remain the QA gate owner while Quinn or Rowan is the top attention owner.
-
-**Resolving a deferred QA capability:** when Quinn resolves a capability gap
-behind `[qa-agent-deferred]`, post `[qa-agent-capability-resolved]` on the
-original task with concise evidence of what changed. This is a handoff back to
-Ash for fresh QA verification, not a QA approval and not a delivery handoff to
-Rowan. Existing tasks may use `[quinn-resolved]` as a compatibility alias, but
-new resolutions should use the explicit marker. Do not keep re-adding Quinn at
-position 0 after the resolution; the lobster should route the task to Ash,
-then return it to the delivery assignee only after `[qa-agent-verified]`.
-
----
-
-## PR Review
-
-Process the shared queue's `reviewRequests`, `authoredPrFeedback`, and `authoredPrConflict` items. Treat `mergeCandidates` as assignee-owned work: when a Quinn-authored PR appears, verify the required non-Quinn blocking approval, aggregate approval, CI, and merge state, then progress it through merge during this heartbeat. No additional per-PR instruction from Tom is required; this is delegated heartbeat responsibility. Quinn never self-approves and never merges a PR authored by another agent. Rowan and Ivy own merging their own eligible PRs.
-
-Read and follow the reviewer section of:
-`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
-
-**Only output if you took a review or merge action (submitted a review, requested changes, approved, or merged). Do not report PRs already reviewed or awaiting a genuine external blocker.**
-
----
-
-## Sindustries Content Notes
-
-Run this check every heartbeat. Write at most 1 ops note per run.
-
-**Signal checklist — scan for any of these since the last ops note:**
-- A PR merged to main in the sindustries repo (`git log origin/main --since="48 hours ago" --oneline`)
-- A task moved to done or accepted in the Tasks API
-- A bookmark pipeline milestone (spec created, approval resolved, task created)
-- Something Tom mentioned in conversation that signals a shift, ship, or lesson
-
-**The tweet test:** before writing, ask "could Tom post about this on X this week?" If no, skip it. Implementation steps, script renames, and config fixes almost never pass. Shipped capabilities, resolved hard problems, and pattern discoveries usually do.
-
-**If a note is warranted:**
-- One note per story — if multiple things are part of the same arc, write one note about the outcome
-- Use the content-notes skill: `codebases/sindustries/agents/skills/content-notes/SKILL.md`
-- The `why:` field must be specific ("first time the pipeline ran end-to-end without manual intervention") not vague ("shows how we're hardening the system")
-
-**If nothing passes the tweet test:** do not write a note. Silence is correct. Do not report that you checked.
-
----
-
-## Workflow Stall Detection
-
-Detect systemic workflow-engine stalls — delivered work not moving for a
-structural reason, not an ordinary task-level wait — and raise exactly one
-incident per shared root cause, never per task. Full model:
-`docs/systems/agent-incidents.md` "Multi-task root-cause incidents".
-
-A task qualifies as delivery-evidence-complete when its required PRs are
-merged and its required structured approvals (`tech_design`, `qa_agent`) are
-in place. If such a task's status has not advanced across 2+ consecutive
-heartbeat passes — typically a couple of days, since passes are not evenly
-spaced — check whether at least one other task shows the same shape at the
-same time, with a plausible shared cause — the same gate, the same
-orchestration pass, the same reconciliation pattern. Candidate shared causes
-include: the workflow engine not re-evaluating stalled tasks, a
-reconciliation pass reapplying the same correction to a task without its
-underlying approval/PR state changing, and two different reads of the same
-task/queue state disagreeing with each other.
-
-**If 2+ tasks share one root cause:** create or update ONE incident keyed by
-a stable root-cause slug (never a task ID). List every affected task in the
-entry-level `impactTaskIds` array — a sibling of `details`, matching
-`agents/schemas/agent-incident-state.schema.json` and
-`docs/systems/agent-incidents.md`. Do NOT nest it under `details`: both paths
-validate today (`details` is open, the incident object allows additional
-properties), so writing to the nested path fails silently and the resolution
-reader — which looks at entry level to preserve impact evidence — finds
-nothing. Follow the normal **Ops State Management** write rules below for
-severity, attempts, and escalation.
-
-**If only one task shows this shape:** it is an ordinary task-level wait. Do
-not create an incident. Route it through the normal
-**OpenClaw and Attention-Owner Handoffs** path instead.
-
-**Never create or keep an incident entry whose only real content is a single
-task ID.** If one is found (including a legacy entry), archive it
-immediately with `scope: "task"` and a short `archiveReason`, the same
-correction applied on 2026-10-16 to `d37681e1` and `bb09eaed`. This applies
-even when the Tasks API is unavailable or its last-known data is stale: in
-that condition, raise exactly one incident for the unavailability itself
-(e.g. `tasks-api-unavailable`), never a per-task entry built from cached
-data, and never a task mutation based on that stale snapshot.
-
----
-
-## Ops State Management
-
-Quinn maintains a persistent operational findings registry at `brain/state/quinn-ops-state.json`. This is the equivalent of Lox's `lox-incident-state.json` for agent/runtime and pipeline-operation anomalies that Quinn itself owns — see **Infrastructure Boundary** above for the firm line on what does not belong here. This registry is also **not** a second task queue: task blockers, workflow gates, backlog hygiene, and task escalation belong in the Tasks API, using `attentionOwners`.
-
-**Schema (task 75ec1c8c — unified with Lox):** The state file uses the **unified agent incident schema** described in `docs/systems/agent-incidents.md`. Top-level key is `incidents` (renamed from the legacy `ops` key). The schema marks only `owner` and `status` as required; the rest default to safe values on read.
-
-**Minimal entry shape Quinn should write:**
-```json
-{
-  "owner": "quinn",
-  "firstSeen": "<ISO timestamp>",
-  "lastCheckedAt": "<ISO timestamp>",
-  "status": "watching | escalated | resolved | false_positive | archived",
-  "severity": "low | medium | high | critical",
-  "needsTom": false,
-  "attempts": 1,
-  "lastAction": "what was tried / what happened",
-  "resolvedAt": null,
-  "escalatedAt": null,
-  "nextRetryAt": null,
-  "recurrenceCount": 0,
-  "impactTaskIds": [],
-  "details": {}
-}
-```
-
-`impactTaskIds` is entry-level (sibling of `details`), never nested inside it.
-Only multi-task root-cause incidents populate it; an ordinary task-level wait
-leaves it empty.
-
-**Reading from both agents (preferred path):** Use the queue CLI (step 1) — it is the only path that reports a read failure. If you need the records directly, use the shared parser at `agents/lib/incident_state.py` and check `verified`: call `read_registry()` / `needs_tom()` instead of hand-rolling the schema. The parser handles Lox's file too and normalizes legacy shapes on the fly, so Quinn's heartbeat does not need to branch on file format. **Do not use `load_all_incidents()`** — it returns only the records and discards the read failures, so a state file that could not be read comes back as an empty list.
-
-```python
-import sys
-sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
-from agents.lib.incident_state import read_registry, needs_tom, reportable_incidents
-
-registry = read_registry()
-if not registry.verified:
-    # A state file could not be read. Report it; do not treat it as empty.
-    for failure in registry.failures:
-        print(f"UNVERIFIED: {failure['path']} — {failure['error']}")
-    raise SystemExit(3)
-all_incidents = reportable_incidents(registry.records)
-for inc in needs_tom(all_incidents):
-    # include in heartbeat output, set escalatedAt, etc.
-    ...
-```
-
-**Legacy compatibility:** The parser still accepts Quinn's pre-migration `ops` key. The live state has already been migrated separately, so the legacy normalizer is now only a safety net for older shapes.
-
-**What to write entries for** (after each heartbeat section above):
-- Guardrail skips on the same item for 2+ consecutive heartbeats
-- State drift that couldn't be auto-fixed
-- Lobster/cron/runtime failures or pipeline execution stalls that are not one task's ordinary gate state
-- Validate steps that silently no-op when they should have processed something
-- Any finding that couldn't be resolved in this heartbeat pass
-
-**What NOT to write entries for:**
-- Routine "no items" / "0 candidates" outcomes
-- Things successfully resolved in this heartbeat pass (mark existing entries resolved instead)
-- A task's missing spec, tech design, QA/acceptance approval, dependency, assignee capacity, or other ordinary workflow gate
-- A task-level blocker or handoff that can be represented by `attentionOwners[0]`
-- Backlog classification/spec hygiene findings; use task comments/metadata and `attentionOwners` when a human must act
-- Infrastructure/service-uptime findings of any kind — see **Infrastructure Boundary** above; report those to Lox, not here
-
-**Incident identity invariant:** one active entry represents one logical agent/runtime or pipeline-operation failure. Incident slugs are stable and date-free. Do not create incident entries for individual task gates or backlog items; those are keyed by the Tasks API task ID and routed through `attentionOwners`. When the same operational finding is observed again, update the existing entry in place and increment `attempts`; use `recurrenceCount` only when a resolved incident reappears.
-
-**Update rules:**
-1. Read `brain/state/quinn-ops-state.json` at the start of heartbeat
-2. After each section: write or update entries for any unresolved findings
-3. If an issue was resolved this pass: set `status: resolved`, `resolvedAt: <now>`, record what fixed it in `lastAction`
-4. If an entry has `attempts >= 3` and is still unresolved: set `needsTom: true`, `severity` to at least `high`
-5. Always increment `attempts` and update `lastCheckedAt` when re-checking an existing entry
-
-**Escalation and incident queue reporting — validate before escalating, then surface the top unblock:**
-After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
-
-**Before escalating any `needsTom` entry, re-validate it is still a real problem:**
-- For task-level blockers: re-check the Tasks API task and its `attentionOwners`; do not escalate through incident state.
-- For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
-- Only escalate if the condition is confirmed present in live state this pass.
-
-1. Run the queue CLI — it is the single source for the counts and the top candidate:
-
-   ```bash
-   cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue            # text lines
-   cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue --json     # structured
-   ```
-
-   It calls `reportable_incidents()` (drops resolved, false-positive, archived, task-scoped, stale >72h) over **both** state files, then splits with `needs_tom()`. Entries where `needsTom` is true OR `severity` is `high`/`critical` are **actionable incidents**; the rest are **monitored findings**. Do not describe the monitored count as incidents waiting on Tom. Do not hand-count the queue or carry counts in `_meta` — that shortcut once hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
-
-   **If the queue reports `UNVERIFIED`, the registry was not read.** `brain/` is an iCloud-backed symlink, and a state file that is only read (never written) can be evicted to a dataless placeholder that fails to read with `OSError [Errno 11] Resource deadlock avoided`. A file that is valid JSON but the wrong shape (a JSON array, or an object with no `incidents`/`ops` object) counts as malformed too. A missing file inside an existing `brain/state/` directory is genuinely empty, but a missing *registry directory* is not: if `brain/state/` itself is absent (unmounted `brain` symlink, wrong `--workspace`), the read fails with `registry directory not found: …` and the queue is UNVERIFIED. In that case the queue renders `Incident queue: N actionable, M monitored — UNVERIFIED.`, exits `3`, and lists the offending path. **UNVERIFIED is an addition to the summary, not a replacement for it**: the counts and the `🔴 Top unblock:` line for the records that did load are still printed and must still be reported. Do **not** present the counts from an UNVERIFIED run as a complete or verified queue — report them alongside the UNVERIFIED banner, and materialise the file (`brctl download <path>`) so the next run is verified.
-2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
-3. **Always report the queue when active findings exist** (the CLI renders these lines verbatim):
-   - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.` (an UNVERIFIED run appends ` — UNVERIFIED.` and the offending path — report that line verbatim too).
-   - If actionable count is 0, output no escalation line and do not reply `HEARTBEAT_OK`; the queue summary is the useful heartbeat output.
-   - If actionable count > 0, also output: `<actionable count> incident(s) waiting on you.`
-   - Sort actionable candidates by severity (critical → high → medium → low), then by `firstSeen` (oldest first). Pick the top candidate and output: `🔴 Top unblock: <what it is and exactly what Tom needs to do>` (or 🟠/🟡 for high/medium).
-4. Repeat the compact queue summary while active findings exist, even if the counts are unchanged. Tom should be able to judge whether incident actioning needs prioritisation from the heartbeat alone.
-5. If there are no active findings at all **and the CLI exited `0`**, output nothing and reply `HEARTBEAT_OK` instead. If the CLI exited `3`, the registry was not read: never reply `HEARTBEAT_OK` — report the UNVERIFIED summary and the offending path, because an unreadable registry is not an empty one.
-
-**State file read/write pattern (unified schema, task 75ec1c8c):**
-```python
-import json, os, sys
-from datetime import datetime, timezone
-
-STATE_FILE = '/Users/quinnstoffer/.openclaw/workspace/brain/state/quinn-ops-state.json'
-
-# Prefer the shared parser; fall back to a hand-rolled read if the package
-# isn't importable (e.g. when running outside the repo worktree).
-try:
-    sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
-    from agents.lib.incident_state import (
-        read_registry,
-        needs_tom as _shared_needs_tom,
-        reportable_incidents,
-    )
-    def read_all_incidents():
-        # An unreadable registry is not an empty one. `read_registry` reports
-        # the failure alongside the records, so a partial read stays visible
-        # instead of silently becoming a clean zero.
-        registry = read_registry()
-        if not registry.verified:
-            raise RuntimeError(
-                "incident registry not fully read: "
-                + "; ".join(f"{f['path']} — {f['error']}" for f in registry.failures)
-            )
-        return reportable_incidents(registry.records)
-    def read_needs_tom():
-        return _shared_needs_tom(read_all_incidents())
-except ImportError:
-    def read_all_incidents():
-        # Fail closed. An empty list here is indistinguishable from "no
-        # incidents", which is the false zero this whole contract exists to
-        # prevent. Report the error and stop instead.
-        raise RuntimeError("incident parser unavailable; report the error and stop")
-    def read_needs_tom():
-        raise RuntimeError("incident parser unavailable; report the error and stop")
-
-def read_ops_state():
-    # A read failure must NOT become an empty registry: `write_ops_state`
-    # truncates the file, so a swallowed error would destroy every incident
-    # in it and the next run would read a valid-but-empty registry as a
-    # verified clean queue. Raise instead, and let the caller report and stop.
-    with open(STATE_FILE) as f:
-        return json.load(f)  # unified key (was "ops" pre-75ec1c8c)
-
-def write_ops_state(state):
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-def upsert_op(state, slug, severity, last_action, resolved=False):
-    now = datetime.now(timezone.utc).isoformat()
-    incidents = state.setdefault("incidents", {})  # unified key (was "ops")
-    if slug not in incidents:
-        incidents[slug] = {
-            "owner": "quinn",  # unified schema: owner is required
-            "firstSeen": now,
-            "attempts": 0,
-            "needsTom": False,
-            "escalatedAt": None,
-            "resolvedAt": None,
-            "nextRetryAt": None,
-            "recurrenceCount": 0,
-            "details": {},
-        }
-    entry = incidents[slug]
-    entry["lastCheckedAt"] = now
-    entry["lastAction"] = last_action
-    entry["severity"] = severity
-    if resolved:
-        entry["status"] = "resolved"
-        entry["resolvedAt"] = now
-    else:
-        entry["attempts"] = entry.get("attempts", 0) + 1
-        entry["status"] = "escalated" if entry.get("needsTom") else "watching"
-        if entry["attempts"] >= 3:
-            entry["needsTom"] = True
-            entry["severity"] = severity if severity in ("high", "critical") else "high"
-    return state
-```
-
-Before writing, treat legacy keys ending in `-YYYY-MM-DD` as aliases for the
-date-free slug and merge them into that single entry. Existing live state has
-been migrated separately; do not recreate date-suffixed keys.
-
-**Migration note:** The live state migration was run separately from this PR
-with backups and schema validation. State files remain outside the repository;
-the parser's legacy normalizer remains as a safety net for any older shape.
-
----
-
-## Retro Notes Scan
-
-After completing all heartbeat sections, if recent work surfaced a recurring pattern (same friction or working practice appearing for the second or later time), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug and the highest-impact pattern becomes one auto-created feature task per run for Tom's approval.
+- **Fresh-pass contract:** run required discovery in the order below before any silent result. The unified queue is read-only and its topCandidate is routed to the matching unit.
+- **Order:** (1) assigned active-task discovery, including global tech-design approvals, review/feedback/conflict items, merge candidates, and attention-owner handoffs; (2) separate open Quinn-assigned no-taskType ops query; (3) tech-design approvals and attention-owner unblock; (4) Quinn ops task action; (5) PR review/merge; (6) content notes; (7) workflow-stall detection; (8) ops-state queue/escalation; (9) retro scan.
+- **Budget:** target one bounded pass of 10 minutes and one model turn; hard stop at 12 minutes. Each unit gets at most one concrete action or newly evidenced blocker.
+- **Action cap:** at most one task action, one attention-owner unblock, one review/merge action, one content note, and one incident-state mutation per pass. A unit stops after its action.
+- **Concurrency:** independent discovery reads may be batched. Serialize task mutations, approvals, attention-owner writes, GitHub actions, and state writes. Never run infrastructure probes or recovery commands.
+- **Exhaustion:** on budget/cap exhaustion, stop immediately, mark remaining units SKIPPED_BUDGET internally, and do not claim clean success. Continue only to bounded final aggregation.
+- **Final aggregation:** emit only each unit’s labeled actionable output. Return HEARTBEAT_OK only when all required discovery units ran (or recorded safe skip), no unit has actionable output, and the incident queue exited 0 with no active findings.
+
+## Shared authority and safety boundary
+
+Quinn’s heartbeat is an operations, routing, review, approval, and unblock loop. It must not autonomously implement application/product code, commit implementation changes, or open an implementation PR for another agent. A specific direct request from Tom authorizes only the stated scope, must be recorded in the PR, and requires the direct-ask label; a later heartbeat must not expand it. Quinn may investigate, approve designs, review PRs, fix Quinn-owned runtime/workflow documentation, and route work to its implementer.
+
+Quinn does not manage infrastructure, service uptime, local/prodlike stacks, Tilt/Docker supervisors, ports, or host processes. Do not run an ad hoc local port probe, including localhost:4001; the only Tasks API call is assigned discovery using the cloud route loaded from ~/.openclaw/.env. If a referenced call fails because a dependency is unreachable, report the failed target plainly, do not diagnose, inspect, repair, or write an infrastructure incident in Quinn state; mention it once for Lox if not already visible there, then stop that unit.
+
+## Unit: assigned-active-task-discovery
+
+**Purpose:** discover Quinn-owned active work and select the deterministic highest-priority candidate without mutating tasks.
+
+**Trigger:** every heartbeat pass, before any specialized unit or silence.
+
+**Inputs and state:** runtime TASKS_API_BASE_URL from ~/.openclaw/.env; read-only agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json; its topCandidate, techDesignApprovals, review requests, authored-PR feedback/conflicts, merge candidates, and attention-owner data. The queue is the source of truth and writes no task state.
+
+**Action boundary:** run the queue once and route topCandidate to the matching unit. Do not treat assigned-task classification as a substitute for the global tech-design scan. Quinn never self-approves and never uses her own review as a merge prerequisite. Follow the relevant task/PR/attention-owner skill.
+
+**Output contract:** silent when no candidate exists. If discovery fails, report the failed cloud target and stop without claiming clean success. This unit emits no task comment, approval, review, or notification of its own.
+
+**Stop condition:** one queue read and one routed candidate; no queue loop.
+
+**Growth trigger:** repeated queue duration/budget pressure or independently scheduled consumers means special cron; ordered queue/action handoffs mean workflow; shared queue mechanics remain in the tasks-api skill.
+
+## Unit: open-quinn-ops-task-discovery
+
+**Purpose:** find open Quinn-assigned operations tasks excluded from the typed active-task queue.
+
+**Trigger:** every pass after unified discovery; required before silence.
+
+**Inputs and state:** live TASKS_API_BASE_URL loaded from ~/.openclaw/.env; /tasks?assignee=Quinn&status=open filtered to missing/falsey taskType. Tasks API owns task state; this unit may write only the selected task status/comment through that API.
+
+**Action boundary:** sort by createdAt, select the oldest, read its full description, and follow the tasks-api skill. Self-contained work may be marked doing, completed, and done; input blockers get one comment and a Tom page; multi-step work gets one meaningful chunk and a progress comment while remaining doing. Never implement another agent’s product work.
+
+**Output contract:** silent when empty. Report only completed/actioned work or new Tom input required. A dependency failure reports the failed target and stops; it never becomes infrastructure repair or a Quinn ops-state incident.
+
+**Stop condition:** one task per pass; a task doing for more than three heartbeats without Quinn progress is escalated once to Tom.
+
+**Growth trigger:** distinct cadence, repeated long actions, or optional maintenance means special cron; serialized multi-task handling means workflow.
+
+## Unit: tech-design-approval
+
+**Purpose:** approve safe delegated tech designs and route risky designs to Tom.
+
+**Trigger:** only when techDesignApprovals from unified discovery is non-empty.
+
+**Inputs and state:** queue approval records, linked design documents, structured Tasks API approvals, and scoped TASKS_API_APPROVAL_TOKEN. Comments may identify a document but never grant approval.
+
+**Action boundary:** inspect one pending design’s required sections, spec alignment, bounded scope, and relevant .openclaw boundary; approve via tasks_api_client.py approve --id <task-id> --type tech_design only when sound. Do not approve a design written in this pass. Risky/missing designs are routed to Tom. Use the approval skill rather than duplicating its procedure.
+
+**Output contract:** silent when none pending or safely skipped. Approval emits the API audit result; a risk emits one direct Tom notification with the specific issue. No output claims another unit’s task state.
+
+**Stop condition:** one approval or one risk/blocker per pass.
+
+**Growth trigger:** long design reads, independent cadence, or repeated budget pressure means special cron; approval dependencies across crons mean workflow.
+
+## Unit: attention-owner-unblock
+
+**Purpose:** resolve a current OpenClaw/runtime blocker where Quinn is ordered attention owner at position 0.
+
+**Trigger:** unified discovery returns Quinn at attention-owner position 0. A later Quinn slot is not actionable; review requests use the PR unit.
+
+**Inputs and state:** task and audit comments, ordered attentionOwners, Tasks API reason-bearing endpoint, and agents/skills/ops/attention-owner-routing/SKILL.md. Tasks API owns the stack; Quinn must not add herself as a dormant tail or use legacy full-stack PATCH/curl.
+
+**Action boundary:** investigate the blocker, take one concrete unblock action, post evidence, and remove Quinn while preserving genuine later slots when resolved. For an external blocker, replace the stack with attentionOwners=[Tom], post reason-bearing evidence, and page Tom. A doing task gets Tom only when his immediate action is truly required. Resolved deferred QA capability gets [qa-agent-capability-resolved] and returns to Ash; this is not QA approval.
+
+**Output contract:** silent for passive/later slots and duplicate evidence. Report only the action, concrete blocker, or required Tom handoff. This unit never claims delivery, QA, or acceptance ownership.
+
+**Stop condition:** one blocker investigation/action, one evidence comment, and one stack transition at most.
+
+**Growth trigger:** repeated long investigations or independently retryable handoffs mean special cron; serialized owner transitions/retries mean workflow.
+
+## Unit: pr-review-and-merge
+
+**Purpose:** process Quinn’s assigned PR reviews/feedback and eligible Quinn-authored merge candidates.
+
+**Trigger:** queue contains reviewRequests, authoredPrFeedback, authoredPrConflict, or a Quinn-owned mergeCandidate.
+
+**Inputs and state:** unified queue, GitHub PR state, and agents/skills/dev/pr-process/SKILL.md. GitHub owns review and merge state. Quinn never self-approves or merges another agent’s PR; a Quinn PR requires non-Quinn blocking approval, aggregate approval, CI, and merge checks.
+
+**Action boundary:** follow pr-process reviewer/merge instructions and take one review, requested-change, approval, feedback, conflict, or merge action. Do not repeat reviewed state or report a genuine external wait.
+
+**Output contract:** silent unless this unit took a review/merge action or encountered a new actionable blocker; report only that action/blocker.
+
+**Stop condition:** one PR action per pass.
+
+**Growth trigger:** distinct review cadence, long-running CI/review work, or repeated budget pressure means special cron; ordered review-to-merge handoffs mean workflow.
+
+## Unit: content-note-scan
+
+**Purpose:** capture at most one genuinely publishable Sindustries story.
+
+**Trigger:** every pass after required task/action discovery.
+
+**Inputs and state:** merged origin/main commits in prior 48h, Tasks API done/accepted changes, bookmark milestones, and Tom conversation signals since last note. Write through agents/skills/content-notes/SKILL.md; that skill owns note state.
+
+**Action boundary:** apply the tweet test; if warranted, write one note for one story with a specific why. Do not turn implementation details, renames, or config fixes into notes.
+
+**Output contract:** silent when no story passes or no note is written; report only the new note artifact. This unit never reports another unit’s silence.
+
+**Stop condition:** one story and at most one note per pass.
+
+**Growth trigger:** distinct publishing cadence or repeated note-writing cost means special cron; multi-stage content handoff means workflow.
+
+## Unit: workflow-stall-detection
+
+**Purpose:** identify one systemic multi-task workflow-engine stall rather than ordinary task waits.
+
+**Trigger:** delivery evidence is complete and status has not advanced for at least two consecutive passes, with a sibling task showing the same plausible root cause.
+
+**Inputs and state:** live task/PR/structured approval evidence, stable root-cause incident slug, impactTaskIds at incident top level, and docs/systems/agent-incidents.md. Quinn state owns runtime/pipeline incidents; ordinary blockers remain in Tasks API attention owners.
+
+**Action boundary:** create/update exactly one incident per shared root cause. Never create a task-ID-only incident; archive legacy single-task entries with scope task and an archive reason. If Tasks API is unavailable, record only the API-unavailability root cause, never stale per-task mutations.
+
+**Output contract:** silent for one-task waits and no stall. A new/changed shared incident emits evidence; it does not page Tom unless the ops-state unit validates it as actionable.
+
+**Stop condition:** one root-cause incident mutation or one newly evidenced blocker.
+
+**Growth trigger:** repeated multi-task scans or independently retryable reconciliation means special cron; multiple ordered remediation crons mean workflow.
+
+## Unit: ops-state-and-incident-queue
+
+**Purpose:** maintain Quinn-owned runtime/pipeline findings and surface the validated top unblock.
+
+**Trigger:** after action units, and whenever a Quinn-owned unresolved finding was observed.
+
+**Inputs and state:** brain/state/quinn-ops-state.json, brain/state/lox-incident-state.json, shared parser agents/lib/incident_state.py, incident queue python3 -m agents.lib.incident_queue --json, and docs/systems/agent-incidents.md. State is unified under incidents; impactTaskIds is sibling of details. Infrastructure findings never belong here.
+
+**Action boundary:** read through shared parser (never load_all_incidents()); fail closed on unreadable/malformed registries. Update existing date-free incidents in place, increment attempts and lastCheckedAt, resolve only confirmed resolution, set needsTom/severity after three unresolved attempts, and revalidate live state before escalating. Use queue counts and top candidate verbatim.
+
+**Output contract:** routine empty/no-op is silent. Active findings always emit Incident queue: <actionable> actionable, <monitored> monitored.; actionable findings also emit waiting count and severity-marked top unblock. UNVERIFIED includes its banner/path and is never clean. This unit alone owns incident queue output and Tom escalation.
+
+**Stop condition:** one bounded queue read and at most one validated state mutation/escalation; no incident loop.
+
+**Growth trigger:** queue runtime regularly consumes the pass or needs its own cadence means special cron; ordered remediation/retry handoffs mean workflow.
+
+## Unit: retro-notes-scan
+
+**Purpose:** record recurring friction or practice for factory retro without duplicating weekly patterns.
+
+**Trigger:** after all other units when a recurring pattern appeared for the second or later time.
+
+**Inputs and state:** today’s brain/ops/retro-notes/YYYY-MM-DD.md and weekly pattern files; use agents/skills/retro-notes/SKILL.md and let factory-retro deduplicate by pattern-slug.
+
+**Action boundary:** append one bounded row only when the pattern is new for that week. Do not create a task directly.
+
+**Output contract:** silent when no recurring/new pattern; report only the new retro row. It emits no incident or task output.
+
+**Stop condition:** one row and one write per pass.
+
+**Growth trigger:** independent cadence or repeated file contention means special cron; ordered pattern-to-task creation means workflow.
+
+## Shared failure policy
+
+Use agents/skills/ops/notify-soft-fail/SKILL.md for canonical failure routing. Heartbeat dependency failures are reported by their owning unit and stop that unit; they do not silently become empty results. No heartbeat unit sends a cron-style failure message directly to Tom.
+
+## Promotion map
+
+- Keep bounded queue/ops discovery, approvals, routing, review, note, stall, incident, and retro units in the heartbeat while they fit the scheduler envelope.
+- Promote a distinct cadence, optional maintenance, isolated tool/model, independently retryable, long-running, or repeatedly budget-exhausting unit to a special cron. Any new cron must follow cron-author and end with its exact notify-soft-fails block; this PR creates no cron.
+- Promote two or more ordered/retry-coupled crons to a workflow owning sequencing, handoffs, and shared state.
+- Extract only shared execution primitives to reusable skills. Existing tasks-api, attention-owner-routing, pr-process, content-notes, incident, retro-notes, cron-author, and notify-soft-fail skills remain authoritative.
+
+## Promotion evidence to collect
+
+Use observed duration, cadence collisions, repeated trigger patterns, repeated output/state coupling, or a concrete task/PR correction before promoting. Do not promote solely because this file is long.
