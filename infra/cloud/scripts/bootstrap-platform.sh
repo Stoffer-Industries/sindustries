@@ -142,6 +142,9 @@ LOCAL_SOURCE_MAP=(
   "CONTENT_SCHEDULER_API_DATABASE_URL:contentSchedulerDatabaseUrl"
   "HEALTH_PROBE_REDIS:redisUrl"
   "TASKS_API_CONTENT_SCHEDULER_REDIS_URL:redisUrl"
+  "TASKS_API_CLERK_SECRET_KEY:tasksClerkSecretKey"
+  "TASKS_API_CLERK_ISSUER:tasksClerkIssuer"
+  "TASKS_API_CLERK_AUTHORIZED_USERS:tasksClerkAuthorizedUsers"
 )
 
 # The LOCAL env-file key -> ENVIRONMENT FACT PATH mapping for the
@@ -326,6 +329,9 @@ if [[ ! -f "$ENV_LOCAL" ]]; then
     HEALTH_PROBE_REDIS            (or TASKS_API_CONTENT_SCHEDULER_REDIS_URL)
     TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
     CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
+    TASKS_API_CLERK_SECRET_KEY
+    TASKS_API_CLERK_ISSUER
+    TASKS_API_CLERK_AUTHORIZED_USERS
   Copy infra/cloud/env/bootstrap-${ENVIRONMENT}.env.example as a starting point,
   fill in the values, re-run." 1
 fi
