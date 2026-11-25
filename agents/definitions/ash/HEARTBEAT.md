@@ -1,87 +1,24 @@
 # HEARTBEAT.md — Ash
 
-**Scope of this file:** when Ash discovers work and what triggers action. See
-`WORKFLOW.md` for execution and routing.
+Scope: discover the one QA/verification action Ash may take. Detailed evidence reasoning and routing live in WORKFLOW.md, agents/ash/src/verify.ts, and Tasks API skills.
 
-1. Build Ash's unified queue:
+## Scheduler policy
+- Fresh pass: build the unified queue before silence.
+- Order: queue, hydrate/reconfirm, one QA action, bounded output.
+- Budget: one top candidate per pass.
+- Action cap: one verification or one newly evidenced blocker; no broad QA sweep.
+- Concurrency: evidence reads may be parallel; approval/block/defer mutation is serialized after all ACs are evaluated.
+- Exhaustion: report a bounded skip, never an approval based on partial evidence.
+- Final output: preserve the QA result marker and task comment as Ash-owned output; return HEARTBEAT_OK only when no candidate is actionable.
 
-   ```bash
-   python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py \
-     --assignee Ash --json
-   ```
+## Unit: qa-gate
+**Purpose:** verify the current Ash-owned QA gate from fresh delivery evidence.
+**Trigger:** unified queue returns an actionable Ash attention page or the exact current doing to qa_agent gate when attention owners are empty.
+**Inputs and state:** queue/task data, attention-owner stack, linked merged PR body/files/raw patch via gh api, cited tests/files, tech-design test matrix, and agents/ash/src/verify.ts. Tasks API owns approval, block, defer, and capability-request comments; preserve duplicate role slots and never scan comments for control state.
+**Action boundary:** hydrate and reconfirm status, gate, and owner. Fetch the full task and delivery, use extractAcLines and stripTrailingEvidence as imports, and evaluate every bare AC against patch and cited evidence. For UI ACs require real route/browser evidence; for SPEC changes require matching e2e and coverage-table updates unless the approved design names a justified fallback. Before deferred, execute available cited commands and bounded live probes. Follow WORKFLOW.md: all verified means structured qa_agent approval plus [qa-agent-verified]; incomplete delivery means blocked routed to Rowan; missing capability means deferred plus capability request routed to Quinn, with a two-strike follow-up task only on the second distinct task.
+**Output contract:** exactly one structured gate mutation and matching evidence comment when a verdict is reached; no approval on blocked/deferred ACs. External evidence failure uses notify-soft-fail and stops without a placeholder verdict.
+**Stop condition:** one top candidate and all its ACs, or first external blocker; never start a second task.
+**Growth trigger:** promote to a QA cron if evidence collection needs its own cadence/tools; create a workflow when capability tasks and original-task reruns need ordered handoffs.
 
-   The queue fetches both `attentionOwner=Ash` and
-   `workflowGateOwner=Ash`. Routing precedence is strict:
-
-   - when `attentionOwners` is populated, only position 0 acts; every gate-owner
-     fallback and later attention slot is dormant;
-   - when `attentionOwners` is empty, Ash may act on an outstanding gate only if
-     it is the exact gate for the current stage (`doing → qa_agent` for Ash);
-   - stale, approved, and future-stage gates are never actionable.
-
-2. Hydrate the top candidate and re-confirm its attention stack, current status,
-   gate type, state, and owner before acting. Preserve duplicate role slots.
-3. When Ash is the current actor for a `qa_agent` gate, reason over the
-   task via the agent's own tool calls (no CLI invocation):
-
-   1. Fetch the full task via the Tasks API.
-   2. Fetch the linked merged PR's body, file list, and raw patch via
-      `gh api` (Ash's `ASH_GITHUB_TOKEN` is in her agent env).
-   3. Import `extractAcLines` + `stripTrailingEvidence` from
-      `agents/ash/src/verify.ts` to get the bare AC descriptions —
-      these are imports, not invocations; Ash runs them inside her own
-      reasoning context.
-   4. For each AC, reason over the AC's bare description + the PR
-      patch + the cited test results + the cited files (read via the
-      agent's `read` / `exec` tools). Reach a verdict: `verified` /
-      `blocked` / `deferred`.
-      For user-visible app ACs, also read the approved tech design's test
-      matrix and confirm the promised e2e/browser test exists in the merged
-      delivery and exercises the real route. A component test or backend test
-      alone cannot verify a UI AC; missing reachability evidence is `blocked`,
-      not `deferred`.
-      If the delivery changes `apps/<app>/SPEC.md`, diff that file: every new
-      or changed user-visible flow must have a matching added/updated e2e
-      spec under that app's `test/e2e/` in the same delivery, plus a
-      coverage-table row linking them. A spec update with no matching e2e
-      change, or an e2e change with no spec/coverage-table update, is
-      `blocked` unless the approved tech design names and justifies a
-      specific non-e2e fallback.
-      Before `deferred`, run an execution preflight: execute any cited
-      repository command or script that is available, use green CI where it
-      is authoritative, and run a bounded live probe when the local service
-      can be started or the endpoint is reachable. A manual or inconvenient
-      check is not a capability gap; do not defer it without attempting it. If
-      the implementation or an AC is simply incomplete, use `blocked` and
-      route back to Rowan; reserve `deferred` for a missing verifier/platform
-      capability.
-   5. On `verified` for all ACs: post the structured `qa_agent`
-      approval via the Tasks API (Ash's `ASH_TASKS_API_APPROVAL_TOKEN`
-      is in her agent env). A `[qa-agent-verified]` comment records the
-      per-AC reasoning summary.
-   6. On any `blocked` AC: post `[qa-agent-blocked] AC<N>: <reason>`
-      listing each blocked AC's reason. Do **not** post the structured
-      approval.
-   7. On a `deferred` AC caused by a missing Ash/codebase capability: post
-      `[qa-agent-deferred] AC<N>: <reason>` and a matching
-      `[qa-agent-capability-request] domain=<domain> AC<N>: need <capability>
-      to perform <check>; attempted <command/tool>; requested action <next
-      step>` entry. Continue the loop for the rest, but do **not** post the
-      structured `qa_agent` approval. Route the task to Quinn at
-      `attentionOwners[0]` until Quinn approves and creates a capability-
-      extension task. Then the original task must depend on that new task; the
-      capability task must have no dependency back to the original. Once that
-      task completes, Ash reruns the original task and approves or blocks it
-      from fresh evidence. Do not classify a capability gap as a delivery
-      failure merely to route it back to Rowan.
-   8. If the same capability gap has been deferred across two distinct
-      tasks (the two-strike rule), propose a follow-up feature task
-      (create via Tasks API) describing the capability spec and link
-      it from both deferred reports. Do not auto-create on the first
-      deferral — transient gaps are noise; only recurring gaps become
-      work items.
-4. Take one concrete action through `WORKFLOW.md`.
-5. Do not scan comments for routing tags. Comments may supply evidence/history,
-   but attention position 0 and the empty-attention current-gate fallback are
-   the control state.
-6. If neither rule yields an actionable task, return `HEARTBEAT_OK`.
+## Shared failure policy
+Read and follow notify-soft-fail. Do not patch task status, clear all attention owners, approve from partial evidence, or classify incomplete delivery as a capability gap.
