@@ -51,8 +51,8 @@ a Tilt supervisor unreachable, a stale Postgres container, a wedged tsx
 process.
 
 **Do not run an ad hoc availability probe against a local/prodlike port at
-all** — e.g. a standalone `curl http://localhost:4001/...` "check Tasks API
-is up" sanity check before or alongside the official discovery step. This
+all** — e.g. a standalone local-port `curl` against `localhost:4001` to
+"check Tasks API is up" before or alongside the official discovery step. This
 is the exact call that caused the 2026-11-24 20:22 incident: Quinn's own
 heartbeat independently curled `localhost:4001` as a self-authored first
 step, found the dev stack down (Tom had stopped it for an overnight cutover
