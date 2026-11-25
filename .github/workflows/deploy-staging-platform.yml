@@ -145,6 +145,7 @@ jobs:
           # The staging environment secrets that carry the live values.
           STAGING_TASKS_API_DATABASE_URL: ${{ secrets.STAGING_TASKS_API_DATABASE_URL }}
           STAGING_BUDGET_API_DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
+          STAGING_BUDGET_API_CLERK_SECRET_KEY: ${{ secrets.STAGING_BUDGET_API_CLERK_SECRET_KEY }}
           # Optional: a dedicated content-scheduler DSN. Not registered
           # today; without it the content-scheduler schema is derived from
           # the tasks-api DSN (one database, three schemas).
