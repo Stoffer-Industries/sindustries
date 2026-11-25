@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import { clearTokenGetter, setTokenGetter } from '../src/auth/token.js';
 
 function createMemoryLocalStorage() {
   let store = new Map();
@@ -35,8 +36,10 @@ beforeEach(() => {
       configurable: true
     });
   }
+  setTokenGetter(async () => 'test-clerk-token');
 });
 
 afterEach(() => {
+  clearTokenGetter();
   cleanup();
 });

@@ -1,18 +1,14 @@
-import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { prisma } from '../lib/prisma.ts';
 import { sendError } from '../lib/http.ts';
-import { config } from '../config/index.ts';
 
 export type ApprovalType = 'spec' | 'tech_design' | 'qa_agent' | 'accepted';
-type ServiceCredential = { token: string; actor: string; approvalTypes: ApprovalType[] };
 export type ApprovalPrincipal = {
   actor: string;
   /** Types this actor may GRANT. */
   approvalTypes: ReadonlySet<ApprovalType>;
   /** Types this actor may REVOKE. Superset of `approvalTypes` by construction. */
   revocationTypes: ReadonlySet<ApprovalType>;
-  kind: 'browser_session' | 'service';
+  kind: 'clerk_session' | 'service';
 };
 
 declare global { namespace Express { interface Request { approvalPrincipal?: ApprovalPrincipal } } }
@@ -72,39 +68,6 @@ const ACTOR_PERMISSIONS: Record<string, ReadonlySet<ApprovalType>> = {
   brain_spec_reconciler: new Set(['spec'])
 };
 
-function loadServiceCredentials(): ServiceCredential[] {
-  const raw = config.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
-  if (!raw || raw === '[]') return [];
-  let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch (e) { throw new Error(`TASKS_API_APPROVAL_SERVICE_CREDENTIALS must be valid JSON: ${(e as Error).message}`); }
-  if (!Array.isArray(parsed)) throw new Error('TASKS_API_APPROVAL_SERVICE_CREDENTIALS must be a JSON array');
-  return parsed.map((value, index) => {
-    const item = value as Partial<ServiceCredential>;
-    if (typeof item?.token !== 'string' || item.token.length < 16 || typeof item.actor !== 'string' ||
-      !Array.isArray(item.approvalTypes) || item.approvalTypes.some((t) => !['spec', 'tech_design', 'qa_agent', 'accepted'].includes(t as ApprovalType))) {
-      throw new Error(`TASKS_API_APPROVAL_SERVICE_CREDENTIALS[${index}] is invalid`);
-    }
-    return item as ServiceCredential;
-  });
-}
-
-// Parse once at module load so malformed config fails process boot (not the
-// first authenticated request) and we don't re-parse JSON per request.
-const SERVICE_CREDENTIALS: ReadonlyArray<ServiceCredential> = loadServiceCredentials();
-
-function parseServiceCredentials(): ReadonlyArray<ServiceCredential> {
-  return SERVICE_CREDENTIALS;
-}
-
-function cookie(req: Request, name: string): string | null {
-  for (const part of (req.headers.cookie ?? '').split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
-  }
-  return null;
-}
-function tokenHash(token: string) { return crypto.createHash('sha256').update(token).digest('hex'); }
-function tokenMatches(a: string, b: string) { const x = Buffer.from(a); const y = Buffer.from(b); return x.length === y.length && crypto.timingSafeEqual(x, y); }
 export function approvalTypesForActor(actor: string): ApprovalType[] {
   return [...(ACTOR_PERMISSIONS[actor] ?? [])];
 }
@@ -116,31 +79,20 @@ function permissions(actor: string, requested?: ApprovalType[]) {
 
 export async function requireApprovalPrincipal(req: Request, res: Response, next: NextFunction) {
   try {
-    const sessionToken = cookie(req, 'tasks_api_session');
-    if (sessionToken) {
-      const session = await prisma.approvalSession.findUnique({ where: { tokenHash: tokenHash(sessionToken) } });
-      if (session && !session.revokedAt && session.expiresAt > new Date()) {
-        const allowed = permissions(session.actor);
-        if (!allowed) return sendError(res, 403, 'APPROVAL_ACTOR_FORBIDDEN', 'Actor is not permitted to mutate approvals');
-        req.approvalPrincipal = {
-          actor: session.actor,
-          approvalTypes: allowed,
-          revocationTypes: revocationTypesFor(session.actor, allowed),
-          kind: 'browser_session'
-        };
-        return next();
-      }
-    }
-    const match = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '');
-    const credential = match ? parseServiceCredentials().find((entry) => tokenMatches(match[1], entry.token)) : null;
-    if (!credential) return sendError(res, 401, 'APPROVAL_AUTH_REQUIRED', 'A valid approval session or service credential is required');
-    const allowed = permissions(credential.actor, credential.approvalTypes);
+    const principal = req.user;
+    if (!principal) return sendError(res, 401, 'APPROVAL_AUTH_REQUIRED', 'A valid bearer credential is required');
+    const requested = principal.kind === 'service'
+      ? principal.approvalTypes.filter((type): type is ApprovalType =>
+          ['spec', 'tech_design', 'qa_agent', 'accepted'].includes(type)
+        )
+      : undefined;
+    const allowed = permissions(principal.actor, requested);
     if (!allowed) return sendError(res, 403, 'APPROVAL_ACTOR_FORBIDDEN', 'Actor is not permitted to mutate approvals');
     req.approvalPrincipal = {
-      actor: credential.actor,
+      actor: principal.actor,
       approvalTypes: allowed,
-      revocationTypes: revocationTypesFor(credential.actor, allowed),
-      kind: 'service'
+      revocationTypes: revocationTypesFor(principal.actor, allowed),
+      kind: principal.kind
     };
     return next();
   } catch (error) { return next(error); }
@@ -168,5 +120,3 @@ export function authorizeApprovalType(req: Request, res: Response, type: Approva
   }
   return true;
 }
-
-export const approvalSessionTokenHash = tokenHash;

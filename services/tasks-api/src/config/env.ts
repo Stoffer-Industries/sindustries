@@ -48,6 +48,48 @@ function jsonStringSchema(ctxPath: string) {
   });
 }
 
+const clerkAuthorizedUsersSchema = z.string().default('[]').superRefine((raw, ctx) => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    ctx.addIssue({ code: 'custom', message: 'TASKS_API_CLERK_AUTHORIZED_USERS must be valid JSON' });
+    return;
+  }
+  if (!Array.isArray(parsed)) {
+    ctx.addIssue({ code: 'custom', message: 'TASKS_API_CLERK_AUTHORIZED_USERS must be a JSON array' });
+    return;
+  }
+  const ids = new Set<string>();
+  parsed.forEach((value, index) => {
+    const row = value as { clerkUserId?: unknown; actor?: unknown };
+    if (typeof row?.clerkUserId !== 'string' || !row.clerkUserId.trim() ||
+      typeof row?.actor !== 'string' || !row.actor.trim()) {
+      ctx.addIssue({ code: 'custom', message: `TASKS_API_CLERK_AUTHORIZED_USERS[${index}] must contain nonblank clerkUserId and actor strings` });
+      return;
+    }
+    if (ids.has(row.clerkUserId)) {
+      ctx.addIssue({ code: 'custom', message: `TASKS_API_CLERK_AUTHORIZED_USERS contains duplicate clerkUserId ${row.clerkUserId}` });
+    }
+    ids.add(row.clerkUserId);
+  });
+});
+
+const exactOriginsSchema = z.string().default('').transform((raw) =>
+  raw.split(',').map((value) => value.trim()).filter(Boolean)
+).superRefine((origins, ctx) => {
+  origins.forEach((origin, index) => {
+    try {
+      const url = new URL(origin);
+      if (origin.includes('*') || url.origin !== origin || !['http:', 'https:'].includes(url.protocol)) {
+        throw new Error();
+      }
+    } catch {
+      ctx.addIssue({ code: 'custom', message: `TASKS_API_CLERK_AUTHORIZED_PARTIES[${index}] must be an exact HTTP(S) origin` });
+    }
+  });
+});
+
 const CORS_ALLOWED_ORIGINS = z.string().default('').transform((raw) =>
   raw.split(',').map((s) => s.trim()).filter(Boolean)
 );
@@ -64,16 +106,14 @@ const schema = z.object({
 
   CORS_ALLOWED_ORIGINS,
 
-  // Approval auth. Stored as JSON strings on the wire; parsed lazily by
-  // the consumers (approvalAuth, approvalSessions) so the redactor can
-  // match the raw string against log rows.
-  TASKS_API_APPROVAL_USERS: jsonStringSchema('TASKS_API_APPROVAL_USERS'),
+  // Human browser identity is Clerk-issued and separately allowlisted by
+  // immutable user id. Service credentials remain the machine identity path.
+  CLERK_SECRET_KEY: z.string().min(1).optional(),
+  CLERK_JWT_KEY: z.string().min(1).optional(),
+  TASKS_API_CLERK_ISSUER: z.string().url().optional(),
+  TASKS_API_CLERK_AUTHORIZED_USERS: clerkAuthorizedUsersSchema,
+  TASKS_API_CLERK_AUTHORIZED_PARTIES: exactOriginsSchema,
   TASKS_API_APPROVAL_SERVICE_CREDENTIALS: jsonStringSchema('TASKS_API_APPROVAL_SERVICE_CREDENTIALS'),
-  TASKS_API_APPROVAL_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(28800),
-  // Set to the environment's shared parent domain so the browser session
-  // issued by tasks-api is also sent to content-scheduler-api. Leave empty
-  // for local development, where localhost is intentionally host-scoped.
-  TASKS_API_APPROVAL_SESSION_COOKIE_DOMAIN: z.string().default(''),
 
   // Content Scheduler — X (Twitter) publishing.
   X_CLIENT: z.enum(['fake', 'real']).default('fake'),
@@ -113,6 +153,20 @@ const schema = z.object({
   OTEL_ENVIRONMENT: z.string().optional(),
   OTEL_SDK_DISABLED: z.string().optional()
 }).superRefine((cfg, ctx) => {
+  if (cfg.NODE_ENV === 'production') {
+    if (!cfg.CLERK_SECRET_KEY && !cfg.CLERK_JWT_KEY) {
+      ctx.addIssue({ code: 'custom', path: ['CLERK_SECRET_KEY'], message: 'CLERK_SECRET_KEY or CLERK_JWT_KEY is required in production' });
+    }
+    if (!cfg.TASKS_API_CLERK_ISSUER) {
+      ctx.addIssue({ code: 'custom', path: ['TASKS_API_CLERK_ISSUER'], message: 'TASKS_API_CLERK_ISSUER is required in production' });
+    }
+    if (cfg.TASKS_API_CLERK_AUTHORIZED_PARTIES.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['TASKS_API_CLERK_AUTHORIZED_PARTIES'], message: 'at least one authorized party is required in production' });
+    }
+    if (cfg.TASKS_API_CLERK_AUTHORIZED_PARTIES.some((origin) => !origin.startsWith('https://'))) {
+      ctx.addIssue({ code: 'custom', path: ['TASKS_API_CLERK_AUTHORIZED_PARTIES'], message: 'production authorized parties must use HTTPS' });
+    }
+  }
   if (cfg.X_CLIENT === 'real') {
     // X_ACTOR_SECRET is intentionally NOT in this list: it is an opt-in
     // x-actor-secret header gate for the content-scheduler X publish path
@@ -162,7 +216,8 @@ export const TASKS_API_SECRET_KEYS = [
   'X_ACCESS_TOKEN_SECRET',
   'X_ACTOR_SECRET',
   'CONTENT_SCHEDULER_INGEST_SECRET',
-  'TASKS_API_APPROVAL_USERS',
+  'CLERK_SECRET_KEY',
+  'CLERK_JWT_KEY',
   'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
   'DATABASE_URL'
 ] as const;

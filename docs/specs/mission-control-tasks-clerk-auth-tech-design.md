@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 task_id: ddd2f57d-0e22-499f-a785-190f81c10683
 product_spec: brain/tasks/specs/in-progress/mission-control-tasks-clerk-auth-2026-11-24.md
 shipped_pr: null
@@ -24,7 +24,7 @@ shipped_date: null
 
 Mission Control and the standalone Tasks app must fail closed before rendering task data. Both browser apps use the existing production Sindustries Clerk identity pool already used by GymTrack; this work does not create, migrate, or link another identity. Neither app exposes self-serve sign-up. Product access is a separate server-side allowlist keyed by Clerk's immutable user ID, with Tom's existing Clerk identity as the initial member.
 
-Mission Control is the primary entry point for this pairing. Tasks participates in Clerk's satellite-domain flow so the Mission Control session is recognized when Tasks loads cross-origin in the iframe. A clean standalone Tasks visit may still enter Clerk's sign-in round trip. Agents remain machine identities: their current `Authorization: Bearer <service credential>` contract stays unchanged and Clerk user tokens are not issued to them.
+Mission Control is the primary product entry point, but both Mission Control and Tasks are Clerk satellites of GymTrack's existing primary domain. Both use satellite auto-sync so the existing primary session is recognized before either protected UI mounts, including when Tasks loads cross-origin in the iframe. A clean standalone Tasks visit may still enter Clerk's sign-in round trip. Agents remain machine identities: their current `Authorization: Bearer <service credential>` contract stays unchanged and Clerk user tokens are not issued to them.
 
 This design also closes the iframe gap recorded in `docs/systems/mission-control.md`: Mission Control supplies an explicit sandbox and Tasks emits a `frame-ancestors` response header restricted to Mission Control.
 
@@ -34,7 +34,7 @@ This design also closes the iframe gap recorded in `docs/systems/mission-control
 - **API-owned resource:** `services/tasks-api` owns product access as deployment configuration mapping Clerk `sub` to the Tasks actor used by existing audit and permission rules. A valid Clerk identity absent from this allowlist receives `403 AUTH_FORBIDDEN`.
 - **Database-backed domain data:** tasks, comments, approvals, attention owners, tags, dependencies, and analytics remain in Tasks Postgres. No task-domain migration is required. Existing `ApprovalSession` rows/table become inert after cutover and remain for a later cleanup rather than adding destructive scope here.
 - **UI-local state:** each SPA's `@clerk/react` provider owns session hydration, refresh, sign-in navigation, and sign-out. Apps keep only loading/authenticated/unauthorized presentation state. They never persist JWTs themselves.
-- **Shared package/cross-app contract:** the durable contract is Clerk issuer + subject, satellite configuration, and a Clerk session JWT in the Tasks API bearer header. Keep thin provider/gate modules app-local because Mission Control is primary while Tasks is satellite, giving them materially different configuration. Both pin `@clerk/react@6.17.0`, matching GymTrack. Extract only if a third restricted SPA adopts the exact same gate.
+- **Shared package/cross-app contract:** the durable contract is Clerk issuer + subject, satellite configuration, and a Clerk session JWT in the Tasks API bearer header. Keep thin provider/gate modules app-local; both are satellites, while Tasks additionally carries iframe-specific policy. Both pin `@clerk/react@6.17.0`, matching GymTrack. Extract only if a third restricted SPA adopts the exact same gate.
 - **Workflow/cron/skill/OpenClaw boundary:** no workflow, cron, or skill receives a Clerk token. Existing callers retain their scoped Tasks API service credential. Clerk dashboard/domain setup, Vercel/Fly secrets, allowlist values, and live checks are operator work outside this repository.
 
 Tasks API is the correct enforcement point because UI hiding cannot protect data, and it already owns task identity/audit policy. Mission Control must not become an auth proxy.
@@ -52,9 +52,9 @@ The API accepts Clerk JWTs and current service credentials from the first cut, s
 ### Browser flow
 
 1. Mission Control boots under `ClerkProvider`. Until Clerk loads, it renders a neutral loading state and makes no domain requests.
-2. With no session, Mission Control redirects to its sign-in route. There is no `SignUp` component, `/sign-up` route, or sign-up CTA.
+2. With no session, Mission Control uses Clerk satellite auto-sync and redirects to the existing primary sign-in route. There is no `SignUp` component, `/sign-up` route, or sign-up CTA.
 3. After sign-in, Mission Control calls `GET /api/v1/auth/session` with a fresh Clerk session JWT. `200` unlocks the shell; `403` renders “Not authorized” without mounting tabs or fetch effects.
-4. The Tasks iframe boots with the same Clerk application configured as a satellite. Clerk's primary/satellite handshake recognizes the browser session; Tasks repeats the API allowlist check and renders without another prompt.
+4. The Tasks iframe boots as a satellite with satelliteAutoSync enabled. Its first-load sync round trip recognizes the existing primary session without user interaction; Tasks then repeats the API allowlist check and renders without another sign-in prompt.
 5. A clean standalone Tasks visit follows the satellite sign-in URL and returns to the original Tasks URL. This may prompt independently but creates no second account.
 6. Both apps call Clerk's token getter for every Tasks API request. Tokens stay in Clerk-managed state and are not copied to localStorage or app cookies.
 
@@ -89,8 +89,8 @@ Legacy `POST` and `DELETE /api/v1/auth/session` are removed. `GET` becomes the b
 
 ### Primary/satellite setup
 
-- Mission Control is the primary domain for this pairing and owns the sign-in URL.
-- Tasks configures Clerk's satellite settings: `isSatellite`, its environment domain, and absolute Mission Control sign-in URL; return navigation preserves the Tasks URL.
+- GymTrack's existing domain remains the Clerk instance's sole primary. Mission Control and Tasks are both satellites and use its absolute sign-in URL.
+- Both apps configure Clerk's satellite settings, including `satelliteAutoSync=true`: `isSatellite`, their environment domain, and the absolute existing-primary sign-in URL; return navigation preserves each app's original URL.
 - Production and staging pairs are explicit. Preview domains are not implicitly trusted and receive no production API access.
 - The same Clerk application/key family as GymTrack is mandatory. A second application/user pool is prohibited.
 
@@ -170,7 +170,7 @@ No domain schema migration is needed. Clerk stores identity; Tasks API configura
 ### Runtime configuration
 
 - Both SPAs: `VITE_CLERK_PUBLISHABLE_KEY`
-- Mission Control: primary Clerk domain/sign-in route configuration
+- Mission Control: VITE_CLERK_SATELLITE_DOMAIN and VITE_CLERK_SIGN_IN_URL for the existing primary
 - Tasks: `VITE_CLERK_SATELLITE_DOMAIN`, `VITE_CLERK_SIGN_IN_URL`, existing `VITE_SHELL_ORIGIN`
 - API: Clerk secret/JWT key, `TASKS_API_CLERK_AUTHORIZED_USERS='[{"clerkUserId":"user_...","actor":"Tom"}]'`, exact authorized-party origins
 - Existing `TASKS_API_APPROVAL_SERVICE_CREDENTIALS`: unchanged
@@ -187,8 +187,8 @@ No domain schema migration is needed. Clerk stores identity; Tasks API configura
 
 ## `.openclaw` and operator boundary
 
-1. Confirm GymTrack's production Clerk application supports Mission Control as this pair's primary and Tasks as satellite without breaking GymTrack's custom-domain auth/public sign-up.
-2. Register production/staging domains, redirects, allowed origins, and satellite settings in that existing application. Do not create another user pool.
+1. Confirm the GymTrack production Clerk instance.s existing primary sign-in URL and register both Mission Control and Tasks as satellites; do not attempt to create a second primary.
+2. Register both production/staging satellite domains, redirects, allowed origins, and auto-sync settings in that existing application. Do not create another user pool.
 3. Read Tom's immutable Clerk user ID from Clerk Backend API/Dashboard and provision its `Tom` mapping; do not key from email.
 4. Provision publishable keys to Vercel and verification secret/key plus allowlist/parties to Fly. Never expose server secrets through Vite.
 5. Deploy API → Tasks → Mission Control, run staging cross-domain/header checks, then promote. Keep previous releases for rollback.
@@ -229,7 +229,7 @@ Prove service credentials in staging, deploy the protected API, then immediately
 
 ## Open questions and risks for Quinn review
 
-1. **Blocking topology question:** GymTrack already uses this Clerk application. Can Mission Control be the primary for the Mission Control ↔ Tasks pair without changing/breaking GymTrack's live primary/custom-domain auth? If Clerk permits one primary domain per application, validate a supported same-user-pool topology with Clerk; a second application is not acceptable.
+1. **Resolved topology:** Clerk permits one primary domain per instance, so GymTrack remains primary and both internal apps are satellites using satellite auto-sync. A second application/user pool remains prohibited.
 2. Confirm Tom's immutable `user_...` ID and canonical actor spelling `Tom`.
 3. Should staging register in the production Clerk application? A separate staging application would not prove AC2 and must not become the production plan.
 4. Does Clerk's supported testing-token flow work across custom primary/satellite domains? If not, AC4/AC5 need documented manual staging evidence; Tom's password/OAuth refresh/session token must not enter CI.

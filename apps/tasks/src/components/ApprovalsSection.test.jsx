@@ -6,8 +6,6 @@ const fetchRequiredApprovalsMock = vi.fn();
 const createTaskApprovalMock = vi.fn();
 const deleteTaskApprovalMock = vi.fn();
 const fetchAuthSessionMock = vi.fn();
-const loginMock = vi.fn();
-const logoutMock = vi.fn();
 
 vi.mock('../tasksApi.ts', async () => {
   const actual = await vi.importActual('../tasksApi.ts');
@@ -16,9 +14,7 @@ vi.mock('../tasksApi.ts', async () => {
     fetchRequiredApprovals: (...args) => fetchRequiredApprovalsMock(...args),
     createTaskApproval: (...args) => createTaskApprovalMock(...args),
     deleteTaskApproval: (...args) => deleteTaskApprovalMock(...args),
-    fetchAuthSession: (...args) => fetchAuthSessionMock(...args),
-    login: (...args) => loginMock(...args),
-    logout: (...args) => logoutMock(...args)
+    fetchAuthSession: (...args) => fetchAuthSessionMock(...args)
   };
 });
 
@@ -46,8 +42,6 @@ describe('ApprovalsSection', () => {
     createTaskApprovalMock.mockReset();
     deleteTaskApprovalMock.mockReset();
     fetchAuthSessionMock.mockReset().mockResolvedValue({ actor: 'Tom', approvalTypes: ['spec', 'qa_agent'] });
-    loginMock.mockReset();
-    logoutMock.mockReset();
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -78,38 +72,13 @@ describe('ApprovalsSection', () => {
     expect(screen.getByRole('checkbox', { name: 'Accepted approval' })).toBeEnabled();
   });
 
-  it('prompts anonymous users to sign in, keeps credentials ephemeral, then performs the requested approval', async () => {
-    fetchAuthSessionMock.mockRejectedValue(new Error('Unauthenticated'));
+  it('shows the Clerk actor without rendering password or local logout controls', async () => {
     fetchRequiredApprovalsMock.mockResolvedValue(required(['spec']));
-    loginMock.mockResolvedValue({ actor: 'Tom', approvalTypes: ['spec', 'qa_agent'] });
-    createTaskApprovalMock.mockResolvedValue(approved);
-    render(<ApprovalsSection task={{ id: 'task-1', taskType: 'feature', approvals: [] }} />);
-
-    const checkbox = await screen.findByRole('checkbox', { name: 'Spec approval' });
-    await waitFor(() => expect(checkbox).toBeEnabled());
-    await userEvent.click(checkbox);
-    expect(createTaskApprovalMock).not.toHaveBeenCalled();
-
-    const form = screen.getByRole('form', { name: 'Sign in to update approvals' });
-    await userEvent.type(screen.getByLabelText('Username'), 'tom');
-    await userEvent.type(screen.getByLabelText('Password'), 'secret');
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-
-    await waitFor(() => expect(loginMock).toHaveBeenCalledWith({ username: 'tom', password: 'secret' }));
-    await waitFor(() => expect(createTaskApprovalMock).toHaveBeenCalledWith('task-1', { type: 'spec' }));
-    expect(form).not.toBeInTheDocument();
-    expect(screen.getByText('Signed in as Tom')).toBeInTheDocument();
-  });
-
-  it('shows the current actor and logs out without persisting credentials', async () => {
-    fetchRequiredApprovalsMock.mockResolvedValue(required(['spec']));
-    logoutMock.mockResolvedValue(null);
     render(<ApprovalsSection task={{ id: 'task-1', taskType: 'feature', approvals: [] }} />);
 
     expect(await screen.findByText('Signed in as Tom')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Log out' }));
-    await waitFor(() => expect(logoutMock).toHaveBeenCalledOnce());
-    expect(screen.getByText('Sign in to change approvals')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
   });
 
   it('optimistically approves one row, disables only that row, and refreshes the parent', async () => {

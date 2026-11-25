@@ -357,7 +357,7 @@ describe('requiredApprovalsFor', () => {
 describe('GET /api/v1/task-types/:taskType/required-approvals', () => {
   it('returns the configured approval list for a known task type', async () => {
     const app = createApp();
-    const response = await request(app).get('/api/v1/task-types/feature/required-approvals');
+    const response = await request(app).get('/api/v1/task-types/feature/required-approvals').set('Authorization', 'Bearer integration-test-token-long-enough');
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
@@ -374,7 +374,7 @@ describe('GET /api/v1/task-types/:taskType/required-approvals', () => {
 
   it('returns the empty list for `research`', async () => {
     const app = createApp();
-    const response = await request(app).get('/api/v1/task-types/research/required-approvals');
+    const response = await request(app).get('/api/v1/task-types/research/required-approvals').set('Authorization', 'Bearer integration-test-token-long-enough');
 
     expect(response.status).toBe(200);
     expect(response.body.data.requiredApprovals).toEqual([]);
@@ -382,7 +382,7 @@ describe('GET /api/v1/task-types/:taskType/required-approvals', () => {
 
   it('400s on an unknown task type', async () => {
     const app = createApp();
-    const response = await request(app).get('/api/v1/task-types/not-a-type/required-approvals');
+    const response = await request(app).get('/api/v1/task-types/not-a-type/required-approvals').set('Authorization', 'Bearer integration-test-token-long-enough');
 
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('INVALID_TASK_TYPE');

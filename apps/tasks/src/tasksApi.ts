@@ -1,3 +1,5 @@
+import { getAccessToken } from './auth/token.js';
+
 // Task-related types
 export interface TaskFilters {
   q?: string;
@@ -124,19 +126,23 @@ export interface AuthActor {
   expiresAt?: string;
 }
 
-export interface LoginPayload {
-  username: string;
-  password: string;
-}
 
 // API Response wrapper
 interface ApiResponse<T> {
   data: T;
   error?: {
     message: string;
+    code?: string;
   };
 }
 
+
+export class TasksApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'TasksApiError';
+  }
+}
 const DEFAULT_API_BASE_BY_PORT: Record<string, string> = {
   '5173': 'http://localhost:4000/api/v1',
   '5174': 'http://localhost:4001/api/v1'
@@ -148,16 +154,22 @@ const API_BASE =
   ?? 'http://localhost:4001/api/v1';
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = await getAccessToken();
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'content-type': 'application/json', ...(options?.headers ?? {}) },
-    credentials: 'include',
-    ...options
+    ...options,
+    headers: {
+      'content-type': 'application/json',
+      ...(options?.headers ?? {}),
+      authorization: `Bearer ${token}`
+    }
   });
 
   const body = response.status === 204
     ? ({ data: null } as ApiResponse<T>)
     : await response.json() as ApiResponse<T>;
-  if (!response.ok) throw new Error(body?.error?.message ?? 'Request failed');
+  if (!response.ok) {
+    throw new TasksApiError(body?.error?.message ?? 'Request failed', response.status, body?.error?.code);
+  }
   return body.data;
 }
 
@@ -233,26 +245,9 @@ export async function fetchRequiredApprovals(taskType: TaskType): Promise<Requir
   return api<RequiredApprovals>(`/task-types/${taskType}/required-approvals`);
 }
 
-/** Resolve the current browser session. */
+/** Resolve the current allowlisted Clerk principal. */
 export async function fetchAuthSession(): Promise<AuthActor> {
-  return api<AuthActor>('/auth/session', { credentials: 'include' });
-}
-
-/** Establish an HttpOnly-cookie browser session. */
-export async function login(payload: LoginPayload): Promise<AuthActor> {
-  return api<AuthActor>('/auth/session', {
-    method: 'POST',
-    credentials: 'include',
-    body: JSON.stringify(payload)
-  });
-}
-
-/** End the current browser session. */
-export async function logout(): Promise<null> {
-  return api<null>('/auth/session', {
-    method: 'DELETE',
-    credentials: 'include'
-  });
+  return api<AuthActor>('/auth/session');
 }
 
 /**
@@ -265,7 +260,6 @@ export async function createTaskApproval(
 ): Promise<TaskApproval> {
   return api<TaskApproval>(`/tasks/${id}/approvals`, {
     method: 'POST',
-    credentials: 'include',
     body: JSON.stringify(payload)
   });
 }
@@ -276,8 +270,7 @@ export async function deleteTaskApproval(
   type: ApprovalType
 ): Promise<TaskApproval | null> {
   return api<TaskApproval | null>(`/tasks/${id}/approvals/${type}`, {
-    method: 'DELETE',
-    credentials: 'include'
+    method: 'DELETE'
   });
 }
 

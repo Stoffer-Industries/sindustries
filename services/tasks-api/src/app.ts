@@ -7,7 +7,7 @@ import { config } from './config/index.ts';
 import { tasksRouter } from './routes/tasks';
 import { taskApprovalsRouter } from './routes/taskApprovals';
 import { taskAttentionOwnersRouter } from './routes/taskAttentionOwners.ts';
-import { approvalSessionsRouter } from './routes/approvalSessions.ts';
+import { authSessionRouter } from './routes/authSession.ts';
 import { requiredApprovalsRouter } from './routes/requiredApprovals';
 import { tagsRouter } from './routes/tags';
 import { featureTaskAnalyticsRouter } from './routes/featureTaskAnalytics.ts';
@@ -30,7 +30,11 @@ function getAllowedOrigins() {
     'http://127.0.0.1:5173',
     'http://127.0.0.1:4173',
     'http://localhost:5174',
-    'http://127.0.0.1:5174'
+    'http://127.0.0.1:5174',
+    'http://localhost:5175',
+    'http://127.0.0.1:5175',
+    'http://localhost:5176',
+    'http://127.0.0.1:5176'
   ]);
 }
 
@@ -72,32 +76,12 @@ export function createApp() {
   app.use('/api/v1/tasks', (req, res, next) =>
     req.method === 'POST' && req.path === '/' ? writeEndpointRateLimit(req, res, next) : next()
   );
-  app.use('/api/v1/auth/session', (req, res, next) =>
-    req.method === 'POST' ? writeEndpointRateLimit(req, res, next) : next()
-  );
 
-  // General-mutation authentication gate (task 0719a8e3). Every
-  // POST/PATCH/DELETE on the task, tag, and analytics surfaces requires a
-  // valid session cookie or Bearer service credential. GET endpoints stay
-  // open so the UI / agent queue / tasks app continue to read without
-  // friction.
-  //
-  // The content-scheduler mount was moved to services/content-scheduler-api
-  // as part of task 94d5e4fc (PR #2 in the series).
-  //
-  // The middleware is mounted ahead of the routers so 401s are returned
-  // before any handler runs (and before Prisma is hit). Per-route
-  // authorization (e.g. "comments allowed for any authenticated user") is
-  // the route's responsibility; this middleware only authenticates.
-  const mutationMethods = new Set(['POST', 'PATCH', 'DELETE']);
-  const gateMutations = (req: express.Request, res: express.Response, next: express.NextFunction) =>
-    mutationMethods.has(req.method) ? requireAuthenticatedUser(req, res, next) : next();
-
-  app.use('/api/v1/tasks', gateMutations);
-  app.use('/api/v1/tags', gateMutations);
-  app.use('/api/v1/feature-task-analytics/events', (req, _res, next) =>
-    req.method === 'POST' ? requireAuthenticatedUser(req, _res, next) : next()
-  );
+  // Task-domain reads and writes fail closed. Health and CORS preflight stay public.
+  app.use('/api/v1/tasks', requireAuthenticatedUser);
+  app.use('/api/v1/tags', requireAuthenticatedUser);
+  app.use('/api/v1/task-types', requireAuthenticatedUser);
+  app.use('/api/v1/feature-task-analytics', requireAuthenticatedUser);
 
   app.get('/health', (_req, res) => {
     // `version` exposes the deployed commit SHA so the cloud-staging
@@ -117,14 +101,12 @@ export function createApp() {
   //
   // `requireAuthenticatedUser` is listed explicitly in the route chain
   // rather than inherited from one of the method-scoped gates above. The
-  // task/tag/analytics surfaces keep their GETs public by design, so this
-  // route must NOT be swept into that rule — it always requires a
-  // credential. Registration happens before the routers are mounted so no
-  // later router can shadow the path.
+  // route is registered before the routers are mounted so no later router
+  // can shadow the path.
   //
   // The response carries ONLY the caller's own identity: the actor name
   // and the middleware's own `kind` discriminator ('service' for a Bearer
-  // service credential, 'browser_session' for a cookie session). It never
+  // service credential, 'clerk_session' for an authorized Clerk subject). It never
   // returns token material, the configured credential list, other actors'
   // names, approval types, or digests/hashes.
   app.get('/api/v1/auth/principal', requireAuthenticatedUser, (req, res) => {
@@ -137,7 +119,7 @@ export function createApp() {
         res,
         401,
         'AUTH_REQUIRED',
-        'A valid session or service credential is required'
+        'A valid bearer credential is required'
       );
     }
     return res.status(200).json({ actor: user.actor, kind: user.kind });
@@ -147,7 +129,7 @@ export function createApp() {
   app.use('/api/v1', tasksRouter);
   app.use('/api/v1', taskApprovalsRouter);
   app.use('/api/v1', taskAttentionOwnersRouter);
-  app.use('/api/v1', approvalSessionsRouter);
+  app.use('/api/v1', authSessionRouter);
   app.use('/api/v1', requiredApprovalsRouter);
   app.use('/api/v1', tagsRouter);
   app.use('/api/v1', featureTaskAnalyticsRouter);

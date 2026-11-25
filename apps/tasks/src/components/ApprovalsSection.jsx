@@ -4,9 +4,7 @@ import {
   createTaskApproval,
   deleteTaskApproval,
   fetchAuthSession,
-  fetchRequiredApprovals,
-  login,
-  logout
+  fetchRequiredApprovals
 } from '../tasksApi.ts';
 import { assigneeDisplayName, findAssigneeUser } from '../users/assignees.js';
 
@@ -61,10 +59,6 @@ export function ApprovalsSection({ task, onTaskRefresh }) {
   const [error, setError] = useState(null);
   const [actor, setActor] = useState(null);
   const [authStatus, setAuthStatus] = useState('loading');
-  const [loginForType, setLoginForType] = useState(null);
-  const [credentials, setCredentials] = useState({ username: '', password: '' });
-  const [authError, setAuthError] = useState(null);
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,7 +70,7 @@ export function ApprovalsSection({ task, onTaskRefresh }) {
         }
       })
       .catch(() => {
-        if (!cancelled) setAuthStatus('anonymous');
+        if (!cancelled) setAuthStatus('error');
       });
     return () => { cancelled = true; };
   }, []);
@@ -108,46 +102,7 @@ export function ApprovalsSection({ task, onTaskRefresh }) {
   }, [taskType]);
 
   function requestToggle(type) {
-    if (authStatus !== 'authenticated') {
-      setLoginForType(type);
-      setAuthError(null);
-      return;
-    }
     void toggleApproval(type);
-  }
-
-  async function handleLogin(event) {
-    event.preventDefault();
-    const requestedType = loginForType;
-    setIsAuthenticating(true);
-    setAuthError(null);
-    try {
-      const currentActor = await login(credentials);
-      setActor(currentActor);
-      setAuthStatus('authenticated');
-      setCredentials({ username: '', password: '' });
-      setLoginForType(null);
-      if (requestedType) await toggleApproval(requestedType);
-    } catch (err) {
-      setCredentials((current) => ({ ...current, password: '' }));
-      setAuthError(err instanceof Error ? err.message : 'Login failed');
-    } finally {
-      setIsAuthenticating(false);
-    }
-  }
-
-  async function handleLogout() {
-    setIsAuthenticating(true);
-    setAuthError(null);
-    try {
-      await logout();
-      setActor(null);
-      setAuthStatus('anonymous');
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Logout failed');
-    } finally {
-      setIsAuthenticating(false);
-    }
   }
 
   async function toggleApproval(type) {
@@ -216,43 +171,10 @@ export function ApprovalsSection({ task, onTaskRefresh }) {
         <h4 className="si-font-display">Approvals</h4>
         {isLoading ? <span className="small">Loading…</span> : null}
         {authStatus === 'authenticated' ? (
-          <span className="approvals-session small">
-            Signed in as {actor?.displayName || actor?.actor || actor?.username}
-            <button type="button" className="approvals-session-action" onClick={() => void handleLogout()} disabled={isAuthenticating}>Log out</button>
-          </span>
-        ) : authStatus === 'anonymous' ? <span className="small">Sign in to change approvals</span> : null}
+          <span className="approvals-session small">Signed in as {actor?.displayName || actor?.actor || actor?.username}</span>
+        ) : authStatus === 'error' ? <span className="small approvals-error">Unable to verify current user</span> : null}
         {error ? <span className="small approvals-error" role="alert">{error}</span> : null}
       </div>
-      {loginForType ? (
-        <form className="approvals-login" aria-label="Sign in to update approvals" onSubmit={handleLogin}>
-          <label>
-            <span className="small">Username</span>
-            <input
-              name="username"
-              autoComplete="username"
-              required
-              value={credentials.username}
-              onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))}
-            />
-          </label>
-          <label>
-            <span className="small">Password</span>
-            <input
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={credentials.password}
-              onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))}
-            />
-          </label>
-          <div className="approvals-login-actions">
-            <button type="submit" disabled={isAuthenticating}>Sign in</button>
-            <button type="button" disabled={isAuthenticating} onClick={() => { setLoginForType(null); setCredentials({ username: '', password: '' }); setAuthError(null); }}>Cancel</button>
-          </div>
-        </form>
-      ) : null}
-      {authError ? <p className="small approvals-error" role="alert">{authError}</p> : null}
       {requiredApprovals.length === 0 ? (
         <p className="small approvals-empty">No approvals required for this task type.</p>
       ) : (
@@ -277,7 +199,7 @@ export function ApprovalsSection({ task, onTaskRefresh }) {
                   <input
                     type="checkbox"
                     checked={isApproved}
-                    disabled={isImmutable || isPending || authStatus === 'loading' || !isAuthorized}
+                    disabled={isImmutable || isPending || authStatus !== 'authenticated' || !isAuthorized}
                     onChange={() => requestToggle(type)}
                     aria-label={`${APPROVAL_LABELS[type]} approval`}
                     aria-describedby={rowErrors[type] ? `approval-error-${type}` : undefined}

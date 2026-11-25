@@ -1,9 +1,12 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { ClerkProvider } from '@clerk/react';
 import '@sindustries/design-tokens/styles.css';
 import '@sindustries/ui/react/styles.css';
 import './index.css';
 import { App } from './App.jsx';
+import { AuthBoundary } from './auth/AuthBoundary.jsx';
+import { clerkConfig } from './auth/clerkConfig.js';
 import { getStoredTheme, getStoredPulseTheme, setStoredPulseTheme, setStoredTheme } from './utils/storage.js';
 
 const PULSE_THEME_MESSAGE = 'pulse:theme';
@@ -39,9 +42,14 @@ if (typeof window !== 'undefined') {
   });
 }
 
+const authConfig = clerkConfig();
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <ClerkProvider {...authConfig}>
+      <AuthBoundary>
+        <App />
+      </AuthBoundary>
+    </ClerkProvider>
   </React.StrictMode>
 );
 

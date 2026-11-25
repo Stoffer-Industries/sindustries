@@ -74,19 +74,13 @@ describe('mutation auth gate (task 0719a8e3)', () => {
       expect(prismaMock.task.create).toHaveBeenCalledTimes(1);
     });
 
-    it('accepts POST /tasks with a valid browser session cookie', async () => {
-      prismaMock.approvalSession.findUnique.mockResolvedValue({
-        actor: 'Quinn',
-        expiresAt: new Date(Date.now() + 60_000),
-        revokedAt: null
-      });
-      prismaMock.tag.findMany.mockResolvedValue([]);
-      prismaMock.task.create.mockResolvedValue({ id: TASK_ID, title: 'X' });
+    it('rejects the retired browser session cookie', async () => {
       const res = await request(createApp())
         .post('/api/v1/tasks')
         .set('Cookie', `tasks_api_session=${TOM_SESSION}`)
         .send({ title: 'X', priority: 'medium', status: 'open' });
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(401);
+      expect(prismaMock.task.create).not.toHaveBeenCalled();
     });
 
     it('rejects POST /tasks with an expired session', async () => {
@@ -207,17 +201,15 @@ describe('mutation auth gate (task 0719a8e3)', () => {
     });
   });
 
-  describe('GET endpoints stay open', () => {
-    it('GET /tasks is accessible without credentials', async () => {
-      prismaMock.task.findMany.mockResolvedValue([]);
+  describe('GET endpoints fail closed', () => {
+    it('GET /tasks requires credentials', async () => {
       const res = await request(createApp()).get('/api/v1/tasks?limit=5');
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
     });
 
-    it('GET /tags is accessible without credentials', async () => {
-      prismaMock.tag.findMany.mockResolvedValue([]);
+    it('GET /tags requires credentials', async () => {
       const res = await request(createApp()).get('/api/v1/tags');
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
     });
   });
 

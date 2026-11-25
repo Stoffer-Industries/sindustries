@@ -2,8 +2,8 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Set service credentials BEFORE the dynamic import of app.ts (which
-// transitively imports approvalAuth.ts) so the module-load-time parse
-// in approvalAuth captures the test credentials instead of an empty value.
+// transitively imports authenticate.ts) so the module-load-time parse
+// captures the test credentials instead of an empty value.
 process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
   { token: 'tom-service-token-long-enough', actor: 'Tom', approvalTypes: ['spec', 'accepted', 'tech_design', 'qa_agent'] },
   { token: 'quinn-service-token-long-enough', actor: 'Quinn', approvalTypes: ['tech_design'] },
@@ -68,9 +68,9 @@ describe('task approval boundary', () => {
     prismaMock.$transaction.mockImplementation(async (fn) => fn(prismaMock));
   });
 
-  it('keeps reads public', async () => {
+  it('allows authenticated service reads', async () => {
     prismaMock.task.findFirst.mockResolvedValue({ id: TASK_ID, approvals: [approval()] });
-    const res = await request(createApp()).get(`/api/v1/tasks/${TASK_ID}/approvals`);
+    const res = await request(createApp()).get(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth());
     expect(res.status).toBe(200); expect(res.body.data[0].owner).toBe('Tom');
   });
 
@@ -85,12 +85,10 @@ describe('task approval boundary', () => {
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('accepts a durable unexpired browser session cookie', async () => {
-    prismaMock.approvalSession.findUnique.mockResolvedValue({ actor: 'Tom', expiresAt: new Date(Date.now() + 60_000), revokedAt: null });
-    prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(null);
-    prismaMock.taskApproval.upsert.mockResolvedValue(approval()); prismaMock.taskComment.create.mockResolvedValue({});
+  it('rejects the retired browser session cookie', async () => {
     const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set('Cookie', `tasks_api_session=${TOM_SESSION}`).send({ type: 'spec' });
-    expect(res.status).toBe(200); expect(prismaMock.taskApproval.upsert).toHaveBeenCalled();
+    expect(res.status).toBe(401);
+    expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
   });
 
   it('lets Tom grant tech_design and qa_agent as an override; still blocks Quinn on spec', async () => {
@@ -531,17 +529,17 @@ describe('attentionOwners stays untouched on structured approval (task 91864257 
 });
 
 describe('TASKS_API_APPROVAL_SERVICE_CREDENTIALS module-load validation', () => {
-  // Re-import approvalAuth.ts with a controlled env value, capturing any
-  // thrown error from the module-load-time IIFE. Restores the previous env
+  // Re-import authenticate.ts with a controlled env value, capturing any
+  // thrown error from module-load validation. Restores the previous env
   // and resets the module cache so subsequent tests reuse the original
   // (good) module captured at file load.
-  async function importApprovalAuthWith(envValue: string | undefined) {
+  async function importAuthenticatorWith(envValue: string | undefined) {
     vi.resetModules();
     const prev = process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
     if (envValue === undefined) delete process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
     else process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = envValue;
     try {
-      return await import('../src/middleware/approvalAuth.ts');
+      return await import('../src/middleware/authenticate.ts');
     } finally {
       if (prev === undefined) delete process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
       else process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = prev;
@@ -550,22 +548,22 @@ describe('TASKS_API_APPROVAL_SERVICE_CREDENTIALS module-load validation', () => 
   }
 
   it('throws at module load when credentials env is not valid JSON', async () => {
-    await expect(importApprovalAuthWith('{not-json')).rejects.toThrow(/must be valid JSON/);
+    await expect(importAuthenticatorWith('{not-json')).rejects.toThrow(/must be valid JSON/);
   });
 
   it('throws at module load when credentials env is not a JSON array', async () => {
     const object = JSON.stringify({ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec'] });
-    await expect(importApprovalAuthWith(object)).rejects.toThrow(/must be a JSON array/);
+    await expect(importAuthenticatorWith(object)).rejects.toThrow(/must be a JSON array/);
   });
 
   it('throws at module load when an entry is invalid', async () => {
     const badEntry = JSON.stringify([{ token: 'short', actor: 'Tom', approvalTypes: ['spec'] }]);
-    await expect(importApprovalAuthWith(badEntry)).rejects.toThrow(/TASKS_API_APPROVAL_SERVICE_CREDENTIALS\[0\] is invalid/);
+    await expect(importAuthenticatorWith(badEntry)).rejects.toThrow(/TASKS_API_APPROVAL_SERVICE_CREDENTIALS\[0\] is invalid/);
   });
 
   it('loads cleanly when credentials env is a valid array', async () => {
     const valid = JSON.stringify([{ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec', 'accepted'] }]);
-    await expect(importApprovalAuthWith(valid)).resolves.toBeDefined();
+    await expect(importAuthenticatorWith(valid)).resolves.toBeDefined();
   });
 });
 

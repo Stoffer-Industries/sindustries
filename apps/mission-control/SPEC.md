@@ -14,6 +14,17 @@ surface.
 
 ## Flows
 
+0. **Authenticate before the shell mounts.** Mission Control boots under the
+   existing Sindustries Clerk identity pool. While Clerk or the Tasks API
+   allowlist check is loading, no tab content mounts and no domain request is
+   made. A signed-out visitor is redirected to sign-in with no sign-up route or
+   CTA. A valid Clerk identity whose immutable user ID is not in the Tasks API
+   product allowlist sees “Not authorized” and no shell content. Tom's existing
+   Clerk identity is the initial authorized account. Signing in once here also
+   reuses the existing primary session through satellite auto-sync; the Tasks iframe must
+   not prompt again. Verification: `src/auth/AuthBoundary.test.jsx`; the real
+   cross-domain primary/two-satellite handshake is verified against deployed
+   staging because local origins cannot prove Clerk domain topology.
 1. **Switch tabs.** User clicks a row in the vertical sidebar.
    - Updates the URL path (e.g. `/tasks` → `/bookmarks`).
    - Renders the new tab content without a full page reload.
@@ -53,6 +64,10 @@ surface.
 4. **Use the Tasks app from inside Pulse.** User clicks the Tasks tab.
    - Embeds the existing Tasks app via iframe at the same path the
      standalone Tasks app serves, preserving its functionality.
+   - The frame uses `sandbox="allow-scripts allow-same-origin allow-forms"`,
+     `allow="clipboard-write"`, and a strict-origin referrer policy. Tasks
+     separately restricts embedders to the exact production and staging
+     Mission Control origins with CSP `frame-ancestors`.
 5. **View the bookmark pipeline.** User is on the Bookmarks tab.
    - On mount, fetches `bookmark-review-state.json` and
      `bookmark-transitions.jsonl` from the dev-only `/api/*` endpoints

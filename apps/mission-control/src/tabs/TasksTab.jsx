@@ -23,7 +23,9 @@ export function TasksTab() {
     <iframe
       title="Tasks"
       src={src}
+      sandbox="allow-scripts allow-same-origin allow-forms"
       allow="clipboard-write"
+      referrerPolicy="strict-origin-when-cross-origin"
       data-testid="pulse-tasks-iframe"
       aria-label="Tasks application"
     />

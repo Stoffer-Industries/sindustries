@@ -1,6 +1,8 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const AUTH = { Authorization: 'Bearer integration-test-token-long-enough' };
+
 /**
  * Pagination cursor / sort semantics — documenting current behavior.
  *
@@ -62,7 +64,7 @@ describe('pagination cursor / sort semantics (audit 2026-W26 0-B)', () => {
     ]);
 
     const app = createApp();
-    await request(app).get('/api/v1/tasks').query({ sort: 'priority' });
+    await request(app).get('/api/v1/tasks').set(AUTH).query({ sort: 'priority' });
 
     expect(prismaMock.task.findMany).toHaveBeenCalledTimes(1);
     // BUG (to be fixed in Milestone 1-C): orderBy ignores `sort` param.
@@ -76,7 +78,7 @@ describe('pagination cursor / sort semantics (audit 2026-W26 0-B)', () => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
     const app = createApp();
-    await request(app).get('/api/v1/tasks').query({ sort: 'dueAt' });
+    await request(app).get('/api/v1/tasks').set(AUTH).query({ sort: 'dueAt' });
 
     expect(prismaMock.task.findMany.mock.calls[0][0].orderBy).toEqual([
       { createdAt: 'desc' },
@@ -101,7 +103,7 @@ describe('pagination cursor / sort semantics (audit 2026-W26 0-B)', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks').query({ sort: 'priority' });
+    const response = await request(app).get('/api/v1/tasks').set(AUTH).query({ sort: 'priority' });
 
     expect(response.status).toBe(200);
     // The data array is the result of JS sort (urgent first), not the DB order.
@@ -130,7 +132,7 @@ describe('pagination cursor / sort semantics (audit 2026-W26 0-B)', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks').query({ sort: 'priority' });
+    const response = await request(app).get('/api/v1/tasks').set(AUTH).query({ sort: 'priority' });
 
     expect(response.status).toBe(200);
     // JS sort flips them so urgent (b) is first.
@@ -157,6 +159,7 @@ describe('pagination cursor / sort semantics (audit 2026-W26 0-B)', () => {
     const app = createApp();
     const response = await request(app)
       .get('/api/v1/tasks')
+      .set(AUTH)
       .query({ sort: 'priority', limit: 1 });
 
     expect(response.status).toBe(200);

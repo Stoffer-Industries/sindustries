@@ -59,10 +59,9 @@ describe('tasks-api config schema', () => {
     expect(config.NODE_ENV).toBe('development');
     expect(config.PORT).toBe(4000);
     expect(config.CORS_ALLOWED_ORIGINS).toEqual(['http://localhost:5173', 'http://localhost:4173']);
-    expect(config.TASKS_API_APPROVAL_USERS).toBe('[]');
+    expect(config.TASKS_API_CLERK_AUTHORIZED_USERS).toBe('[]');
+    expect(config.TASKS_API_CLERK_AUTHORIZED_PARTIES).toEqual([]);
     expect(config.TASKS_API_APPROVAL_SERVICE_CREDENTIALS).toBe('[]');
-    expect(config.TASKS_API_APPROVAL_SESSION_TTL_SECONDS).toBe(28800);
-    expect(config.TASKS_API_APPROVAL_SESSION_COOKIE_DOMAIN).toBe('.example.test');
     expect(config.TASKS_API_RATE_LIMIT_WINDOW_MS).toBe(900_000);
     expect(config.TASKS_API_RATE_LIMIT_MAX).toBe(100);
   });
@@ -136,34 +135,42 @@ describe('tasks-api config schema', () => {
     expect(resolveRedisUrl()).toBe('redis://localhost:6379');
   });
 
-  it('parses TASKS_API_APPROVAL_USERS as a JSON string', async () => {
+  it('parses Clerk authorized users and exact authorized parties', async () => {
     process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:6432/sindustries_dev?schema=tasks_api';
     process.env.X_CLIENT = 'fake';
-    process.env.TASKS_API_APPROVAL_USERS = JSON.stringify([
-      { username: 'tom', actor: 'Tom', passwordHash: 'scrypt$abcd$1234' }
+    process.env.TASKS_API_CLERK_AUTHORIZED_USERS = JSON.stringify([
+      { clerkUserId: 'user_tom', actor: 'Tom' }
     ]);
+    process.env.TASKS_API_CLERK_AUTHORIZED_PARTIES = 'https://mission-control.example.test,https://tasks.example.test';
     const { config } = await loadEnvFresh();
-    expect(config.TASKS_API_APPROVAL_USERS).toBe(JSON.stringify([
-      { username: 'tom', actor: 'Tom', passwordHash: 'scrypt$abcd$1234' }
+    expect(config.TASKS_API_CLERK_AUTHORIZED_USERS).toBe(JSON.stringify([
+      { clerkUserId: 'user_tom', actor: 'Tom' }
     ]));
+    expect(config.TASKS_API_CLERK_AUTHORIZED_PARTIES).toEqual([
+      'https://mission-control.example.test',
+      'https://tasks.example.test'
+    ]);
   });
 
-  it('refuses to boot when TASKS_API_APPROVAL_USERS is malformed JSON', async () => {
+  it('refuses malformed or duplicate Clerk authorized users', async () => {
     process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:6432/sindustries_dev?schema=tasks_api';
     process.env.X_CLIENT = 'fake';
-    process.env.TASKS_API_APPROVAL_USERS = 'not-json';
+    process.env.TASKS_API_CLERK_AUTHORIZED_USERS = JSON.stringify([
+      { clerkUserId: 'user_same', actor: 'Tom' },
+      { clerkUserId: 'user_same', actor: 'Quinn' }
+    ]);
     await expect(loadEnvFresh()).rejects.toThrow(/ConfigValidationError/);
     const payload = JSON.parse(capturedExit.payload ?? '{}');
-    expect(payload.issues.some((i: { path: string }) => i.path === 'TASKS_API_APPROVAL_USERS')).toBe(true);
+    expect(payload.issues.some((i: { path: string }) => i.path === 'TASKS_API_CLERK_AUTHORIZED_USERS')).toBe(true);
   });
 
-  it('refuses to boot when TASKS_API_APPROVAL_USERS is valid JSON but not an array', async () => {
+  it('refuses wildcard or path-bearing Clerk authorized parties', async () => {
     process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:6432/sindustries_dev?schema=tasks_api';
     process.env.X_CLIENT = 'fake';
-    process.env.TASKS_API_APPROVAL_USERS = '{"username":"tom"}';
+    process.env.TASKS_API_CLERK_AUTHORIZED_PARTIES = 'https://*.example.test,https://tasks.example.test/path';
     await expect(loadEnvFresh()).rejects.toThrow(/ConfigValidationError/);
     const payload = JSON.parse(capturedExit.payload ?? '{}');
-    expect(payload.issues.some((i: { path: string }) => i.path === 'TASKS_API_APPROVAL_USERS')).toBe(true);
+    expect(payload.issues.some((i: { path: string }) => i.path === 'TASKS_API_CLERK_AUTHORIZED_PARTIES')).toBe(true);
   });
 
   it('throws ConfigValidationError with structured issues when validation fails', async () => {

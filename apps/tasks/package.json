@@ -12,6 +12,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@clerk/react": "6.17.0",
     "@sindustries/design-tokens": "file:../../packages/design-tokens",
     "@sindustries/ui": "file:../../packages/ui",
     "dompurify": "^3.3.3",

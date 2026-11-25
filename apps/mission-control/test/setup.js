@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import { clearTokenGetter, setTokenGetter } from '../src/auth/token.js';
 
 // Provide an in-memory localStorage if jsdom or Node did not install
 // one. This matches the pattern used by apps/tasks/test/setup.js so
@@ -38,8 +39,10 @@ beforeEach(() => {
       configurable: true
     });
   }
+  setTokenGetter(async () => 'test-clerk-token');
 });
 
 afterEach(() => {
+  clearTokenGetter();
   cleanup();
 });
