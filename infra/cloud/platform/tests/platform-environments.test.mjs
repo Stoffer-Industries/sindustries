@@ -101,6 +101,9 @@ function productionEnv(overrides = {}) {
     [PRODUCTION.sourceNames.tasksDatabaseUrl]: PRODUCTION_TASKS_DSN,
     [PRODUCTION.sourceNames.budgetDatabaseUrl]: PRODUCTION_BUDGET_DSN,
     [PRODUCTION.sourceNames.redisUrl]: `content-scheduler=${PRODUCTION_REDIS_URL}`,
+    [PRODUCTION.sourceNames.tasksClerkSecretKey]: 'sk_live_fixture',
+    [PRODUCTION.sourceNames.tasksClerkIssuer]: 'https://clerk.sindustries.co.nz',
+    [PRODUCTION.sourceNames.tasksClerkAuthorizedUsers]: '[{"clerkUserId":"user_test","actor":"Tom"}]',
     [tasksContract.platformTokenSource]: 'p'.repeat(32),
     [tasksContract.operatorCredentialsSource]: operatorArray(tasksContract),
     [schedulerContract.platformTokenSource]: 'q'.repeat(32),
@@ -502,7 +505,7 @@ describe('assertEnvironmentValues', () => {
 });
 
 describe('buildPlatformSecretPayload for production', () => {
-  it('maps the production source names onto the same platform value names', () => {
+  it('maps the production source names onto the same canonical platform value names', () => {
     const { secrets, missing } = buildPlatformSecretPayload(productionEnv(), {
       environment: 'production',
     });
@@ -521,6 +524,10 @@ describe('buildPlatformSecretPayload for production', () => {
         'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL',
+        'PLATFORM_TASKS_API_CLERK_AUTHORIZED_PARTIES',
+        'PLATFORM_TASKS_API_CLERK_AUTHORIZED_USERS',
+        'PLATFORM_TASKS_API_CLERK_ISSUER',
+        'PLATFORM_TASKS_API_CLERK_SECRET_KEY',
         'PLATFORM_TASKS_API_CONTENT_SCHEDULER_REDIS_URL',
         'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_TASKS_API_DATABASE_URL',
@@ -652,6 +659,9 @@ describe('buildPlatformSecretPayload for production', () => {
       [STAGING.sourceNames.budgetDatabaseUrl]: 'postgresql://u:***@db.example.test/neondb',
       [STAGING.sourceNames.redisUrl]: 'rediss://default:***@redis.example.test:6379',
       [approvalCredentialContracts(STAGING).tasks.platformTokenSource]: 'a'.repeat(32),
+      [STAGING.sourceNames.tasksClerkSecretKey]: 'sk_test_fixture',
+      [STAGING.sourceNames.tasksClerkIssuer]: 'https://clerk.example.test',
+      [STAGING.sourceNames.tasksClerkAuthorizedUsers]: '[{"clerkUserId":"user_test","actor":"Tom"}]',
       [approvalCredentialContracts(STAGING).contentScheduler.platformTokenSource]: 'b'.repeat(32),
     });
     const byName = Object.fromEntries(secrets.map((secret) => [secret.name, secret.value]));

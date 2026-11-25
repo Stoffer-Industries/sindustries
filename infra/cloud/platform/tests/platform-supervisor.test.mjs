@@ -91,6 +91,10 @@ function fullParentEnv() {
     PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS: 'https://mission-control.staging.sindustries.co.nz',
     PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS: 'https://mission-control.staging.sindustries.co.nz',
     PLATFORM_TASKS_API_REDIS_URL: 'redis://tasks:6379',
+    PLATFORM_TASKS_API_CLERK_SECRET_KEY: 'sk_test_fixture',
+    PLATFORM_TASKS_API_CLERK_ISSUER: 'https://clerk.example.test',
+    PLATFORM_TASKS_API_CLERK_AUTHORIZED_USERS: '[{"clerkUserId":"user_test","actor":"Tom"}]',
+    PLATFORM_TASKS_API_CLERK_AUTHORIZED_PARTIES: 'https://tasks.staging.sindustries.co.nz',
     PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL: 'redis://scheduler:6379',
     PLATFORM_AUTO_POST_WORKER_REDIS_URL: 'redis://worker:6379',
   };

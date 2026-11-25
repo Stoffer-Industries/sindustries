@@ -9,7 +9,7 @@
 #
 # PROVISIONING
 # -------------
-# The platform app and its fifteen app-level secrets are provisioned HERE,
+# The platform app and its nineteen app-level values are provisioned HERE,
 # from the staging GitHub environment secrets, by
 # infra/cloud/platform/platform-provision-secrets.mjs. That mapping is the
 # source of record: the live staging values are not readable from a
@@ -100,7 +100,7 @@ jobs:
           version: 0.4.102
 
       # Provisioning — creates the app when it is absent and registers the
-      # fifteen app-level secrets from the staging environment. The values
+      # nineteen app-level values from the staging environment. The values
       # are mapped in the script and handed to flyctl without being
       # printed; nothing here echoes a secret value.
       # The database sources are the WRITE-CAPABLE staging DSNs. The
@@ -151,6 +151,9 @@ jobs:
           # the tasks-api DSN (one database, three schemas).
           STAGING_CONTENT_SCHEDULER_API_DATABASE_URL: ${{ secrets.STAGING_CONTENT_SCHEDULER_API_DATABASE_URL }}
           HEALTH_PROBE_REDIS: ${{ secrets.HEALTH_PROBE_REDIS }}
+          STAGING_TASKS_API_CLERK_SECRET_KEY: ${{ secrets.STAGING_TASKS_API_CLERK_SECRET_KEY }}
+          STAGING_TASKS_API_CLERK_ISSUER: ${{ secrets.STAGING_TASKS_API_CLERK_ISSUER }}
+          STAGING_TASKS_API_CLERK_AUTHORIZED_USERS: ${{ secrets.STAGING_TASKS_API_CLERK_AUTHORIZED_USERS }}
           TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
 

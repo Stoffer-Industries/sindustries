@@ -43,6 +43,9 @@ function stagingEnv(overrides = {}) {
     [SOURCE_NAMES.tasksDatabaseUrl]: TASKS_DSN,
     [SOURCE_NAMES.budgetDatabaseUrl]: BUDGET_DSN,
     [SOURCE_NAMES.redisUrl]: `content-scheduler=${REDIS_URL}`,
+    [SOURCE_NAMES.tasksClerkSecretKey]: 'sk_test_fixture',
+    [SOURCE_NAMES.tasksClerkIssuer]: 'https://clerk.example.test',
+    [SOURCE_NAMES.tasksClerkAuthorizedUsers]: '[{"clerkUserId":"user_test","actor":"Tom"}]',
     [CREDENTIAL_SOURCE_NAMES.tasks.platformToken]: 'a'.repeat(32),
     [CREDENTIAL_SOURCE_NAMES.contentScheduler.platformToken]: 'b'.repeat(32),
     ...overrides,
@@ -359,7 +362,7 @@ describe('buildServiceCredentials', () => {
 });
 
 describe('buildPlatformSecretPayload', () => {
-  it('maps the staging environment onto the platform value names', () => {
+  it('maps the staging environment onto the canonical platform value names', () => {
     const { secrets, missing } = buildPlatformSecretPayload(stagingEnv());
     assert.deepEqual(missing, []);
     assert.deepEqual(
@@ -375,6 +378,10 @@ describe('buildPlatformSecretPayload', () => {
         'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
         'PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL',
+        'PLATFORM_TASKS_API_CLERK_AUTHORIZED_PARTIES',
+        'PLATFORM_TASKS_API_CLERK_AUTHORIZED_USERS',
+        'PLATFORM_TASKS_API_CLERK_ISSUER',
+        'PLATFORM_TASKS_API_CLERK_SECRET_KEY',
         'PLATFORM_TASKS_API_CONTENT_SCHEDULER_REDIS_URL',
         'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
         'PLATFORM_TASKS_API_DATABASE_URL',

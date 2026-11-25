@@ -342,10 +342,10 @@ gate. See
 
 ## Platform secret provisioning (task `219fb673`)
 
-The consolidated platform app (`sindustries-platform-staging`) needs fifteen
-app-level secrets before it can boot: three database URLs, six Redis URLs,
-two approval-service credentials, one public base URL and three CORS
-allow-lists. They are provisioned from the
+The consolidated platform app (`sindustries-platform-staging`) needs nineteen
+app-level values before it can boot: three database URLs, six Redis URLs,
+two approval-service credentials, one public base URL, three CORS allow-lists
+and four Tasks Clerk settings. They are provisioned from the
 **staging GitHub environment** by
 `infra/cloud/platform/platform-provision-secrets.mjs`, which the
 `.github/workflows/deploy-staging-platform.yml` workflow runs before the
@@ -372,11 +372,16 @@ names, the base URLs and the CORS allow-lists.
 | `PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.tasksApi`), not a GitHub environment secret |
 | `PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.budgetApi`) |
 | `PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS` | — | comma-separated allow-list; from the environment manifest (`corsAllowedOrigins.contentSchedulerApi`) |
+| `PLATFORM_TASKS_API_CLERK_SECRET_KEY` | `STAGING_TASKS_API_CLERK_SECRET_KEY` | server-only Clerk credential; required because the child runs with `NODE_ENV=production` |
+| `PLATFORM_TASKS_API_CLERK_ISSUER` | `STAGING_TASKS_API_CLERK_ISSUER` | exact issuer URL accepted from Tasks browser JWTs |
+| `PLATFORM_TASKS_API_CLERK_AUTHORIZED_USERS` | `STAGING_TASKS_API_CLERK_AUTHORIZED_USERS` | JSON allow-list mapping immutable Clerk user ids to Tasks actors |
+| `PLATFORM_TASKS_API_CLERK_AUTHORIZED_PARTIES` | — | derived from the manifest-owned Tasks CORS origins so the browser-origin contracts cannot drift |
 
 **This table is the operator contract, and it matches the supervisor.**
-The three CORS values are not optional: `infra/cloud/platform/platform-services.mjs`
-lists them in each child's `requiredSources`, so the supervisor refuses to
-boot without them. They are registered from the environment manifest
+The three CORS values and four Tasks Clerk settings are not optional:
+`infra/cloud/platform/platform-services.mjs` lists them in each child's
+`requiredSources`, so the supervisor refuses to boot without them. The CORS
+values and Clerk authorized parties are registered from the environment manifest
 rather than left to the Fly TOML, because the TOML holds the STAGING
 allow-lists — a production app that inherited them would answer every
 preflight from the wrong origin.

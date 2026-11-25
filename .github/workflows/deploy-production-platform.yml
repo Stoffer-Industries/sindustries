@@ -192,7 +192,7 @@ jobs:
           PRODUCTION_FLY_ORG: ${{ vars.PRODUCTION_FLY_ORG }}
 
       # Provisioning — creates the app when it is absent and registers the
-      # fifteen app-level secrets from the production GitHub environment.
+      # nineteen app-level values from the production GitHub environment.
       # The provisioner owns the mapping from source names to the
       # app-level `PLATFORM_*` names, so this workflow and the local
       # operator path can never register different secrets on the same
@@ -221,6 +221,9 @@ jobs:
           PRODUCTION_BUDGET_API_CLERK_SECRET_KEY: ${{ secrets.PRODUCTION_BUDGET_API_CLERK_SECRET_KEY }}
           PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_DATABASE_URL }}
           PRODUCTION_HEALTH_PROBE_REDIS: ${{ secrets.PRODUCTION_HEALTH_PROBE_REDIS }}
+          PRODUCTION_TASKS_API_CLERK_SECRET_KEY: ${{ secrets.PRODUCTION_TASKS_API_CLERK_SECRET_KEY }}
+          PRODUCTION_TASKS_API_CLERK_ISSUER: ${{ secrets.PRODUCTION_TASKS_API_CLERK_ISSUER }}
+          PRODUCTION_TASKS_API_CLERK_AUTHORIZED_USERS: ${{ secrets.PRODUCTION_TASKS_API_CLERK_AUTHORIZED_USERS }}
           PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.PRODUCTION_CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           # The COMPLETE operator credential arrays (task 3c004590). The

@@ -32,6 +32,7 @@ import {
   CREDENTIAL_SOURCE_NAMES,
   PLATFORM_APP,
   SOURCE_NAMES,
+  PLATFORM_SECRET_NAMES,
   main,
   redactOutput,
 } from '../platform-provision-secrets.mjs';
@@ -53,6 +54,9 @@ function stagingEnv(overrides = {}) {
     [SOURCE_NAMES.tasksDatabaseUrl]: TASKS_DSN,
     [SOURCE_NAMES.budgetDatabaseUrl]: BUDGET_DSN,
     [SOURCE_NAMES.redisUrl]: `content-scheduler=${REDIS_URL}`,
+    [SOURCE_NAMES.tasksClerkSecretKey]: 'sk_test_fixture',
+    [SOURCE_NAMES.tasksClerkIssuer]: 'https://clerk.example.test',
+    [SOURCE_NAMES.tasksClerkAuthorizedUsers]: '[{"clerkUserId":"user_test","actor":"Tom"}]',
     [CREDENTIAL_SOURCE_NAMES.tasks.platformToken]: TASKS_TOKEN,
     [CREDENTIAL_SOURCE_NAMES.contentScheduler.platformToken]: SCHEDULER_TOKEN,
     ...overrides,
@@ -175,7 +179,7 @@ describe('platform provisioning CLI', () => {
       '--stage holds the values for the next release; on the live deploy the canary Machine still ran with the placeholder that had been registered out of band',
     );
     const names = secrets.slice(4).filter((entry) => entry.includes('=')).map((entry) => entry.split('=')[0]);
-    assert.equal(names.length, 15);
+    assert.equal(names.length, PLATFORM_SECRET_NAMES.length);
     for (const name of [
       'PLATFORM_TASKS_API_DATABASE_URL',
       'PLATFORM_BUDGET_API_DATABASE_URL',

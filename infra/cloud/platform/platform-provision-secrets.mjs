@@ -6,7 +6,7 @@
  * WHY THIS EXISTS
  * ---------------
  * The consolidated platform app (`sindustries-platform-staging`) needs
- * fifteen app-level values before it can boot: three database URLs, six
+ * nineteen app-level values before it can boot: three database URLs, six
  * Redis URLs, two approval-service credentials, the content-scheduler base
  * URL, and three CORS allow-lists. Until now those values
  * were registered out of band by hand, and the CI guard only checked that
@@ -32,7 +32,7 @@
  * workflow, mapped here, and handed to `flyctl secrets set` WITHOUT ever
  * being printed, logged, committed or passed through a shell.
  *
- * THE FIFTEEN NAMES
+ * THE NINETEEN NAMES
  * ------------------
  * The names are settled by the live Fly secret inventory (task 219fb673,
  * 2026-11-06): every live per-service app's secret names, plus the
@@ -55,6 +55,10 @@
  *   PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS (environment manifest)
  *   TASKS_API_APPROVAL_SERVICE_CREDENTIALS              <- approval credential (inherited)
  *   CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS   <- approval credential (inherited)
+ *   PLATFORM_TASKS_API_CLERK_SECRET_KEY                <- Tasks Clerk server key
+ *   PLATFORM_TASKS_API_CLERK_ISSUER                    <- Tasks Clerk issuer
+ *   PLATFORM_TASKS_API_CLERK_AUTHORIZED_USERS          <- Tasks Clerk user allow-list
+ *   PLATFORM_TASKS_API_CLERK_AUTHORIZED_PARTIES        (environment manifest)
  *
  * The two approval credentials keep their own names: they are inherited by
  * every child through the app environment, not mapped through a
@@ -197,7 +201,7 @@ export const SCHEDULER_APPROVAL_ACTOR =
 /**
  * The app-level secret names the consolidated platform app must carry.
  *
- * The NAMES are environment-independent — the same fifteen names on
+ * The NAMES are environment-independent — the same nineteen names on
  * staging and on production — because the supervisor and the children
  * read the same variables in both. Only the VALUES differ, and the values
  * come from the environment manifest.
@@ -234,6 +238,13 @@ export const PLATFORM_SECRET_NAMES = Object.freeze([
   'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
   'PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS',
   'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+  // Tasks browser authentication. Parties come from the same manifest-owned
+  // frontend origins as CORS; the credential, issuer and user allow-list are
+  // Quinn-owned GitHub Environment sources.
+  'PLATFORM_TASKS_API_CLERK_SECRET_KEY',
+  'PLATFORM_TASKS_API_CLERK_ISSUER',
+  'PLATFORM_TASKS_API_CLERK_AUTHORIZED_USERS',
+  'PLATFORM_TASKS_API_CLERK_AUTHORIZED_PARTIES',
 ]);
 
 /**
@@ -615,6 +626,34 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
       value: origins.join(','),
       source: `${environment.label} environment manifest (CORS origins)`,
     });
+  }
+
+  // Tasks browser authentication. The authorized parties intentionally use
+  // the Tasks CORS origins: both contracts name the browser origins allowed
+  // to call this API, so keeping a second hand-maintained list would drift.
+  for (const [name, value, source] of [
+    [
+      'PLATFORM_TASKS_API_CLERK_SECRET_KEY',
+      env[sourceNames.tasksClerkSecretKey],
+      sourceNames.tasksClerkSecretKey,
+    ],
+    [
+      'PLATFORM_TASKS_API_CLERK_ISSUER',
+      env[sourceNames.tasksClerkIssuer],
+      sourceNames.tasksClerkIssuer,
+    ],
+    [
+      'PLATFORM_TASKS_API_CLERK_AUTHORIZED_USERS',
+      env[sourceNames.tasksClerkAuthorizedUsers],
+      sourceNames.tasksClerkAuthorizedUsers,
+    ],
+    [
+      'PLATFORM_TASKS_API_CLERK_AUTHORIZED_PARTIES',
+      environment.corsAllowedOrigins.tasksApi.join(','),
+      `${environment.label} environment manifest (Tasks browser origins)`,
+    ],
+  ]) {
+    if (value) secrets.push({ name, value, source });
   }
 
   // Fail closed BEFORE anything is registered: a production payload that
