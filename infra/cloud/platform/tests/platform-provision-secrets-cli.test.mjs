@@ -179,7 +179,14 @@ describe('platform provisioning CLI', () => {
       '--stage holds the values for the next release; on the live deploy the canary Machine still ran with the placeholder that had been registered out of band',
     );
     const names = secrets.slice(4).filter((entry) => entry.includes('=')).map((entry) => entry.split('=')[0]);
-    assert.equal(names.length, PLATFORM_SECRET_NAMES.length);
+    // The canonical list is environment-independent, but ONE name in it is
+    // production-only: PLATFORM_BUDGET_API_CLERK_SECRET_KEY. The provisioner
+    // excludes it from the staging payload, so the staging CLI registers one
+    // secret fewer than the canonical list has entries.
+    const stagingSecretNames = PLATFORM_SECRET_NAMES.filter(
+      (name) => name !== 'PLATFORM_BUDGET_API_CLERK_SECRET_KEY',
+    );
+    assert.equal(names.length, stagingSecretNames.length);
     for (const name of [
       'PLATFORM_TASKS_API_DATABASE_URL',
       'PLATFORM_BUDGET_API_DATABASE_URL',
