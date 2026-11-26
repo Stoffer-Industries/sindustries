@@ -78,7 +78,11 @@ def main() -> int:
     env.setdefault("OPENCLAW_WORKSPACE", str(WORKSPACE))
 
     before = _md_snapshot()
-    result = safe_run(cmd, cwd=str(WORKSPACE), env=env)
+    # Explicit timeout: the default 25s in agents/lib/subprocess_safe.py is
+    # shorter than a full X fetch(20) + process(4) pass needs (~40s), so
+    # the wrapper died on subprocess.TimeoutExpired while the child kept
+    # running and completed the work anyway. Bound it explicitly.
+    result = safe_run(cmd, cwd=str(WORKSPACE), env=env, timeout=120)
 
     if result.returncode == 0:
         after = _md_snapshot()
