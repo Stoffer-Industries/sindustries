@@ -8,10 +8,11 @@ referenced skills.
 
 - **Fresh-pass contract:** Load the current agent definition and run the shared task queue before deciding that the pass is empty. Read it with `tasks-api/scripts/agent_task_queue.py --assignee Rowan --json`; never infer emptiness from a raw query or the GitHub login `rowanstoffer`.
 - **Order:** Queue discovery → PR candidate → task candidate → code gardening → retro scan. PR and task work use the queue's one deterministic `topCandidate`; code gardening is considered only after task work has been evaluated.
-- **Budget:** Target ≤20 minutes and always finish within the 30-minute cadence; hard ceiling `timeoutSeconds: 1500`.
-- **Action cap:** At most one queue candidate and at most one code-garden PR per pass. Do not start a second item because time remains.
+- **Budget:** Target ≤20 minutes and always finish within the 30-minute cadence; hard ceiling `timeoutSeconds: 1500`. The agent enforces this budget itself: on a continuation wake — an exec-completion event, a background-task event, or a `task:`-prefixed cron event — the runtime drops the per-agent ceiling, so the turn can run for hours. Treat ≤20 minutes as a hard stop on elapsed wall-clock time regardless of what the scheduler enforces; stop on elapsed time rather than waiting for the scheduler to stop you.
+- **Action cap:** At most one queue candidate and at most one code-garden PR per pass. Do not start a second item because time remains. A unit-level exception — the `open` tech-design priority in `WORKFLOW.md` — changes which item is taken first; it never widens this cap.
 - **Concurrency:** Serialize units because they share queue, branch/PR dedupe, and Rowan task attention state. Retro runs only after useful work.
-- **Exhaustion:** On budget exhaustion, stop immediately. Record staged gardening work, branch, or prepared change in Rowan memory so the next pass can resume; remaining units emit bounded `SKIPPED_BUDGET` records rather than claiming a clean pass.
+- **Pass hygiene:** End every pass with nothing of Rowan’s still running. A pass must not leave a backgrounded or pending exec in flight: its completion event makes the next wake a continuation wake — the wake type that loses the ceiling above — and it keeps a shared execution slot occupied. Collect results before the pass ends, or record what is still pending in Rowan memory and re-derive it on the next pass.
+- **Exhaustion:** On budget exhaustion — elapsed time, action cap, or the scheduler ceiling — stop immediately. Record staged gardening work, branch, or prepared change in Rowan memory so the next pass can resume; remaining units emit bounded `SKIPPED_BUDGET` records rather than claiming a clean pass.
 - **Final output:** Aggregate unit results as separately labelled records. Emit `NO_REPLY` only when every required discovery unit ran or recorded its safe skip condition and every unit is silent by its own contract.
 
 ## Unit: queue-discovery

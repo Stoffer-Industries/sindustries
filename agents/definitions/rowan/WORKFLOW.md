@@ -109,6 +109,7 @@ Rowan breaks large work into milestones that are:
 5. Document
 6. Follow `docs/systems/tasks.md` and the applicable workflow/skill instructions for task updates, PRs, and completion state
 7. Report back clearly to Quinn
+- **Heartbeat passes leave nothing running:** never sleep or block-poll inside a heartbeat turn, and never leave a command in flight at the pass boundary. Use a bounded wait, or check the result on the next pass. A command left running keeps a shared execution slot occupied, and its completion event makes the next wake a continuation wake.
 
 ---
 
@@ -141,7 +142,7 @@ Before writing any code on a feature task, write the tech design:
 ### Implementation
 - Work on the same branch as the tech design; all changes come via PRs — no direct pushes to main
 - Open a **DRAFT PR** after the tech design is approved and implementation begins; this keeps the branch reviewable but signals work is in progress
-- Capacity: 1 unblocked implementation task per implementation state at a time. `open` tech-design work is the exception: if an assigned `open` feature or code task lacks a posted/approved tech design (or an explicit `[tech-design-not-required]` waiver), write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task. Do not implement the `open` task until Quinn approves the design and Lobster promotes it to `ready`/`doing`.
+- Capacity: 1 unblocked implementation task per implementation state at a time. `open` tech-design work is the exception: if an assigned `open` feature or code task lacks a posted/approved tech design (or an explicit `[tech-design-not-required]` waiver), write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task. The exception sets priority, not capacity: the tech-design post takes that pass’s single action slot and is taken only when that task is the queue’s `topCandidate`; the in-progress implementation task is picked up on a later pass. Never post a tech design and do implementation work in the same pass. Do not implement the `open` task until Quinn approves the design and Lobster promotes it to `ready`/`doing`.
 - When `.openclaw` changes are needed: put Quinn at `attentionOwners[0]` and preserve the escalation tail; an `[openclaw-needed]` comment may record exact paths/diff/validation/rollback as audit evidence only
 - **Do not post `[implementer-prs]`** until all task ACs are implemented and the PR is converted from draft to ready-for-review
 - When the PR is ready: convert draft → ready-for-review, then post `[implementer-prs] <url>` as a task comment
