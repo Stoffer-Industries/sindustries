@@ -147,16 +147,20 @@ id = "generic-api-key"
 # live credential, and a synthetic stub is neither, so the finding is
 # suppressed narrowly and recorded in the findings ledger instead.
 #
-# The exception names one rule, this exact commit and these exact fixture
-# files. A different value in either file, and any value in any other
-# file, is still scanned.
+# The exception names one rule, the exact anchored stub value and these
+# exact fixture files. The value scope is required because GitHub's merge
+# queue rebases the pull request and rewrites commit SHAs before scanning;
+# a commit-scoped exception can never match both the pull-request commit and
+# its merge-group copy. A different value in either file, and any value in
+# any other file, is still scanned.
 [[rules]]
 id = "stripe-access-token"
 
   [[rules.allowlists]]
-    description = "False positive: the synthetic secret-key stub written into the bootstrap contract test fixtures by this exact commit. It is a fixed, published test value with no issuer, no account and no scope, and it was removed from the tracked tree in the next commit on this branch. The exception is scoped to this one commit and these two fixture files, so the same files with any other value, and any value in any other file, are still scanned."
+    description = "False positive: the synthetic secret-key stub written into the bootstrap contract test fixtures. It is a fixed, published test value with no issuer, no account and no scope, and it was removed from the tracked tree in the next commit on this branch. The exception is scoped to the exact anchored stub value and these two fixture files so it survives merge-queue commit rewriting while the same files with any other value, and any value in any other file, are still scanned."
     condition = "AND"
-    commits = ["e6ac2f93360732083403a1197e191984964809ed"]
+    regexTarget = "secret"
+    regexes = ['''^sk_test_stubtasksapiclrkey$''']
     paths = [
       '''infra/cloud/scripts/tests/bootstrap-staging\.test\.sh$''',
       '''infra/cloud/scripts/tests/bootstrap-platform\.test\.sh$''',
